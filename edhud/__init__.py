@@ -29,4 +29,9 @@ __all__ = [
     "tui",
     "demo",
     "spansh",
+    "tray",
+    "settings",
+    "voice",
+    "alerts",
+    "mainwindow",
 ]

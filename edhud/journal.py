@@ -43,6 +43,7 @@ class JournalWatcher(threading.Thread):
         poll_status: float = 0.5,
         on_event: Callable[[dict], None] | None = None,
         on_status: Callable[[], None] | None = None,
+        on_catchup_done: Callable[[], None] | None = None,
         replay: bool = True,
     ) -> None:
         super().__init__(name="edhud-journal", daemon=True)
@@ -52,6 +53,7 @@ class JournalWatcher(threading.Thread):
         self.poll_status = poll_status
         self.on_event = on_event
         self.on_status = on_status
+        self.on_catchup_done = on_catchup_done
         self.replay = replay
         self._stop = threading.Event()
         self._file: Path | None = None
@@ -59,6 +61,7 @@ class JournalWatcher(threading.Thread):
         self._status_mtime = 0.0
         self._navroute_mtime = 0.0
         self._partial = ""
+        self._catchup_pending = bool(replay)
         self.errors: list[str] = []
 
     # ------------------------------------------------------------------ API
@@ -82,11 +85,14 @@ class JournalWatcher(threading.Thread):
     def read_journal(self) -> None:
         latest = newest_journal(self.folder)
         if latest is None:
+            self._finish_catchup()  # нечего replay — сразу live
             return
         if self._file != latest:
             self._file = latest
             self._offset = 0 if self.replay else latest.stat().st_size
             self._partial = ""
+            if self.replay:
+                self._catchup_pending = True
         try:
             size = latest.stat().st_size
         except OSError:
@@ -94,7 +100,9 @@ class JournalWatcher(threading.Thread):
         if size < self._offset:  # файл обрезали/пересоздали
             self._offset = 0
             self._partial = ""
+            self._catchup_pending = True
         if size == self._offset:
+            self._finish_catchup()
             return
         try:
             with latest.open("r", encoding="utf-8", errors="replace") as handle:
@@ -117,6 +125,18 @@ class JournalWatcher(threading.Thread):
             self.state.apply(event)
             if self.on_event:
                 self.on_event(event)
+        if self._offset >= size and not self._partial:
+            self._finish_catchup()
+
+    def _finish_catchup(self) -> None:
+        if not self._catchup_pending:
+            return
+        self._catchup_pending = False
+        if self.on_catchup_done:
+            try:
+                self.on_catchup_done()
+            except Exception:
+                pass
 
     # -------------------------------------------------------------- status
     def read_status(self) -> None:

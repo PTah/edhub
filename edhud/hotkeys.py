@@ -1,7 +1,7 @@
 """Глобальные горячие клавиши (только Windows).
 
 RegisterHotKey + собственный message loop в фоновом потоке: оверлей не
-забирает фокус у игры, но реагирует на F8/F9/F10.
+забирает фокус у игры, но реагирует на F8/F9/F10/F12.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 
 VK = {"F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B}
+VK_F12 = 0x7B
 
 
 class Hotkeys(threading.Thread):

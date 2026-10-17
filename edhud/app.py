@@ -2,12 +2,17 @@
 """Связка: журналы -> состояние -> HUD (tkinter-оверлей или терминал)."""
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
+import webbrowser
 from pathlib import Path
+from urllib.parse import quote
 
-from . import demo, eddn, galaxy, hudmodel, remote
+from . import config as config_mod
+from . import demo, eddn, galaxy, hudmodel, remote, tray
+from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
 from .journal import JournalWatcher
@@ -15,6 +20,7 @@ from .model import GameState
 from .route import Route
 from .store import SystemStore
 from .tui import run_tui
+from .voice import Voice
 
 SAVE_INTERVAL = 20.0
 FULLSCREEN_HINT = "полноэкранный режим: если оверлея не видно — Alt+Enter (Borderless)"
@@ -36,17 +42,18 @@ class App:
         self.journal_dir = Path(journal_dir) if journal_dir else cfg.resolved_journal_dir()
         self.state = GameState()
         self.store = SystemStore()
-        self.remote_client = (
-            remote.RemoteClient(ttl=float(cfg.remote_ttl_sec), timeout=float(cfg.remote_timeout))
-            if cfg.remote_enabled
-            else None
-        )
+        self.remote_client = self._make_remote_client()
         self.watcher: JournalWatcher | None = None
         self.overlay = None
+        self.mainwindow = None
         self.hotkeys: Hotkeys | None = None
+        self.tray: tray.TrayIcon | None = None
         self.demo_player: demo.DemoPlayer | None = None
         self.demo_speed = demo_speed
         self.eddn: eddn.EddnListener | None = None
+        self.voice = Voice(rate=int(cfg.voice_rate or 0))
+        self.alerts = AlertEngine(on_alert=self._on_alert)
+        self.alerts.configure(cfg)
         self._eddn_filter = eddn.SetFilter()
         self._eddn_messages: queue.Queue = queue.Queue(maxsize=512)
         self._cached_for: int | None = None
@@ -54,11 +61,25 @@ class App:
         self._remote_results: queue.Queue = queue.Queue()
         self._last_save = 0.0
         self._stop = threading.Event()
+        self._settings_open = False
+        self._voice_alert: str | None = None
+
+    def _make_remote_client(self) -> remote.RemoteClient | None:
+        if not self.cfg.remote_enabled:
+            return None
+        return remote.RemoteClient(
+            ttl=float(self.cfg.remote_ttl_sec),
+            timeout=float(self.cfg.remote_timeout),
+            edsm_api_key=self.cfg.edsm_api_key or "",
+            edsm_commander=self.cfg.edsm_commander or "",
+        )
 
     # ------------------------------------------------------------------ setup
     def prepare(self) -> bool:
         if self.journal_dir is None:
-            return False
+            # всё равно стартуем: трей + настройки позволят указать каталог
+            candidates = config_mod.journal_dir_candidates()
+            self.journal_dir = candidates[0] if candidates else config_mod.app_dir() / "journals"
         try:
             self.journal_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -90,8 +111,11 @@ class App:
             poll_journal=self.cfg.journal_poll_sec,
             poll_status=self.cfg.status_poll_sec,
             on_event=self._on_event,
+            on_catchup_done=self._on_journal_catchup,
         )
         self.watcher.start()
+        if self.cfg.voice_enabled:
+            self.voice.start()
         self._warm_nebulae()
         self._start_eddn()
 
@@ -125,7 +149,18 @@ class App:
 
         threading.Thread(target=work, name="edhud-nebulae", daemon=True).start()
 
+    def _on_journal_catchup(self) -> None:
+        """После replay журнала включаем голосовые алерты на новые события."""
+        self.alerts.arm()
+
+    def _on_alert(self, alert: Alert) -> None:
+        if alert.overlay:
+            self._voice_alert = alert.overlay
+        if self.cfg.voice_enabled:
+            self.voice.speak(alert.text)
+
     def _on_event(self, event: dict) -> None:
+        self.alerts.handle(event, self.state)
         if event.get("event") != "FSDJump":
             return
         if not self.cfg.copy_next_system or self.overlay is None:
@@ -146,7 +181,12 @@ class App:
             view = hudmodel.build_view(
                 self.state, self.cfg, expanded=self.expanded, hint=self.hint()
             )
+            if self._voice_alert and not view.alert:
+                view.alert = self._voice_alert
+                self._voice_alert = None
             self.overlay.set_view(view)
+        if self.mainwindow is not None:
+            self.mainwindow.update_state(self.state)
 
     def hint(self) -> str | None:
         hints: list[str] = []
@@ -236,6 +276,15 @@ class App:
             self.store.save(self.state.system)
 
     # -------------------------------------------------------------------- UI
+    def _ui(self, fn) -> None:
+        """Выполнить действие в потоке tkinter."""
+        if self.overlay is None:
+            return
+        try:
+            self.overlay.root.after(0, fn)
+        except Exception:
+            fn()
+
     def _start_overlay(self) -> None:
         from .overlay import Overlay
 
@@ -244,14 +293,68 @@ class App:
             on_expanded=self.toggle_expanded,
             on_click_through=self.toggle_click_through,
             on_visible=self.toggle_visible,
+            on_quit=self.request_quit,
+            on_settings=self.open_settings,
+            system_name_provider=lambda: self.state.system.name,
+            system_address_provider=lambda: self.state.system.address,
         )
         bindings = {
             0x77: self.toggle_expanded,  # F8
             0x78: self.toggle_click_through,  # F9
             0x79: self.toggle_visible,  # F10
+            0x7B: self.request_quit,  # F12
         }
         self.hotkeys = Hotkeys(bindings)
         self.hotkeys.start()
+        from .mainwindow import MainWindow
+
+        self.mainwindow = MainWindow(self.overlay.root)
+        self.mainwindow.show()
+        self._start_tray()
+
+    def _start_tray(self) -> None:
+        self.tray = tray.TrayIcon(
+            on_command=self._on_tray_command,
+            tip="EDHUD — оверлей исследователя",
+            state_provider=self._tray_state,
+        )
+        self.tray.start()
+
+    def _tray_state(self) -> dict:
+        visible = True
+        if self.overlay is not None:
+            visible = bool(getattr(self.overlay, "_visible", True))
+        main_visible = bool(
+            self.mainwindow is not None and getattr(self.mainwindow, "_visible", False)
+        )
+        return {
+            "visible": visible,
+            "main_visible": main_visible,
+            "expanded": self.expanded,
+            "click_through": bool(self.cfg.click_through),
+        }
+
+    def _on_tray_command(self, command_id: int) -> None:
+        # из потока трея — в UI
+        mapping = {
+            tray.ID_TOGGLE_VISIBLE: self.toggle_visible,
+            tray.ID_TOGGLE_MAIN: self.toggle_mainwindow,
+            tray.ID_TOGGLE_EXPANDED: self.toggle_expanded,
+            tray.ID_TOGGLE_CLICK: self.toggle_click_through,
+            tray.ID_OPEN_SPANSH: self.open_spansh_system,
+            tray.ID_OPEN_EDSM: self.open_edsm_system,
+            tray.ID_OPEN_MAP: self.open_spansh_map,
+            tray.ID_SETTINGS: self.open_settings,
+            tray.ID_OPEN_CONFIG: self.open_config_folder,
+            tray.ID_QUIT: self.request_quit,
+        }
+        action = mapping.get(command_id)
+        if action:
+            self._ui(action)
+
+    def toggle_mainwindow(self) -> None:
+        if self.mainwindow is not None:
+            self.mainwindow.toggle()
 
     def toggle_expanded(self) -> None:
         self.expanded = not self.expanded
@@ -262,15 +365,124 @@ class App:
         if self.overlay is not None:
             self.overlay.cfg.click_through = self.cfg.click_through
             self.overlay._apply_click_through()
+            if self.overlay._view is not None:
+                self.overlay._draw(self.overlay._view)
 
     def toggle_visible(self) -> None:
         if self.overlay is not None:
             self.overlay.toggle_visible()
 
+    def open_spansh_system(self) -> None:
+        address = self.state.system.address
+        name = self.state.system.name
+        if address:
+            url = f"https://spansh.co.uk/system/{int(address)}"
+        elif name:
+            url = f"https://spansh.co.uk/system/{quote(str(name))}"
+        else:
+            url = "https://spansh.co.uk/"
+        webbrowser.open(url)
+
+    def open_edsm_system(self) -> None:
+        name = self.state.system.name
+        if name:
+            url = f"https://www.edsm.net/en/system?systemName={quote(str(name))}"
+        else:
+            url = "https://www.edsm.net/"
+        webbrowser.open(url)
+
+    def open_spansh_map(self) -> None:
+        webbrowser.open("https://spansh.co.uk/plotter")
+
+    def open_config_folder(self) -> None:
+        path = config_mod.app_dir()
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(path)  # type: ignore[attr-defined]
+        except OSError:
+            webbrowser.open(path.as_uri())
+
+    def open_settings(self) -> None:
+        if self._settings_open or self.overlay is None:
+            return
+        from .settings import SettingsDialog
+
+        self._settings_open = True
+
+        def on_saved(cfg: Config) -> None:
+            self.cfg = cfg
+            self._apply_settings()
+
+        def on_close() -> None:
+            self._settings_open = False
+
+        dlg = SettingsDialog(self.overlay.root, self.cfg, on_saved=on_saved)
+        dlg.win.bind("<Destroy>", lambda e: on_close() if e.widget is dlg.win else None)
+
+    def _apply_settings(self) -> None:
+        """Применить сохранённые настройки на лету."""
+        self.remote_client = self._make_remote_client()
+        new_journal = self.cfg.resolved_journal_dir()
+        if new_journal and new_journal != self.journal_dir:
+            self.journal_dir = new_journal
+            if self.watcher is not None:
+                self.watcher.stop()
+                self.alerts.armed = False
+                self.watcher = JournalWatcher(
+                    self.journal_dir,
+                    self.state,
+                    poll_journal=self.cfg.journal_poll_sec,
+                    poll_status=self.cfg.status_poll_sec,
+                    on_event=self._on_event,
+                    on_catchup_done=self._on_journal_catchup,
+                )
+                self.watcher.start()
+        self.alerts.configure(self.cfg)
+        self.voice.rate = int(self.cfg.voice_rate or 0)
+        if self.cfg.voice_enabled:
+            self.voice.start()
+        if self.overlay is not None:
+            self.overlay.cfg = self.cfg
+            try:
+                self.overlay.root.attributes(
+                    "-alpha", max(0.25, min(1.0, float(self.cfg.opacity)))
+                )
+            except Exception:
+                pass
+            self.overlay._apply_click_through()
+            self.overlay._place_window()
+            if self.overlay._view is not None:
+                self.overlay._draw(self.overlay._view)
+        # EDDN: перезапуск при смене флага
+        want_eddn = bool(self.cfg.eddn_enabled and self.cfg.allow_network)
+        if want_eddn and self.eddn is None:
+            self._start_eddn()
+        elif not want_eddn and self.eddn is not None:
+            self.eddn.stop()
+            self.eddn = None
+
+    def request_quit(self) -> None:
+        """Корректный выход: остановить потоки и закрыть окно tkinter."""
+        self._stop.set()
+        if self.tray is not None:
+            self.tray.stop()
+        self.voice.stop()
+        if self.mainwindow is not None:
+            try:
+                self.mainwindow.destroy()
+            except Exception:
+                pass
+        if self.overlay is not None:
+            try:
+                self.overlay.root.after(0, self.overlay.destroy)
+            except Exception:
+                self.overlay.destroy()
+
     def run(self) -> int:
         if not self.prepare():
             print("Не найден каталог журналов Elite Dangerous.")
             print('Укажите его: run.py run --journal-dir "..."')
+            print("Или откройте Настройки из трея после запуска с --demo.")
             return 2
         if self.ui == "tui":
             self.start()
@@ -309,6 +521,14 @@ class App:
             self.eddn.stop()
         if self.hotkeys is not None:
             self.hotkeys.stop()
+        if self.tray is not None:
+            self.tray.stop()
+        self.voice.stop()
+        if self.mainwindow is not None:
+            try:
+                self.mainwindow.destroy()
+            except Exception:
+                pass
         if self.state.system.address and self.state.system.bodies:
             self.store.save(self.state.system)
         try:

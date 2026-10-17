@@ -6,11 +6,15 @@
 EDMC/EDDN в EDSM), мы можем показать их параметры, найденные роды биологии и
 стоимость — до собственного FSS/DSS-скана.
 
-Источники (оба поверх EDDN, никаких ключей не нужно):
+Источники (чтение публичных данных — без ключа):
   * EDSM  /api-system-v1/bodies        — параметры тел + кто открыл/картографировал
   * EDSM  /api-system-v1/estimated-value — суммарная стоимость системы
   * Spansh /api/bodies/search          — сигналы (биология/геология), материалы,
                                          оценки стоимости скана/картографии
+
+Опциональные edsm_api_key + edsm_commander (как на edsm.net → Settings → API)
+передаются в query как apiKey и commanderName для личных API EDSM.
+Публичные bodies/estimated-value работают и без них.
 """
 from __future__ import annotations
 
@@ -25,10 +29,11 @@ from pathlib import Path
 from . import config
 from .model import Body, System
 
-USER_AGENT = "EDHUD/1.1 (+local overlay; python-urllib)"
+USER_AGENT = "EDHUD/1.2 (+local overlay; python-urllib)"
 EDSM_BODIES = "https://www.edsm.net/api-system-v1/bodies?systemName={name}"
 EDSM_VALUE = "https://www.edsm.net/api-system-v1/estimated-value?systemName={name}&includeBodies=1"
 SPANSH_SEARCH = "https://spansh.co.uk/api/bodies/search"
+
 G_TO_MS2 = 9.80665
 AU_TO_M = 1.495978707e11
 DEFAULT_TTL = 6 * 3600
@@ -290,8 +295,28 @@ def _parse_edsm(name: str, data: dict, timeout: float) -> RemoteSystem:
     return system
 
 
-def _fetch_edsm_totals(system: RemoteSystem, timeout: float) -> None:
-    url = EDSM_VALUE.format(name=urllib.parse.quote(system.name))
+def _edsm_url(
+    template: str,
+    name_quoted: str,
+    api_key: str = "",
+    commander: str = "",
+) -> str:
+    """Добавляет apiKey/commanderName как на странице EDSM API."""
+    url = template.format(name=name_quoted)
+    if api_key:
+        url += f"&apiKey={urllib.parse.quote(api_key)}"
+    if commander:
+        url += f"&commanderName={urllib.parse.quote(commander)}"
+    return url
+
+
+def _fetch_edsm_totals(
+    system: RemoteSystem,
+    timeout: float,
+    api_key: str = "",
+    commander: str = "",
+) -> None:
+    url = _edsm_url(EDSM_VALUE, urllib.parse.quote(system.name), api_key, commander)
     data = _http_json(url, timeout=timeout)
     if not isinstance(data, dict):
         return
@@ -394,10 +419,19 @@ def _merge(base: RemoteSystem | None, extra: RemoteSystem | None) -> RemoteSyste
 class RemoteClient:
     """Тянет данные о системе и кэширует их на диск (работает офлайн по кэшу)."""
 
-    def __init__(self, cache_dir: Path | None = None, ttl: float = DEFAULT_TTL, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        cache_dir: Path | None = None,
+        ttl: float = DEFAULT_TTL,
+        timeout: float = 10.0,
+        edsm_api_key: str = "",
+        edsm_commander: str = "",
+    ) -> None:
         self.cache_dir = Path(cache_dir) if cache_dir else config.app_dir() / "remote"
         self.ttl = ttl
         self.timeout = timeout
+        self.edsm_api_key = edsm_api_key or ""
+        self.edsm_commander = edsm_commander or ""
 
     def cache_path(self, name: str, address: int | None) -> Path:
         key = str(address) if address else name.replace("/", "_").replace(" ", "_")
@@ -423,7 +457,9 @@ class RemoteClient:
         resolved_address = address
         if result is not None:
             resolved_address = resolved_address or result.address
-            _fetch_edsm_totals(result, self.timeout)
+            _fetch_edsm_totals(
+                result, self.timeout, self.edsm_api_key, self.edsm_commander
+            )
         result = _merge(result, self._fetch_spansh(name, resolved_address))
         if result is None:
             return cached  # сеть недоступна — отдаём старое, если есть
@@ -433,7 +469,10 @@ class RemoteClient:
         return result
 
     def _fetch_edsm_bodies(self, name: str, quoted: str) -> RemoteSystem | None:
-        data = _http_json(EDSM_BODIES.format(name=quoted), timeout=self.timeout)
+        data = _http_json(
+            _edsm_url(EDSM_BODIES, quoted, self.edsm_api_key, self.edsm_commander),
+            timeout=self.timeout,
+        )
         if not isinstance(data, dict) or not data.get("bodies"):
             return None
         return _parse_edsm(name, data, self.timeout)

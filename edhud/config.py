@@ -116,6 +116,14 @@ class Config:
     remote_ttl_sec: int = 6 * 3600
     remote_timeout: float = 10.0
     remote_in_legacy: bool = False
+    # EDSM: чтение тел/стоимости — без ключа; ключ только для личных API
+    edsm_api_key: str = ""
+    edsm_commander: str = ""
+    # голос (Windows SAPI, русский)
+    voice_enabled: bool = True
+    voice_bio: bool = True
+    voice_first_discovery: bool = True
+    voice_rate: int = 0  # SAPI Rate -10..10
     # живой фид EDDN (ZeroMQ); pyzmq не обязателен — есть встроенный ZMTP-клиент
     eddn_enabled: bool = True
     eddn_endpoint: str = "tcp://eddn.edcd.io:9500"

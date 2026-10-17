@@ -6,21 +6,34 @@
   * «сквозной» для мыши на Windows (WS_EX_TRANSPARENT|WS_EX_NOACTIVATE),
     чтобы клики уходили в игру (как в SrvSurvey plotters/PlotBase.cs);
   * полупрозрачность настраивается, F8 разворачивает панель подробностей,
-    F9 включает/выключает сквозной режим, F10 прячет/показывает оверлей.
+    F9 включает/выключает сквозной режим, F10 прячет/показывает оверлей,
+    F12 / ПКМ-меню / кнопка × — выход.
 """
 from __future__ import annotations
 
 import queue
+import webbrowser
 
 from . import winapi
 from .hudmodel import HudView
 
 PAD = 12
 BAR_H = 4
+CLOSE_SIZE = 18
 
 
 class Overlay:
-    def __init__(self, cfg, on_expanded=None, on_click_through=None, on_visible=None) -> None:
+    def __init__(
+        self,
+        cfg,
+        on_expanded=None,
+        on_click_through=None,
+        on_visible=None,
+        on_quit=None,
+        on_settings=None,
+        system_name_provider=None,
+        system_address_provider=None,
+    ) -> None:
         import tkinter as tk
         from tkinter import font as tkfont
 
@@ -29,6 +42,10 @@ class Overlay:
         self.on_expanded = on_expanded
         self.on_click_through = on_click_through
         self.on_visible = on_visible
+        self.on_quit = on_quit
+        self.on_settings = on_settings
+        self.system_name_provider = system_name_provider
+        self.system_address_provider = system_address_provider
         self._fonts: dict[tuple[int, bool], tkfont.Font] = {}
         self._view: HudView | None = None
         self._queue: queue.Queue = queue.Queue(maxsize=2)
@@ -40,11 +57,13 @@ class Overlay:
         self._last_draw = 0.0
         self.fullscreen: bool | None = None
         self._keeper: winapi.TopmostKeeper | None = None
+        self._menu = None
 
         self.root = tk.Tk()
         self.root.title("EDHUD")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
+        self.root.protocol("WM_DELETE_WINDOW", self._request_quit)
         try:
             self.root.attributes("-alpha", max(0.25, min(1.0, float(cfg.opacity))))
         except tk.TclError:
@@ -53,6 +72,7 @@ class Overlay:
         self.canvas.pack(fill="both", expand=True)
         self._place_window()
         self._bind_keys()
+        self._build_menu()
         self._apply_click_through()
         self._start_keeper()
 
@@ -123,9 +143,54 @@ class Overlay:
         self.root.bind("<F8>", lambda _e: self._toggle_expanded())
         self.root.bind("<F9>", lambda _e: self._toggle_click_through())
         self.root.bind("<F10>", lambda _e: self._toggle_visible())
-        self.canvas.bind("<ButtonPress-1>", self._drag_start)
+        self.root.bind("<F12>", lambda _e: self._request_quit())
+        self.canvas.bind("<ButtonPress-1>", self._on_left_press)
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
+        self.canvas.bind("<Button-3>", self._show_menu)
+
+    def _build_menu(self) -> None:
+        menu = self.tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Подробности (F8)", command=self._toggle_expanded)
+        menu.add_command(label="Сквозной режим мыши (F9)", command=self._toggle_click_through)
+        menu.add_command(label="Скрыть оверлей (F10)", command=self._toggle_visible)
+        menu.add_separator()
+        menu.add_command(label="Открыть систему на Spansh…", command=self._open_spansh)
+        menu.add_command(label="Настройки…", command=self._open_settings)
+        menu.add_separator()
+        menu.add_command(label="Выход (F12)", command=self._request_quit)
+        self._menu = menu
+
+    def _show_menu(self, event) -> None:
+        if self.cfg.click_through or self._menu is None:
+            return
+        try:
+            self._menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._menu.grab_release()
+
+    def _request_quit(self) -> None:
+        if self.on_quit:
+            self.on_quit()
+        else:
+            self.destroy()
+
+    def _open_settings(self) -> None:
+        if self.on_settings:
+            self.on_settings()
+
+    def _open_spansh(self) -> None:
+        address = self.system_address_provider() if self.system_address_provider else None
+        name = self.system_name_provider() if self.system_name_provider else None
+        if address:
+            url = f"https://spansh.co.uk/system/{int(address)}"
+        elif name:
+            from urllib.parse import quote
+
+            url = f"https://spansh.co.uk/system/{quote(str(name))}"
+        else:
+            url = "https://spansh.co.uk/"
+        webbrowser.open(url)
 
     def _toggle_expanded(self) -> None:
         (self.on_expanded or self.toggle_expanded)()
@@ -135,6 +200,22 @@ class Overlay:
 
     def _toggle_visible(self) -> None:
         (self.on_visible or self.toggle_visible)()
+
+    def _close_hit(self, x: int, y: int) -> bool:
+        if self.cfg.click_through:
+            return False
+        width = int(self.cfg.width)
+        x0 = width - PAD - CLOSE_SIZE
+        y0 = PAD // 2
+        return x0 <= x <= x0 + CLOSE_SIZE and y0 <= y <= y0 + CLOSE_SIZE
+
+    def _on_left_press(self, event) -> None:
+        if self.cfg.click_through:
+            return
+        if self._close_hit(event.x, event.y):
+            self._request_quit()
+            return
+        self._drag_start(event)
 
     def _drag_start(self, event) -> None:
         if self.cfg.click_through:
@@ -211,10 +292,15 @@ class Overlay:
             )
         canvas.create_line(0, height - 1, width, height - 1, fill=cfg.color("dim"))
 
+        text_limit = width - PAD * 2
+        if not cfg.click_through:
+            text_limit -= CLOSE_SIZE + 6
+            self._draw_close_button(width)
+
         y = PAD
-        y = self._draw_row(view.route_row, PAD, y, route_font, width)
+        y = self._draw_row(view.route_row, PAD, y, route_font, width, text_limit=text_limit)
         y += 2
-        y = self._draw_row(view.body_row, PAD, y, body_font, width)
+        y = self._draw_row(view.body_row, PAD, y, body_font, width, text_limit=text_limit)
 
         if view.alert:
             y += 1
@@ -229,12 +315,47 @@ class Overlay:
             canvas.create_line(PAD, y, width - PAD, y, fill=cfg.color("dim"))
             y += 4
             for row in detail_lines:
-                y = self._draw_row(row, PAD + 2, y, detail_font, width, line_detail)
+                y = self._draw_row(
+                    row, PAD + 2, y, detail_font, width, line_detail, text_limit=text_limit
+                )
 
-    def _draw_row(self, row, x: int, y: int, font, width: int, line_height: int | None = None) -> int:
+    def _draw_close_button(self, width: int) -> None:
+        """Кнопка × — видна только когда сквозной режим выключен (F9)."""
         canvas = self.canvas
         cfg = self.cfg
-        limit = width - PAD * 2
+        x0 = width - PAD - CLOSE_SIZE
+        y0 = PAD // 2
+        canvas.create_rectangle(
+            x0,
+            y0,
+            x0 + CLOSE_SIZE,
+            y0 + CLOSE_SIZE,
+            fill=cfg.color("bg"),
+            outline=cfg.color("dim"),
+            tags=("close",),
+        )
+        canvas.create_text(
+            x0 + CLOSE_SIZE // 2,
+            y0 + CLOSE_SIZE // 2,
+            text="×",
+            fill=cfg.color("bad"),
+            font=self._font(2, bold=True),
+            tags=("close",),
+        )
+
+    def _draw_row(
+        self,
+        row,
+        x: int,
+        y: int,
+        font,
+        width: int,
+        line_height: int | None = None,
+        text_limit: int | None = None,
+    ) -> int:
+        canvas = self.canvas
+        cfg = self.cfg
+        limit = width - PAD * 2 if text_limit is None else text_limit
         cursor = x
         for segment in row.segments:
             if cursor > width - PAD:
