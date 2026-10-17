@@ -1,0 +1,19 @@
+# Created by nc.ai 0.8.8.0 on macbook 2026-10-17 20:02:11
+[project]
+name = "edhud"
+version = "1.1.0"
+description = "Оверлей исследователя Elite Dangerous: маршрут, биология, пробы"
+requires-python = ">=3.9"
+dependencies = []
+readme = "README.md"
+license = { text = "GPL-3.0-only" }
+
+[project.scripts]
+edhud = "run:main"
+
+[tool.setuptools]
+py-modules = ["run"]
+packages = ["edhud"]
+
+[tool.setuptools.package-data]
+edhud = []

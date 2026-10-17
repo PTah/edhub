@@ -1,0 +1,5 @@
+Файлы *.json в этом каталоге взяты из проекта SrvSurvey
+(https://github.com/njthomson/SrvSurvey), каталог SrvSurvey/bio-criteria.
+Автор: njthomson и участники проекта. Лицензия: GNU GPL v3.
+Формат описан в readme.md исходного проекта; движок интерпретации
+переписан на Python в edhud/bio.py.
