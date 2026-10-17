@@ -464,6 +464,149 @@ class RemoteClient:
             pass
 
 
+def body_from_journal_scan(event: dict) -> Body | None:
+    """Тело из события журнала `Scan` (такой же формат приходит по EDDN)."""
+    body_id = event.get("BodyID")
+    if body_id is None:
+        return None
+    star_type = event.get("StarType")
+    parents: list[int] = []
+    for parent in event.get("Parents") or []:
+        if isinstance(parent, dict):
+            parents.extend(v for v in parent.values() if isinstance(v, int))
+    return Body(
+        body_id=int(body_id),
+        name=event.get("BodyName") or f"Body {body_id}",
+        planet_class=event.get("PlanetClass") or None,
+        star_type=star_type or None,
+        is_star=bool(star_type),
+        radius=_f(event.get("Radius")) or 0.0,
+        mass_em=_f(event.get("MassEM")) or 0.0,
+        stellar_mass=_f(event.get("StellarMass")) or 0.0,
+        surface_temp=_f(event.get("SurfaceTemperature")),
+        surface_gravity=_f(event.get("SurfaceGravity")),
+        surface_pressure=_f(event.get("SurfacePressure")),
+        atmosphere=event.get("Atmosphere") or None,
+        atmosphere_composition={
+            k: float(v) for k, v in (event.get("AtmosphereComposition") or {}).items()
+        },
+        volcanism=event.get("Volcanism") or None,
+        materials={k: float(v) for k, v in (event.get("Materials") or {}).items()},
+        landable=bool(event.get("Landable")),
+        distance_ls=_f(event.get("DistanceFromArrivalLS")) or 0.0,
+        semi_major_axis=_f(event.get("SemiMajorAxis")),
+        parent_ids=parents,
+        terraform_state=event.get("TerraformState") or None,
+        was_discovered=bool(event.get("WasDiscovered", True)),
+        was_mapped=bool(event.get("WasMapped", False)),
+        was_footfalled=bool(event.get("WasFootfalled", False)),
+        remote=True,
+        source="EDDN",
+    )
+
+
+def _journal_system_matches(system: System, message: dict) -> bool:
+    address = message.get("SystemAddress")
+    if system.address and isinstance(address, int) and address != int(system.address):
+        return False
+    name = message.get("StarSystem") or message.get("SystemName")
+    if system.name and isinstance(name, str) and name:
+        if not system.address and name.lower() != system.name.lower():
+            return False
+    return True
+
+
+def apply_eddn(system: System, message: dict) -> bool:
+    """Применяет живое сообщение EDDN к текущей системе (только чужие данные)."""
+    changed = _apply_eddn_body(system, message)
+    if changed:
+        sources = set(getattr(system, "remote_sources", []) or [])
+        if "EDDN" not in sources:
+            sources.add("EDDN")
+            system.remote_sources = sorted(sources)
+    return changed
+
+
+def _apply_eddn_body(system: System, message: dict) -> bool:
+    event = message.get("event")
+    if event not in ("Scan", "FSSBodySignals", "SAASignalsFound", "SAAScanComplete"):
+        return False
+    if not _journal_system_matches(system, message):
+        return False
+
+    body_id = message.get("BodyID")
+    if body_id is None:
+        return False
+    body = system.bodies.get(int(body_id))
+    changed = False
+
+    if event == "Scan":
+        incoming = body_from_journal_scan(message)
+        if incoming is None:
+            return False
+        if body is None:
+            system.bodies[incoming.body_id] = incoming
+            return True
+        # своё тело не перезаписываем — только дополняем недостающее
+        for field_name in (
+            "planet_class",
+            "star_type",
+            "atmosphere",
+            "volcanism",
+            "terraform_state",
+        ):
+            if getattr(body, field_name) in (None, "") and getattr(incoming, field_name):
+                setattr(body, field_name, getattr(incoming, field_name))
+                changed = True
+        for field_name in ("mass_em", "stellar_mass", "radius", "distance_ls", "was_footfalled"):
+            if not getattr(body, field_name) and getattr(incoming, field_name):
+                setattr(body, field_name, getattr(incoming, field_name))
+                changed = True
+        if not body.materials and incoming.materials:
+            body.materials = incoming.materials
+            changed = True
+        if not body.atmosphere_composition and incoming.atmosphere_composition:
+            body.atmosphere_composition = incoming.atmosphere_composition
+            changed = True
+        return changed
+
+    if body is None:
+        body = Body(body_id=int(body_id), name=message.get("BodyName") or f"Body {body_id}", remote=True, source="EDDN")
+        system.bodies[body.body_id] = body
+        changed = True
+
+    if event in ("FSSBodySignals", "SAASignalsFound"):
+        for signal in message.get("Signals") or []:
+            kind = (signal.get("Type") or "").lower()
+            count = int(signal.get("Count") or 0)
+            if "biological" in kind and body.bio_signals is None:
+                body.bio_signals = count
+                body.signals_known = True
+                changed = True
+            elif "geological" in kind and body.geo_signals is None:
+                body.geo_signals = count
+                changed = True
+        genuses = message.get("Genuses") or []
+        if genuses and not body.genuses:
+            body.genuses = {
+                str(item.get("Genus")): int(item.get("Count") or 1)
+                for item in genuses
+                if item.get("Genus")
+            }
+            changed = True
+        if event == "SAASignalsFound" and not body.dss_scanned:
+            body.dss_remote = True
+            changed = True
+
+    if event == "SAAScanComplete" and not body.dss_scanned:
+        body.dss_remote = True
+        changed = True
+
+    if changed and body.source is None:
+        body.source = "EDDN"
+    return changed
+
+
 def merge_into_system(system: System, remote: RemoteSystem) -> int:
     """Добавляет в систему тела, известные другим командирам. Возвращает число новых."""
     added = 0

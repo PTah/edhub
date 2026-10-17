@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from edhud import demo, hudmodel, journal  # noqa: E402
 from edhud.config import Config  # noqa: E402
-from edhud.model import GameState, surface_distance  # noqa: E402
+from edhud.model import Body, GameState, System, surface_distance  # noqa: E402
 from edhud.route import Route  # noqa: E402
 from edhud.store import SystemStore  # noqa: E402
 
@@ -174,12 +174,97 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertTrue(star.remote)
         self.assertTrue(star.is_star)
 
+    def test_first_logged_payout(self):
+        body = self.state.system.body(1)
+        organismes = list(body.organisms.values())
+        bacter = next(o for o in organismes if o.genus and "Bacterial" in o.genus)
+        self.assertFalse(bacter.was_logged)
+        self.assertTrue(bacter.first_logged)
+        self.assertEqual(bacter.payout, bacter.reward * 5)
+        fungus = next(o for o in organismes if o.genus and "Fungoids" in o.genus)
+        self.assertTrue(fungus.was_logged)
+        self.assertFalse(fungus.first_logged)
+        self.assertEqual(fungus.payout, fungus.reward)
+
+    def test_sold_totals(self):
+        # демо в конце продаёт данные: суммы из SellExplorationData/SellOrganicData
+        self.assertGreater(self.state.session_organic_sold, 0)
+        self.assertGreater(self.state.session_sold, 0)
+        view = hudmodel.build_view(self.state, Config(), expanded=True)
+        self.assertIn("продано", "\n".join(row.text for row in view.detail))
+
+    def test_hud_first_logged_marker(self):
+        view = hudmodel.build_view(self.state, Config(), expanded=True)
+        detail = "\n".join(row.text for row in view.detail)
+        self.assertIn("×5 First Logged", detail)
+
     def test_dump_lines(self):
         from edhud.app import dump
 
         lines = dump(self.folder)
         self.assertTrue(any("JAMESON" in line for line in lines))
         self.assertTrue(any("БИО" in line for line in lines))
+
+
+class LegacyTests(unittest.TestCase):
+    def test_legacy_version(self):
+        state = GameState()
+        state.apply({"event": "Fileheader", "part": 1, "gameversion": "3.8.0.400", "build": "r286858/r0 "})
+        self.assertTrue(state.legacy)
+        self.assertFalse(state.odyssey)
+        view = hudmodel.build_view(state, Config(), expanded=True)
+        self.assertIn("Legacy 3.8", view.body_row.text + "\n".join(r.text for r in view.detail))
+
+    def test_live_version(self):
+        state = GameState()
+        state.apply({"event": "Fileheader", "part": 1, "gameversion": "4.9.0.100"})
+        self.assertFalse(state.legacy)
+        self.assertTrue(state.odyssey)
+
+    def test_odyssey_bonus_changes_value(self):
+        from edhud import values
+
+        body = Body(
+            body_id=1,
+            name="Test",
+            planet_class="Icy body",
+            mass_em=0.9,
+            was_discovered=True,
+            was_mapped=True,
+        )
+        live = values.body_values(body, odyssey=True)
+        legacy = values.body_values(body, odyssey=False)
+        assert live is not None and legacy is not None
+        self.assertGreater(live.mapped, legacy.mapped)
+        self.assertEqual(live.scan, legacy.scan)
+
+    def test_no_predictions_in_legacy(self):
+        from edhud import hudmodel as hm
+
+        state = GameState()
+        state.legacy = True
+        state.system = System(address=1, name="Test")
+        state.system.bodies[0] = Body(body_id=0, name="A", star_type="K", is_star=True)
+        state.system.bodies[1] = Body(
+            body_id=1,
+            name="Test 1",
+            planet_class="Icy body",
+            landable=True,
+            mass_em=0.9,
+            surface_gravity=5.6,
+            surface_temp=118.0,
+            surface_pressure=540.0,
+            atmosphere="thin neon atmosphere",
+            atmosphere_composition={"Neon": 100.0},
+            materials={"Technetium": 0.7},
+            parent_ids=[0],
+        )
+        state.current_body_id = 1
+        cfg = Config()
+        cfg.expanded = True
+        view = hm.build_view(state, cfg, expanded=True)
+        detail = "\n".join(row.text for row in view.detail)
+        self.assertNotIn("предсказание:", detail)
 
 
 class StatusTests(unittest.TestCase):

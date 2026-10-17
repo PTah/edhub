@@ -46,15 +46,26 @@
   Guardian bubble).
 * **Пробы**: `1/3 → 2/3 → готово`, дистанция от предыдущей пробы и нужный интервал
   рода (`605 м/500 м`, зелёным когда можно брать следующую).
-* **Данные других командиров (EDSM/Spansh, т.е. EDDN)**: если систему уже
-  сканировали другие и они отправили данные через EDMC/EDDN, HUD покажет
-  параметры тел, найденные роды/сигналы, кто открыл/картографировал и стоимость —
-  ещё до вашего FSS/DSS. Тела без данных помечаются «?» (как в EDEB).
-  Кэш на диск, работа офлайн по кэшу, флаг `--offline`.
+* **Данные других командиров**: EDSM + Spansh (`remote/`) и **живой фид EDDN**
+  (`edhud/eddn.py`): собственный ZMTP-клиент подписывается на
+  `tcp://eddn.edcd.io:9500`, фильтрует сообщения по текущей системе и сразу
+  подмешивает `Scan`, `FSSBodySignals`, `SAASignalsFound`, `SAAScanComplete`.
+  pyzmq не обязателен (если установлен — используется он). Тела из чужих данных
+  помечаются `[EDSM]` / `[spansh]` / `[EDDN]`, тела без данных — «?» (как в EDEB).
+  Кэш на диск, работа офлайн по кэшу, флаги `--offline`, `--no-remote`, `--no-eddn`.
 * **Стоимость**: скан и скан+DSS для каждого тела, множители первооткрывателя
   (×2.6) и картографии (×3.33/×8.1/×3.7 + бонус Odyssey и +25 % за эффективный
   DSS), итоги по системе, суммы за сессию, реальные выплаты из
   `SellExplorationData`/`SellOrganicData`.
+* **Биология: бонус First Logged**. Vista Genomics платит базовую стоимость вида,
+  а если пробу ещё никто не сдавал — **×5** (это не «первый футфол»: футфол даёт
+  только метку на планете). Признак берётся из журнала
+  (`ScanOrganic.WasLogged`), поэтому в HUD видно `≈8.45 Mcr ×5 First Logged` или
+  `(base, First Logged ?)`, если игра поле не прислала. Фактические суммы с
+  бонусами всегда видны после продажи (`SellOrganicData`).
+* **Legacy 3.8**: определяется по `Fileheader/LoadGame` (`gameversion` 3.x) —
+  отключаются Odyssey-бонус в стоимости, био-прогноз и догрузка EDSM/EDDN
+  (там только Live-данные), в HUD появляется метка `[Legacy 3.8]`.
 * **Память**: просканированные системы кэшируются в `…/EliteDangerousHUD/systems/*.json`.
 * **Терминальный режим** (`--tui`) и демо-режим на синтетическом журнале.
 
@@ -69,9 +80,11 @@ python run.pyw                :: то же без консольного окн�
 python run.py run --journal-dir "C:\Users\me\Saved Games\Frontier Developments\Elite Dangerous"
 python run.py run --tui       :: HUD в терминале
 python run.py run --demo      :: демо на синтетическом журнале
-python run.py run --offline   :: без сети (нет EDSM/Spansh и каталога туманностей)
+python run.py run --offline   :: без сети (нет EDSM/Spansh/EDDN и каталога туманностей)
 python run.py dump            :: один кадр HUD в консоль
 python run.py remote "HIP 36601"   :: что EDSM/Spansh знают о системе
+python run.py eddn --seconds 20    :: проверить живую подписку EDDN
+python run.py eddn --system "Sol"  :: только сообщения по системе
 ```
 
 Каталог журналов по умолчанию:
@@ -134,10 +147,18 @@ HUD показывает для текущего тела `≈скан` (или 
 ещё никем не открыто; в подробностях — разбивку, кто открыл/картографировал; в
 строке «система» — суммы по своим данным и оценку EDSM; в строке «сессия» —
 накопленные скан/DSS/биология и реально проданные данные. Для тел, известных
-только по EDSM/Spansh, множитель первого картографа не применяется (мы не знаем,
-картографировали ли их уже), поэтому оценка консервативная. Первый футфол для
-биологии по журналу не определить — показывается базовая стоимость вида, а
-фактические суммы с бонусами берутся из `SellOrganicData`.
+только по EDSM/Spansh/EDDN, множитель первого картографа не применяется (мы не
+знаем, картографировали ли их уже), поэтому оценка консервативная.
+
+### Биология: First Logged
+
+Vista Genomics платит базовую стоимость вида; если пробу ещё никто не сдавал, за
+«First Logged» начисляется ещё четыре базовые стоимости, то есть **×5**. Это не
+«первый футфол»: футфол только ставит метку на планете и денег не даёт (в HUD он
+показывается отдельно — «чужого футфола нет: шанс на ×5 First Logged»).
+Признак берётся из журнала `ScanOrganic.WasLogged` (`false` → бонус будет).
+Если игра поле не прислала, HUD пишет `(base, First Logged ?)`; после продажи
+показываются фактические суммы из `SellOrganicData` (`Value` + `Bonus`).
 
 ## Как это устроено
 
@@ -148,7 +169,8 @@ Journal*.log / Status.json / NavRoute.json
 edhud/model.py   GameState: система, тела, сигналы, пробы, статус, маршрут, деньги
         │        ├── edhud/bio.py     критерии -> предсказания (небулы, Guardian)
         │        ├── edhud/values.py  стоимость скана/картографии + множители
-        │        ├── edhud/remote.py  EDSM + Spansh(EDDN) -> тела других командиров
+        │        ├── edhud/remote.py  EDSM + Spansh -> тела других командиров
+        │        ├── edhud/eddn.py    живой фид EDDN (+ edhud/zmtp.py, если нет pyzmq)
         │        ├── edhud/galaxy.py  туманности и Guardian bubble
         │        ├── edhud/codex.py   имена/стоимость/дистанции родов
         │        ├── edhud/regions.py регион галактики по координатам
@@ -160,9 +182,26 @@ edhud/hudmodel.py  HudView: строки и сегменты (без UI)
         └── edhud/tui.py      тот же вид в терминале
 ```
 
-`edhud/app.py` — связка: watcher, кэш, фоновая догрузка EDSM/Spansh, цикл
-обновления, горячие клавиши. `edhud/winapi.py` — DPI, click-through, удержание
+`edhud/app.py` — связка: watcher, кэш, фоновая догрузка EDSM/Spansh, поток EDDN,
+цикл обновления, горячие клавиши. `edhud/winapi.py` — DPI, click-through, удержание
 topmost, детект полноэкранного окна.
+
+### EDDN
+
+`edhud/zmtp.py` — минимальный ZMTP 3.1-подписчик (приветствие, READY, SUBSCRIBE,
+PING/PONG): EDDN отдаёт zlib-сжатый JSON, поэтому pyzmq не нужен. Если pyzmq
+установлен, `edhud/eddn.py` использует его. Фильтр по системе строится по
+`SystemAddress`/`StarSystem`, применяются `Scan`, `FSSBodySignals`,
+`SAASignalsFound`, `SAAScanComplete` — только для дополнения недостающего, свои
+данные никогда не перезаписываются. Проверка: `python run.py eddn --seconds 20`.
+
+### Legacy 3.8
+
+Версия берётся из `Fileheader`/`LoadGame` (`gameversion`: `3.8.x` → Legacy,
+`4.x` → Live/Odyssey). В Legacy: нет Odyssey-бонуса в стоимости (множители
+картографии и ×2.6 остаются), био-прогноз отключён, EDSM/Spansh/EDDN не
+догружаются (там только Live-данные) — при желании включается
+`remote_in_legacy` в `config.json`. В HUD — метка `[Legacy 3.8]` и подсказка.
 
 ### Предсказание биологии
 
@@ -180,12 +219,13 @@ topmost, детект полноэкранного окна.
 ## Тесты и разработка
 
 ```bash
-python -m unittest discover -s tests     # 58 тестов: критерии, регионы, стоимость,
-                                         # догрузка EDSM/Spansh, маршруты, конвейер
+python -m unittest discover -s tests     # 81 тест: критерии, регионы, стоимость,
+                                         # EDSM/Spansh, EDDN/ZMTP, Legacy, конвейер
 python tools/inspect_bio.py              # свойства тела и предсказания по журналу
 python tools/inspect_remote.py "HIP 36601"  # предсказания по чужим данным
 python tools/debug_bio.py Bacterium      # трассировка критериев
 python tools/render_test.py              # отрисовка оверлея без игры (canvas -> postscript)
+python tools/eddn_probe.py               # что идёт в живом фиде EDDN (нужен pyzmq)
 python tools/check_imports.py            # неиспользуемые импорты
 ```
 
@@ -198,8 +238,8 @@ python tools/check_imports.py            # неиспользуемые импо
   (MIT), упакована в RLE.
 * `data/codex_ref.json` — выжимка из справочника кодекса Canonn (через SrvSurvey).
 * Формула стоимости — [Exploration Value Formulae](https://forums.frontier.co.uk/threads/exploration-value-formulae.232000).
-* Данные систем — EDSM (`edsm.net/api-system-v1/*`) и Spansh (`spansh.co.uk/api/bodies/search`),
-  оба поверх EDDN.
+* Данные систем — EDSM (`edsm.net/api-system-v1/*`), Spansh
+  (`spansh.co.uk/api/bodies/search`) и живой EDDN (`tcp://eddn.edcd.io:9500`).
 * Идеи и форматы журналов — [EDMarketConnector](https://github.com/EDCD/EDMarketConnector),
   [EDDiscovery](https://github.com/EDDiscovery/EDDiscovery),
   [Exploration Buddy](https://www.panostrede.de/EDEB/).
@@ -209,11 +249,12 @@ python tools/check_imports.py            # неиспользуемые импо
 
 ## Чего пока нет
 
-* Собственного слушателя EDDN (ZeroMQ) нет — данные приходят через EDSM/Spansh,
-  куда их отправляют EDMC/EDDN-клиенты. Для этого EDMC (или аналог) должен быть
-  настроен на отправку данных.
-* Множитель «первый футфол» для биологии из журнала не выводится (только базовые
-  стоимости видов и фактические выплаты при продаже).
-* Стоимость скана звезды в HUD показывается без учёта бонуса за «эффективный»
-  DSS (у звёзд его нет).
-* Legacy (3.8) не поддерживается, только Live/Odyssey.
+* Био-прогноз опирается на Odyssey-критерии: в Legacy он отключён (там другой
+  набор организмов), в Live работает как подсказка, а не гарантия.
+* Оценка стоимости скана звезды не включает бонус «эффективного» DSS (у звёзд
+  его нет), а у тел, известных только по чужим данным, не применяется множитель
+  первого картографа — намеренно консервативно.
+* EDSM/Spansh/EDDN содержат только Live-данные: в Legacy догрузка выключена
+  (можно включить `remote_in_legacy`, но данные будут от Live-вселенной).
+* Каталог туманностей и Guardian bubble нужны для части критериев: сам каталог
+  качается с edastro.com, без сети критерии `nebulae [...]` не срабатывают.

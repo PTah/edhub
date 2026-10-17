@@ -115,6 +115,10 @@ class Config:
     remote_enabled: bool = True
     remote_ttl_sec: int = 6 * 3600
     remote_timeout: float = 10.0
+    remote_in_legacy: bool = False
+    # живой фид EDDN (ZeroMQ); pyzmq не обязателен — есть встроенный ZMTP-клиент
+    eddn_enabled: bool = True
+    eddn_endpoint: str = "tcp://eddn.edcd.io:9500"
     # каталог туманностей для критериев биологии
     nebulae_enabled: bool = True
     # Windows: держать окно поверх всех и подсказывать про fullscreen

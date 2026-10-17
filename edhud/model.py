@@ -28,6 +28,9 @@ FLAG_IN_FIGHTER = 1 << 20
 FLAG_IN_SRV = 1 << 21
 FLAG_FSD_JUMP = 1 << 25
 
+# Vista Genomics: бонус "First Logged" — пробу ещё никто не сдавал, платят ×5
+FIRST_LOGGED_MULTIPLIER = 5
+
 GUI_FOCUS = {
     0: "None",
     1: "InternalPanel",
@@ -64,6 +67,7 @@ class Organic:
     genus_local: str | None = None
     species_local: str | None = None
     variant_local: str | None = None
+    was_logged: bool | None = None
     samples: int = 0
     analysed: bool = False
     sample_pos: list[tuple[float, float]] = field(default_factory=list)
@@ -106,6 +110,18 @@ class Organic:
         return codex.reward_for(self.genus_en, self.species_en, self.variant_short)
 
     @property
+    def first_logged(self) -> bool:
+        """First Logged: пробу ещё никто не сдавал — Vista Genomics платит ×5."""
+        return self.was_logged is False
+
+    @property
+    def payout(self) -> int:
+        base = self.reward
+        if not base:
+            return 0
+        return base * FIRST_LOGGED_MULTIPLIER if self.first_logged else base
+
+    @property
     def scans_text(self) -> str:
         if self.analysed:
             return "готово"
@@ -120,6 +136,7 @@ class Organic:
             "genus_local": self.genus_local,
             "species_local": self.species_local,
             "variant_local": self.variant_local,
+            "was_logged": self.was_logged,
             "samples": self.samples,
             "analysed": self.analysed,
             "sample_pos": [list(p) for p in self.sample_pos],
@@ -136,6 +153,7 @@ class Organic:
             genus_local=data.get("genus_local"),
             species_local=data.get("species_local"),
             variant_local=data.get("variant_local"),
+            was_logged=data.get("was_logged"),
             samples=int(data.get("samples") or 0),
             analysed=bool(data.get("analysed")),
             sample_pos=[(float(p[0]), float(p[1])) for p in data.get("sample_pos") or []],
@@ -169,10 +187,12 @@ class Body:
     has_rings: bool = False
     was_discovered: bool = False
     was_mapped: bool = False
+    was_footfalled: bool = False
     bio_signals: int | None = None
     geo_signals: int | None = None
     genuses: dict[str, int] = field(default_factory=dict)
     dss_scanned: bool = False
+    dss_remote: bool = False
     signals_known: bool = False
     organisms: dict[str, Organic] = field(default_factory=dict)
     # данные от других командиров (EDSM/Spansh, т.е. EDDN)
@@ -428,6 +448,10 @@ class GameState:
     last_event_ts: float = 0.0
     last_event: str | None = None
     game_running: bool = False
+    # Legacy (Elite Dangerous 3.8, Horizons/Beyond) — без Odyssey-бонусов и био-прогноза
+    legacy: bool = False
+    game_version: str | None = None
+    build: str | None = None
     organic_alert: str | None = None
     organic_alert_ts: float = 0.0
     # стоимость данных за сессию (cr)
@@ -451,6 +475,9 @@ class GameState:
             handler(event)
 
     # --- запуск/система
+    def _on_fileheader(self, e: dict) -> None:
+        self._apply_version(e)
+
     def _on_loadgame(self, e: dict) -> None:
         self.cmdr = e.get("Commander")
         self.fid = e.get("FID")
@@ -458,8 +485,23 @@ class GameState:
         self.ship_name = e.get("ShipName")
         self.game_mode = e.get("GameMode")
         self.game_running = True
+        self._apply_version(e)
         if e.get("Fuel") is not None:
             self.status.fuel_main = float(e.get("Fuel") or 0.0)
+
+    def _apply_version(self, e: dict) -> None:
+        """Legacy (3.8) или Live/Odyssey (4.x) — по версии игры в Fileheader/LoadGame."""
+        version = e.get("gameversion") or e.get("GameVersion")
+        if version:
+            self.game_version = str(version)
+            self.legacy = str(version).startswith("3.")
+        build = e.get("build")
+        if build:
+            self.build = str(build)
+
+    @property
+    def odyssey(self) -> bool:
+        return not self.legacy
 
     def _on_loadout(self, e: dict) -> None:
         self.ship = e.get("Ship") or self.ship
@@ -579,6 +621,8 @@ class GameState:
             body.was_discovered = bool(e.get("WasDiscovered"))
         if e.get("WasMapped") is not None:
             body.was_mapped = bool(e.get("WasMapped"))
+        if e.get("WasFootfalled") is not None:
+            body.was_footfalled = bool(e.get("WasFootfalled"))
         if e.get("BodyCount") is not None:
             self.system.body_count = e.get("BodyCount")
         self._account_scan(body_id)
@@ -588,7 +632,7 @@ class GameState:
         body = self.system.body(body_id)
         if body is None:
             return
-        breakdown = body_values(body)
+        breakdown = body_values(body, odyssey=self.odyssey)
         if breakdown is None:
             return
         key = (self.system.address or 0, body.body_id)
@@ -684,6 +728,8 @@ class GameState:
         organic.genus_local = e.get("Genus_Localised") or organic.genus_local
         organic.species_local = e.get("Species_Localised") or organic.species_local
         organic.variant_local = e.get("Variant_Localised") or organic.variant_local
+        if "WasLogged" in e:
+            organic.was_logged = bool(e.get("WasLogged"))
         scan_type = (e.get("ScanType") or "").lower()
         lat, lon = self.status.lat, self.status.lon
         if scan_type == "log":
@@ -695,7 +741,7 @@ class GameState:
         elif scan_type in ("analyse", "analyze"):
             organic.samples = 3
             organic.analysed = True
-            self.session_organic_estimate += organic.reward
+            self.session_organic_estimate += organic.payout
             self._alert(f"Биология: {organic.genus_en} — анализ сдан")
         if lat is not None and lon is not None and scan_type in ("log", "sample"):
             organic.sample_pos.append((float(lat), float(lon)))

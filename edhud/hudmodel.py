@@ -1,3 +1,4 @@
+# Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:22:52
 """Модель отображения HUD: из GameState в строки/сегменты для рендера.
 
 Чистый слой без зависимостей от UI — его используют и tkinter-оверлей, и
@@ -83,9 +84,9 @@ def _genuses(body: Body, limit: int = 4) -> str:
     return ", ".join(parts)
 
 
-def _body_value_text(body: Body) -> tuple[str, str]:
+def _body_value_text(body: Body, odyssey: bool = True) -> tuple[str, str]:
     """(текст, стиль) стоимости тела: скан или скан+DSS, с множителем."""
-    breakdown = values.body_values(body)
+    breakdown = values.body_values(body, odyssey=odyssey)
     if breakdown is None:
         return "", "muted"
     if body.dss_scanned:
@@ -175,10 +176,12 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment("   DSS ", "dim"))
         if body.dss_scanned or body.genuses:
             row.segments.append(Segment("✔", "ok"))
+        elif body.dss_remote:
+            row.segments.append(Segment("~", "accent"))
         else:
             row.segments.append(Segment("✗", "warn"))
 
-    value_text, value_style = _body_value_text(body)
+    value_text, value_style = _body_value_text(body, state.odyssey)
     if value_text:
         row.segments.append(Segment("   ", "text"))
         row.segments.append(Segment(value_text, value_style))
@@ -201,6 +204,8 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment("   [SRV]", "accent"))
     elif state.mode == "OnFoot":
         row.segments.append(Segment("   [пешком]", "accent"))
+    if state.legacy:
+        row.segments.append(Segment("   [Legacy 3.8]", "warn"))
     return row
 
 
@@ -212,15 +217,19 @@ def _organism_rows(state: GameState, body: Body) -> list[Row]:
         row.segments.append(Segment("● ", style))
         row.segments.append(Segment(organic.label, "fg"))
         row.segments.append(Segment(f"  {organic.scans_text}", style))
-        reward = organic.reward
-        if reward:
-            row.segments.append(Segment(f"  ≈{values.credits(reward)}", "muted"))
+        payout = organic.payout
+        if payout:
+            row.segments.append(Segment(f"  ≈{values.credits(payout)}", "muted"))
+            if organic.first_logged:
+                row.segments.append(Segment(" ×5 First Logged", "ok"))
+            elif organic.was_logged is None:
+                row.segments.append(Segment(" (base, First Logged ?)", "dim"))
         rows.append(row)
     return rows
 
 
-def _value_row(body: Body) -> Row | None:
-    breakdown = values.body_values(body)
+def _value_row(state: GameState, body: Body) -> Row | None:
+    breakdown = values.body_values(body, odyssey=state.odyssey)
     if breakdown is None:
         return None
     row = Row([Segment("стоимость: ", "dim")])
@@ -230,6 +239,11 @@ def _value_row(body: Body) -> Row | None:
         row.segments.append(Segment(f" · ×{values.DISCOVERY_MULTIPLIER:g} за первое открытие", "ok"))
     elif breakdown.first_mapper:
         row.segments.append(Segment(" · DSS первым (×8.1)", "ok"))
+    if body.landable:
+        if body.was_footfalled:
+            row.segments.append(Segment(" · футфол уже был", "muted"))
+        else:
+            row.segments.append(Segment(" · чужого футфола нет: шанс на ×5 First Logged", "ok"))
     if body.discovered_by:
         row.segments.append(Segment(f" · открыл {body.discovered_by}", "muted"))
     if body.mapped_by:
@@ -244,11 +258,16 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
 
     if body is not None:
         rows.extend(_organism_rows(state, body))
-        value_row = _value_row(body)
+        value_row = _value_row(state, body)
         if value_row is not None:
             rows.append(value_row)
 
-    if body is not None and cfg.show_predictions and (body.landable or body.genuses):
+    if (
+        body is not None
+        and cfg.show_predictions
+        and state.odyssey
+        and (body.landable or body.genuses)
+    ):
         predictions = bio.predict_for_body(body, state.system, limit=max_pred)
         if predictions:
             head = Row([Segment("предсказание: ", "dim")])
@@ -285,7 +304,7 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
 
 def _system_row(state: GameState) -> Row:
     system = state.system
-    scan_sum, mapped_sum = values.system_totals(system)
+    scan_sum, mapped_sum = values.system_totals(system, odyssey=state.odyssey)
     row = Row([Segment("система: ", "dim")])
     row.segments.append(Segment(f"{len(system.bodies)} тел", "text"))
     if scan_sum:
@@ -298,6 +317,8 @@ def _system_row(state: GameState) -> Row:
         row.segments.append(Segment(label, "accent"))
     if system.remote_sources:
         row.segments.append(Segment(f" · догрузка: {', '.join(system.remote_sources)}", "muted"))
+    if state.legacy:
+        row.segments.append(Segment(" · Legacy 3.8 (без Odyssey-бонусов)", "warn"))
     return row
 
 

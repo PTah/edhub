@@ -10,7 +10,7 @@
     биологии, ценность проб.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     "config",
     "journal",
@@ -20,6 +20,8 @@ __all__ = [
     "codex",
     "values",
     "remote",
+    "eddn",
+    "zmtp",
     "galaxy",
     "winapi",
     "hudmodel",

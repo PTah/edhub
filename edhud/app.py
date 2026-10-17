@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import demo, galaxy, hudmodel, remote
+from . import demo, eddn, galaxy, hudmodel, remote
 from .config import Config
 from .hotkeys import Hotkeys
 from .journal import JournalWatcher
@@ -18,6 +18,7 @@ from .tui import run_tui
 
 SAVE_INTERVAL = 20.0
 FULLSCREEN_HINT = "полноэкранный режим: если оверлея не видно — Alt+Enter (Borderless)"
+LEGACY_HINT = "Legacy 3.8: Odyssey-бонусы, EDSM/EDDN и био-прогноз отключены"
 
 
 class App:
@@ -45,6 +46,9 @@ class App:
         self.hotkeys: Hotkeys | None = None
         self.demo_player: demo.DemoPlayer | None = None
         self.demo_speed = demo_speed
+        self.eddn: eddn.EddnListener | None = None
+        self._eddn_filter = eddn.SetFilter()
+        self._eddn_messages: queue.Queue = queue.Queue(maxsize=512)
         self._cached_for: int | None = None
         self._remote_for: int | None = None
         self._remote_results: queue.Queue = queue.Queue()
@@ -89,6 +93,24 @@ class App:
         )
         self.watcher.start()
         self._warm_nebulae()
+        self._start_eddn()
+
+    def _start_eddn(self) -> None:
+        """Подписка на живой EDDN (нужен только текущий прыжок/система)."""
+        if not (self.cfg.eddn_enabled and self.cfg.allow_network):
+            return
+        self.eddn = eddn.EddnListener(
+            endpoint=self.cfg.eddn_endpoint,
+            on_message=self._on_eddn_message,
+            system_filter=self._eddn_filter,
+        )
+        self.eddn.start()
+
+    def _on_eddn_message(self, message: dict) -> None:
+        try:
+            self._eddn_messages.put_nowait(message)
+        except queue.Full:
+            pass
 
     def _warm_nebulae(self) -> None:
         """Каталог туманностей нужен критериям `nebulae [...]` — качаем в фоне."""
@@ -118,6 +140,7 @@ class App:
     def tick(self) -> None:
         self.sync_system()
         self.collect_remote()
+        self.collect_eddn()
         self.autosave()
         if self.overlay is not None:
             view = hudmodel.build_view(
@@ -126,11 +149,16 @@ class App:
             self.overlay.set_view(view)
 
     def hint(self) -> str | None:
-        if self.overlay is None or not self.cfg.warn_fullscreen:
-            return None
-        if getattr(self.overlay, "fullscreen", None) is True:
-            return FULLSCREEN_HINT
-        return None
+        hints: list[str] = []
+        if self.state.legacy:
+            hints.append(LEGACY_HINT)
+        if (
+            self.overlay is not None
+            and self.cfg.warn_fullscreen
+            and getattr(self.overlay, "fullscreen", None) is True
+        ):
+            hints.append(FULLSCREEN_HINT)
+        return " · ".join(hints) if hints else None
 
     def sync_system(self) -> None:
         """Кэш своих систем + запуск догрузки от других командиров."""
@@ -148,11 +176,17 @@ class App:
                 self.state.system.remote_mapped_value or cached.remote_mapped_value
             )
         self._cached_for = address
+        self._eddn_filter.update(
+            names={self.state.system.name} if self.state.system.name else set(),
+            addresses={address},
+        )
         self._start_remote(address, self.state.system.name)
 
     def _start_remote(self, address: int, name: str | None) -> None:
         if self.remote_client is None or not name:
             return
+        if self.state.legacy and not self.cfg.remote_in_legacy:
+            return  # EDSM — только Live; в Legacy догрузка отключена
         if self._remote_for == address:
             return
         self._remote_for = address
@@ -179,6 +213,19 @@ class App:
             added = remote.merge_into_system(self.state.system, result)
             if added:
                 self.store.save(self.state.system)
+
+    def collect_eddn(self) -> None:
+        """Применяет сообщения EDDN к текущей системе (только в главном потоке)."""
+        changed = False
+        while True:
+            try:
+                message = self._eddn_messages.get_nowait()
+            except queue.Empty:
+                break
+            if remote.apply_eddn(self.state.system, message):
+                changed = True
+        if changed:
+            self.store.save(self.state.system)
 
     def autosave(self) -> None:
         now = time.time()
@@ -258,6 +305,8 @@ class App:
             self.watcher.stop()
         if self.demo_player is not None:
             self.demo_player.stop()
+        if self.eddn is not None:
+            self.eddn.stop()
         if self.hotkeys is not None:
             self.hotkeys.stop()
         if self.state.system.address and self.state.system.bodies:

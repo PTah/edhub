@@ -334,6 +334,9 @@ def script() -> list[Step]:
                 Landable=True,
                 distance=1180.0,
                 sma=1.2e10,
+                WasDiscovered=False,
+                WasMapped=False,
+                WasFootfalled=False,
             ),
         )
     )
@@ -425,6 +428,7 @@ def script() -> list[Step]:
                 "Species_Localised": "Bacterium Cerbrus",
                 "Variant": "$Codex_Ent_Bacterial_07_K_Name;",
                 "Variant_Localised": "Bacterium Cerbrus - Lime",
+                "WasLogged": False,
                 "Body": "Synuefe GG-O c22-4 1",
                 "SystemAddress": 3932277477892,
             },
@@ -462,8 +466,47 @@ def script() -> list[Step]:
                 "Species_Localised": "Fungoida Setisis",
                 "Variant": "$Codex_Ent_Fungoids_01_K_Name;",
                 "Variant_Localised": "Fungoida Setisis - Gold",
+                "WasLogged": True,
                 "Body": "Synuefe GG-O c22-4 1",
                 "SystemAddress": 3932277477892,
+            },
+        )
+    )
+    # продажа данных: реальные суммы с бонусами (First Logged ×5)
+    steps.append(
+        Step(
+            0.6,
+            "event",
+            {
+                "event": "SellOrganicData",
+                "BioData": [
+                    {
+                        "Name": "$Codex_Ent_Fungoids_01_K_Name;",
+                        "Name_Localised": "Fungoida Setisis - Gold",
+                        "Value": 1671800,
+                        "Bonus": 0,
+                    },
+                    {
+                        "Name": "$Codex_Ent_Bacterial_07_K_Name;",
+                        "Name_Localised": "Bacterium Cerbrus - Lime",
+                        "Value": 1690000,
+                        "Bonus": 6760000,
+                    },
+                ],
+            },
+        )
+    )
+    steps.append(
+        Step(
+            0.4,
+            "event",
+            {
+                "event": "SellExplorationData",
+                "Systems": ["Synuefe EN-H d11-97"],
+                "Discovered": ["Synuefe GG-O c22-4 1"],
+                "BaseValue": 120000,
+                "Bonuses": 312000,
+                "TotalEarnings": 432000,
             },
         )
     )

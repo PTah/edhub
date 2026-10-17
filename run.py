@@ -16,9 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
-from edhud import config, demo, remote, spansh, values, winapi
+from edhud import config, demo, eddn, remote, spansh, values, winapi
 from edhud.app import App, dump
 from edhud.route import Route, parse_route_text
 
@@ -60,8 +61,11 @@ def cmd_run(args) -> int:
         cfg.allow_network = False
         cfg.remote_enabled = False
         cfg.nebulae_enabled = False
+        cfg.eddn_enabled = False
     if args.no_remote:
         cfg.remote_enabled = False
+    if args.no_eddn:
+        cfg.eddn_enabled = False
 
     journal_dir = None
     demo_speed = None
@@ -76,6 +80,42 @@ def cmd_run(args) -> int:
         demo_speed=demo_speed,
     )
     return app.run()
+
+
+def cmd_eddn(args) -> int:
+    """Проверка живой подписки EDDN: сколько сообщений и что пришло по системе."""
+    listener_filter = eddn.SetFilter()
+    if args.system:
+        listener_filter.update(names={args.system}, addresses={args.address} if args.address else set())
+
+    def on_message(message: dict) -> None:
+        print(
+            f"{message.get('event')}: {message.get('StarSystem') or message.get('SystemName') or '—'} "
+            f"{message.get('BodyName') or ''}"
+        )
+
+    listener = eddn.EddnListener(
+        endpoint=args.endpoint,
+        on_message=on_message if args.system else None,
+        system_filter=listener_filter if args.system else None,
+    )
+    print(f"EDDN {args.endpoint}, backend={listener.stats['backend']}, слушаю {args.seconds:.0f} с")
+    listener.start()
+    try:
+        deadline = time.time() + args.seconds
+        while time.time() < deadline:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.stop()
+        listener.join(timeout=5)
+    stats = listener.stats
+    print(
+        f"получено {stats['received']}, подошло по фильтру {stats['matched']}, "
+        f"ошибок {stats['errors']}" + (f" ({stats['last_error']})" if stats["last_error"] else "")
+    )
+    return 0 if stats["received"] else 1
 
 
 def cmd_remote(args) -> int:
@@ -221,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--width", type=int, help="ширина оверлея, px")
     run.add_argument("--offline", action="store_true", help="без сети: без EDSM/Spansh и каталога туманностей")
     run.add_argument("--no-remote", action="store_true", help="не догружать тела от других командиров")
+    run.add_argument("--no-eddn", action="store_true", help="не подключаться к живой шине EDDN")
     run.set_defaults(func=cmd_run)
 
     dump_cmd = subs.add_parser("dump", help="напечатать один кадр HUD")
@@ -232,6 +273,13 @@ def build_parser() -> argparse.ArgumentParser:
     remote_cmd.add_argument("--address", type=int, help="SystemAddress (id64), если известен")
     remote_cmd.add_argument("--limit", type=int, default=12)
     remote_cmd.set_defaults(func=cmd_remote)
+
+    eddn_cmd = subs.add_parser("eddn", help="проверить живую подписку EDDN")
+    eddn_cmd.add_argument("--system", help="фильтр по системе")
+    eddn_cmd.add_argument("--address", type=int, help="SystemAddress (id64)")
+    eddn_cmd.add_argument("--endpoint", default=eddn.DEFAULT_ENDPOINT)
+    eddn_cmd.add_argument("--seconds", type=float, default=20.0)
+    eddn_cmd.set_defaults(func=cmd_eddn)
 
     plot = subs.add_parser("plot", help="построить маршрут через Spansh Galaxy Plotter")
     plot.add_argument("start")
