@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from . import values
+from . import bio, values
 from .model import Body, GameState
 from .route import Route
 
@@ -23,6 +23,7 @@ COLORS = {
     "sel": "#2a1a0a",
     "ink": "#000000",
     "paper": "#f2f2f2",
+    "accent": "#54dfed",
 }
 
 # Колонки таблицы тел. Пояс — отдельная узкая ячейка со значком кольца.
@@ -33,6 +34,7 @@ BODY_COLUMNS = (
     ("atmos", "Атмосфера", 110, "w"),
     ("temp", "T", 70, "e"),
     ("bio", "Био", 50, "center"),
+    ("guess", "Возможно", 220, "w"),
     ("geo", "Гео", 50, "center"),
     ("pml", "PML", 50, "center"),
     ("dss", "DSS", 50, "center"),
@@ -55,6 +57,30 @@ def _temp(value: float | None) -> str:
     if value is None:
         return "—"
     return f"{value:,.0f} K".replace(",", " ")
+
+
+def _forecast(body: Body, state: GameState) -> tuple[str, str | None]:
+    """Текст колонки «Возможно»: подтверждённые роды или прогноз до DSS."""
+    if body.genuses:
+        names = bio.forecast_names(body, state.system)
+        return ", ".join(names), "ok"
+    if (body.bio_signals or 0) <= 0:
+        return "—", None
+    names = bio.forecast_names(body, state.system)
+    if not names:
+        return "—", None
+    return "≈ " + ", ".join(names), "accent"
+
+
+def route_tag(hop_index: int, current_index: int | None) -> str:
+    """Пройденные системы — серые, текущая — крупнее."""
+    if current_index is None:
+        return ""
+    if hop_index < current_index:
+        return "done"
+    if hop_index == current_index:
+        return "here"
+    return ""
 
 
 def signal_colors(column: str, count: int | None) -> tuple[str, str] | None:
@@ -128,6 +154,10 @@ class MainWindow:
         self._visible = True
         self._shown_tab = "bodies"
         self._ring_icon: tk.PhotoImage | None = None
+        self._ui_family = "Segoe UI"
+        self._ui_size = 9
+        self._state: GameState | None = None
+        self._header_labels: list[tk.Label] = []
         self._style()
         self._build()
         self._last_key: tuple | None = None
@@ -140,7 +170,12 @@ class MainWindow:
             pass
         style.configure("ED.TFrame", background=COLORS["bg"])
         style.configure("ED.TLabel", background=COLORS["bg"], foreground=COLORS["text"])
-        style.configure("ED.Header.TLabel", background=COLORS["bg"], foreground=COLORS["fg"], font=("Segoe UI", 12, "bold"))
+        style.configure(
+            "ED.Header.TLabel",
+            background=COLORS["bg"],
+            foreground=COLORS["fg"],
+            font=(self._ui_family, self._ui_size + 3, "bold"),
+        )
         style.configure("ED.Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
         style.configure("ED.TNotebook", background=COLORS["bg"], borderwidth=0)
         style.configure("ED.TNotebook.Tab", background=COLORS["panel"], foreground=COLORS["muted"], padding=(14, 6))
@@ -155,13 +190,15 @@ class MainWindow:
             foreground=COLORS["text"],
             fieldbackground=COLORS["row"],
             borderwidth=0,
-            rowheight=24,
+            rowheight=max(22, self._ui_size + 14),
+            font=(self._ui_family, self._ui_size),
         )
         style.configure(
             "ED.Treeview.Heading",
             background=COLORS["panel"],
             foreground=COLORS["fg"],
             relief="flat",
+            font=(self._ui_family, self._ui_size, "bold"),
         )
         style.map("ED.Treeview", background=[("selected", COLORS["sel"])], foreground=[("selected", COLORS["fg"])])
 
@@ -199,6 +236,8 @@ class MainWindow:
         ):
             self.route_tree.heading(col, text=title)
             self.route_tree.column(col, width=w, anchor=anchor)
+        self.route_tree.tag_configure("done", foreground=COLORS["muted"])
+        self.route_tree.tag_configure("here", font=(self._ui_family, self._ui_size + 1))
         route_scroll = ttk.Scrollbar(self.tab_route, orient="vertical", command=self.route_tree.yview)
         self.route_tree.configure(yscrollcommand=route_scroll.set)
         self.route_tree.pack(side="left", fill="both", expand=True)
@@ -211,31 +250,37 @@ class MainWindow:
         """Таблица тел на метках: Treeview не умеет красить отдельные ячейки."""
         host = tk.Frame(self.tab_bodies, bg=COLORS["bg"])
         host.pack(fill="both", expand=True)
+        self._bodies_host = host
         host.grid_columnconfigure(0, weight=1)
         host.grid_rowconfigure(1, weight=1)
 
         header = tk.Frame(host, bg=COLORS["panel"])
         header.grid(row=0, column=0, sticky="ew")
+        self._bodies_header = header
         for index, (key, title, width, anchor) in enumerate(BODY_COLUMNS):
             weight = 1 if key == "name" else 0
             header.grid_columnconfigure(index, minsize=width, weight=weight)
-            tk.Label(
+            label = tk.Label(
                 header,
                 text=title,
                 bg=COLORS["panel"],
                 fg=COLORS["fg"],
                 anchor=anchor,
-                font=("Segoe UI", 9, "bold"),
+                font=(self._ui_family, self._ui_size, "bold"),
                 padx=4,
                 pady=4,
-            ).grid(row=0, column=index, sticky="ew")
+            )
+            label.grid(row=0, column=index, sticky="ew")
+            self._header_labels.append(label)
 
         canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
         scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scroll.set)
         canvas.grid(row=1, column=0, sticky="nsew")
         scroll.grid(row=1, column=1, sticky="ns")
-        tk.Frame(host, width=16, bg=COLORS["bg"]).grid(row=0, column=1)
+        gutter = tk.Frame(host, width=16, bg=COLORS["bg"])
+        gutter.grid(row=0, column=1)
+        self._bodies_gutter = gutter
 
         inner = tk.Frame(canvas, bg=COLORS["row"])
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
@@ -288,7 +333,37 @@ class MainWindow:
             pass
 
     # --------------------------------------------------------------- update
+    def apply_look(self, cfg) -> None:
+        """Шрифт и палитра окна из настроек. Цвета таблицы живут в COLORS."""
+        from .config import DARK_COLORS
+
+        for key in list(COLORS):
+            COLORS[key] = cfg.colors.get(key) or DARK_COLORS.get(key, COLORS[key])
+        self._ui_family = cfg.ui_font_family or "Segoe UI"
+        self._ui_size = max(8, min(24, int(cfg.ui_font_size or 9)))
+        self._style()
+        self._paint_chrome()
+        self.route_tree.tag_configure("done", foreground=COLORS["muted"])
+        self.route_tree.tag_configure("here", font=(self._ui_family, self._ui_size + 1))
+        self._last_key = None
+        if self._state is not None:
+            self.update_state(self._state)
+
+    def _paint_chrome(self) -> None:
+        font = (self._ui_family, self._ui_size, "bold")
+        self.win.configure(bg=COLORS["bg"])
+        host = getattr(self, "_bodies_host", None)
+        if host is not None:
+            host.configure(bg=COLORS["bg"])
+            self._bodies_header.configure(bg=COLORS["panel"])
+            self._bodies_canvas.configure(bg=COLORS["row"])
+            self._bodies_inner.configure(bg=COLORS["row"])
+            self._bodies_gutter.configure(bg=COLORS["bg"])
+        for label in self._header_labels:
+            label.configure(bg=COLORS["panel"], fg=COLORS["fg"], font=font)
+
     def update_state(self, state: GameState) -> None:
+        self._state = state
         self._apply_tab(state)
         if not self._visible:
             # всё равно обновляем редко — но дешевле пропускать, если скрыто
@@ -314,6 +389,10 @@ class MainWindow:
                 b.dss_scanned,
                 b.was_discovered,
                 b.has_rings,
+                b.landable,
+                b.planet_class,
+                bool(b.materials),
+                bool(b.genuses),
                 b.source,
                 round(b.distance_ls or 0, 1),
             )
@@ -371,17 +450,19 @@ class MainWindow:
         extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
         self.route_info.configure(text=f"Источник: {src}{lock}{extra}")
         current_item = None
-        here = (current or "").lower()
-        for i, hop in enumerate(route.hops, start=1):
+        here = route.index_of(current)
+        for i, hop in enumerate(route.hops):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
-            mark = "▶ " if here and hop.system.lower() == here else ""
+            tag = route_tag(i, here)
+            mark = "▶ " if tag == "here" else ""
             item = self.route_tree.insert(
                 "",
                 "end",
-                values=(i, f"{mark}{hop.system}", hop.star_class or "—", ly_text),
+                values=(i + 1, f"{mark}{hop.system}", hop.star_class or "—", ly_text),
+                tags=(tag,) if tag else (),
             )
-            if mark:
+            if tag == "here":
                 current_item = item
         if current_item is not None:
             self.route_tree.see(current_item)
@@ -397,6 +478,7 @@ class MainWindow:
             bio = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
             geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
             pml = "—" if body.mining_locations is None else str(body.mining_locations)
+            guess, guess_color = _forecast(body, state)
             dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
             first = "✔" if not body.was_discovered and not body.remote else "—"
             src = body.source or ("своё" if not body.remote else "?")
@@ -406,6 +488,7 @@ class MainWindow:
                 "atmos": body.atmosphere_type or body.atmosphere or "—",
                 "temp": _temp(body.surface_temp),
                 "bio": bio,
+                "guess": guess,
                 "geo": geo,
                 "pml": pml,
                 "dss": dss,
@@ -427,14 +510,17 @@ class MainWindow:
                         cell.image = icon
                 else:
                     paint = signal_colors(key, counts.get(key))
-                    fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
+                    if key == "guess" and guess_color:
+                        fg, bg = COLORS[guess_color], COLORS["row"]
+                    else:
+                        fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
                     cell = tk.Label(
                         self._bodies_inner,
                         text=values[key],
                         bg=bg,
                         fg=fg,
                         anchor=anchor,
-                        font=("Segoe UI", 9),
+                        font=(self._ui_family, self._ui_size),
                         padx=4,
                         pady=2,
                     )

@@ -15,7 +15,8 @@ import queue
 import webbrowser
 
 from . import winapi
-from .hudmodel import HudView
+from .biooverlay import BioPanel
+from .hudmodel import BioBoard, HudView
 
 PAD = 12
 BAR_H = 4
@@ -74,6 +75,7 @@ class Overlay:
         self._place_window()
         self._bind_keys()
         self._build_menu()
+        self.bio = BioPanel(self.root, cfg)
         self._apply_click_through()
         self._start_keeper()
 
@@ -82,11 +84,18 @@ class Overlay:
         if not winapi.IS_WINDOWS or not getattr(self.cfg, "keep_topmost", True):
             return
         self._keeper = winapi.TopmostKeeper(
-            hwnd_provider=lambda: winapi.hwnd_of(self.root),
+            hwnd_provider=self._topmost_hwnd,
             interval=2.0,
             on_fullscreen=self._on_fullscreen,
         )
         self._keeper.start()
+
+    def _topmost_hwnd(self) -> int:
+        if getattr(self, "bio", None) is not None and self.bio.wants_topmost():
+            extra = self.bio.hwnd()
+            if extra:
+                winapi.keep_topmost(extra)
+        return winapi.hwnd_of(self.root)
 
     def _on_fullscreen(self, state: bool | None) -> None:
         self.fullscreen = state
@@ -98,6 +107,8 @@ class Overlay:
             click_through=bool(self.cfg.click_through),
             topmost=bool(getattr(self.cfg, "keep_topmost", True)),
         )
+        if getattr(self, "bio", None) is not None:
+            self.bio.apply_click_through(bool(self.cfg.click_through))
 
     # ------------------------------------------------------------------ окно
     def _font(self, delta: int = 0, bold: bool = False):
@@ -252,6 +263,21 @@ class Overlay:
             pass
 
     # ------------------------------------------------------------ содержимое
+    def refresh_look(self) -> None:
+        """Сбросить кэш шрифта и перерисовать после смены оформления."""
+        self._fonts.clear()
+        if getattr(self, "bio", None) is not None:
+            self.bio.cfg = self.cfg
+            self.bio._fonts.clear()
+            if self.bio._board is not None and self.bio._parent_visible:
+                self.bio._draw(self.bio._board)
+        if self._view is not None:
+            self._draw(self._view)
+
+    def set_bio(self, board: BioBoard | None) -> None:
+        if getattr(self, "bio", None) is not None:
+            self.bio.set_board(board)
+
     def set_view(self, view: HudView) -> None:
         try:
             self._queue.put_nowait(view)
@@ -451,6 +477,8 @@ class Overlay:
             self.root.attributes("-topmost", True)
         else:
             self.root.withdraw()
+        if getattr(self, "bio", None) is not None:
+            self.bio.set_parent_visible(self._visible)
 
     def copy_to_clipboard(self, text: str) -> None:
         try:
@@ -466,6 +494,8 @@ class Overlay:
     def destroy(self) -> None:
         if self._keeper is not None:
             self._keeper.stop()
+        if getattr(self, "bio", None) is not None:
+            self.bio.destroy()
         try:
             self.root.destroy()
         except Exception:

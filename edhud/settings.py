@@ -3,10 +3,37 @@ from __future__ import annotations
 
 import webbrowser
 from pathlib import Path
-from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, filedialog, messagebox, ttk
+from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, filedialog, messagebox, ttk
 import tkinter as tk
 
 from . import config
+
+# Подписи цветов в разделе «Оформление». Первые — текст, дальше заливки.
+COLOR_FIELDS = (
+    ("fg", "Заголовок"),
+    ("text", "Основной текст"),
+    ("muted", "Приглушённый"),
+    ("dim", "Линии"),
+    ("accent", "Акцент"),
+    ("ok", "Био / успех"),
+    ("warn", "Предупреждение"),
+    ("bad", "Ошибка"),
+    ("bg", "Фон"),
+    ("panel", "Панели"),
+    ("row", "Строки таблицы"),
+    ("sel", "Выделение"),
+)
+
+
+def _parse_color(value: str) -> str | None:
+    text = (value or "").strip()
+    if not text.startswith("#"):
+        text = "#" + text
+    if len(text) == 4 and all(ch in "0123456789abcdefABCDEF" for ch in text[1:]):
+        text = "#" + "".join(ch * 2 for ch in text[1:])
+    if len(text) == 7 and all(ch in "0123456789abcdefABCDEF" for ch in text[1:]):
+        return text.lower()
+    return None
 
 
 class SettingsDialog:
@@ -30,8 +57,26 @@ class SettingsDialog:
 
     def _build(self) -> None:
         pad = {"padx": 10, "pady": 4}
-        frm = ttk.Frame(self.win, padding=12)
-        frm.grid(row=0, column=0, sticky="nsew")
+        outer = ttk.Frame(self.win, padding=(8, 8, 8, 4))
+        outer.grid(row=0, column=0, sticky="nsew")
+        nb = ttk.Notebook(outer)
+        nb.grid(row=0, column=0, sticky="nsew")
+        general = ttk.Frame(nb, padding=8)
+        look = ttk.Frame(nb, padding=8)
+        nb.add(general, text="Общее")
+        nb.add(look, text="Оформление")
+        self._build_general(general, pad)
+        self._build_look(look)
+        btns = ttk.Frame(outer)
+        btns.grid(row=1, column=0, sticky="e", pady=(8, 4))
+        ttk.Button(btns, text="Отмена", command=self.win.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text="Сохранить", command=self._save).pack(side="right", padx=4)
+        self.win.update_idletasks()
+        w, h = self.win.winfo_width(), self.win.winfo_height()
+        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+        self.win.geometry(f"+{(sw - w) // 2}+{max(0, (sh - h) // 3)}")
+
+    def _build_general(self, frm: ttk.Frame, pad: dict) -> None:
 
         self.journal_dir = StringVar(value=self.cfg.journal_dir or "")
         self.opacity = DoubleVar(value=float(self.cfg.opacity))
@@ -160,17 +205,128 @@ class SettingsDialog:
         ttk.Spinbox(orow, from_=600, to=2400, increment=20, textvariable=self.width, width=6).pack(
             side="left", padx=8
         )
+
+    def _font_names(self) -> list[str]:
+        from tkinter import font as tkfont
+
+        names = sorted({name for name in tkfont.families(self.win) if name and not name.startswith("@")})
+        return names or ["Consolas", "Segoe UI"]
+
+    def _build_look(self, frm: ttk.Frame) -> None:
+        families = self._font_names()
+        self.theme = StringVar(value=self.cfg.theme if self.cfg.theme in config.THEMES else "dark")
+        self.font_family = StringVar(value=self.cfg.font_family or "Consolas")
+        self.font_size = IntVar(value=int(self.cfg.font_size or 11))
+        self.ui_font_family = StringVar(value=self.cfg.ui_font_family or "Segoe UI")
+        self.ui_font_size = IntVar(value=int(self.cfg.ui_font_size or 9))
+        self.color_vars: dict[str, StringVar] = {}
+        self._swatches: dict[str, tk.Label] = {}
+
+        row = 0
+        ttk.Label(frm, text="Тема").grid(row=row, column=0, sticky="w", padx=8, pady=4)
+        theme = ttk.Combobox(
+            frm,
+            textvariable=self.theme,
+            values=("dark", "light"),
+            state="readonly",
+            width=18,
+        )
+        theme.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        theme.bind("<<ComboboxSelected>>", lambda _e: self._apply_theme_to_fields())
+        ttk.Label(frm, text="dark — тёмная, light — светлая").grid(
+            row=row, column=2, columnspan=2, sticky="w"
+        )
         row += 1
 
-        btns = ttk.Frame(frm)
-        btns.grid(row=row, column=0, columnspan=2, sticky="e", pady=(12, 0))
-        ttk.Button(btns, text="Отмена", command=self.win.destroy).pack(side="right", padx=4)
-        ttk.Button(btns, text="Сохранить", command=self._save).pack(side="right", padx=4)
+        self._font_row(frm, row, "Шрифт оверлея", self.font_family, self.font_size, families, 8, 32)
+        row += 1
+        self._font_row(frm, row, "Шрифт окна", self.ui_font_family, self.ui_font_size, families, 8, 24)
+        row += 1
+        ttk.Label(
+            frm,
+            text="Смена темы подставляет палитру. Отдельные цвета можно поправить и сохранить.",
+            foreground="#666",
+        ).grid(row=row, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 6))
+        row += 1
 
-        self.win.update_idletasks()
-        w, h = self.win.winfo_width(), self.win.winfo_height()
-        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        self.win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 3}")
+        for index, (key, title) in enumerate(COLOR_FIELDS):
+            grid_row = row + index // 2
+            grid_col = (index % 2) * 2
+            self._color_row(frm, grid_row, grid_col, key, title)
+
+    def _font_row(self, frm, row, title, family_var, size_var, families, lo, hi) -> None:
+        ttk.Label(frm, text=title).grid(row=row, column=0, sticky="w", padx=8, pady=4)
+        box = ttk.Combobox(frm, textvariable=family_var, values=families, width=28)
+        box.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(frm, text="размер").grid(row=row, column=2, sticky="e", padx=(8, 0))
+        ttk.Spinbox(frm, from_=lo, to=hi, textvariable=size_var, width=5).grid(
+            row=row, column=3, sticky="w", padx=8, pady=4
+        )
+
+    def _color_row(self, frm, row, col, key: str, title: str) -> None:
+        var = StringVar(value=self.cfg.color(key))
+        self.color_vars[key] = var
+        ttk.Label(frm, text=title).grid(row=row, column=col, sticky="w", padx=8, pady=2)
+        cell = ttk.Frame(frm)
+        cell.grid(row=row, column=col + 1, sticky="w", padx=8, pady=2)
+        ttk.Entry(cell, textvariable=var, width=10).pack(side="left")
+        swatch = tk.Label(cell, text="    ", bg=self._safe_color(var.get()), relief="solid", bd=1)
+        swatch.pack(side="left", padx=4)
+        self._swatches[key] = swatch
+        ttk.Button(cell, text="Цвет", width=6, command=lambda k=key: self._pick_color(k)).pack(side="left")
+        var.trace_add("write", lambda *_a, k=key: self._paint_swatch(k))
+
+    def _safe_color(self, value: str) -> str:
+        parsed = _parse_color(value)
+        return parsed or "#888888"
+
+    def _paint_swatch(self, key: str) -> None:
+        swatch = self._swatches.get(key)
+        if swatch is None:
+            return
+        try:
+            swatch.configure(bg=self._safe_color(self.color_vars[key].get()))
+        except tk.TclError:
+            pass
+
+    def _pick_color(self, key: str) -> None:
+        current = self._safe_color(self.color_vars[key].get())
+        chosen = colorchooser.askcolor(color=current, parent=self.win, title="Цвет")
+        if chosen and chosen[1]:
+            self.color_vars[key].set(chosen[1])
+
+    def _apply_theme_to_fields(self) -> None:
+        colors = config.palette(self.theme.get())
+        for key, var in self.color_vars.items():
+            if key in colors:
+                var.set(colors[key])
+
+    def _read_look(self) -> str | None:
+        theme = self.theme.get().strip()
+        if theme not in config.THEMES:
+            return "Тема: dark или light."
+        family = self.font_family.get().strip()
+        ui_family = self.ui_font_family.get().strip()
+        if not family or not ui_family:
+            return "Укажите шрифт оверлея и шрифт окна."
+        try:
+            size = int(self.font_size.get())
+            ui_size = int(self.ui_font_size.get())
+        except (tk.TclError, ValueError):
+            return "Размер шрифта должен быть числом."
+        colors = config.palette(theme)
+        for key, title in COLOR_FIELDS:
+            parsed = _parse_color(self.color_vars[key].get())
+            if parsed is None:
+                return f"Цвет «{title}» — это #RRGGBB."
+            colors[key] = parsed
+        self.cfg.theme = theme
+        self.cfg.font_family = family
+        self.cfg.font_size = max(8, min(32, size))
+        self.cfg.ui_font_family = ui_family
+        self.cfg.ui_font_size = max(8, min(24, ui_size))
+        self.cfg.colors = colors
+        return None
 
     def _browse_journal(self) -> None:
         path = filedialog.askdirectory(parent=self.win, title="Каталог журналов Elite Dangerous")
@@ -198,6 +354,10 @@ class SettingsDialog:
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))
+        look_error = self._read_look()
+        if look_error:
+            messagebox.showerror("EDHUD", look_error, parent=self.win)
+            return
         try:
             self.cfg.save()
         except OSError as exc:

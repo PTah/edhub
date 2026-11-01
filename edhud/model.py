@@ -239,6 +239,7 @@ class Body:
     dss_scanned: bool = False
     dss_remote: bool = False
     signals_known: bool = False
+    signals_local: bool = False  # сигналы пришли из нашего журнала, не из EDSM/Spansh
     organisms: dict[str, Organic] = field(default_factory=dict)
     # данные от других командиров (EDSM/Spansh, т.е. EDDN)
     remote: bool = False
@@ -406,6 +407,8 @@ class Status:
     oxygen: float | None = None
     body_name: str | None = None
     body_id: int | None = None
+    destination_name: str | None = None
+    destination_body: int | None = None
     balance: int | None = None
     gui_focus: int = 0
     legal_state: str | None = None
@@ -429,6 +432,14 @@ class Status:
         self.oxygen = _f(data.get("Oxygen"))
         self.body_name = data.get("BodyName")
         self.body_id = data.get("BodyID")
+        dest = data.get("Destination")
+        if isinstance(dest, dict):
+            self.destination_name = dest.get("Name")
+            body = dest.get("Body")
+            self.destination_body = int(body) if isinstance(body, int) else None
+        else:
+            self.destination_name = None
+            self.destination_body = None
         self.balance = data.get("Balance")
         self.gui_focus = int(data.get("GuiFocus") or 0)
         self.legal_state = data.get("LegalState")
@@ -499,6 +510,8 @@ class GameState:
     system: System = field(default_factory=System)
     current_body_id: int | None = None
     current_body_name: str | None = None
+    # тело, по которому только что пришли сигналы (FSS/DSS) — карточка слева
+    last_fss_body_id: int | None = None
     status: Status = field(default_factory=Status)
     route: Route = field(default_factory=Route)
     carrier: Carrier = field(default_factory=Carrier)
@@ -593,6 +606,7 @@ class GameState:
             self.system = System(address=address, name=name)
             self.current_body_id = None
             self.current_body_name = None
+            self.last_fss_body_id = None
         self.system.address = address or self.system.address
         self.system.name = name or self.system.name
         if isinstance(pos, (list, tuple)) and len(pos) == 3:
@@ -791,7 +805,11 @@ class GameState:
             body.parent_ids = ids
         body.terraform_state = e.get("TerraformState") or body.terraform_state
         rings = e.get("Rings")
-        if isinstance(rings, list):
+        # Пояс у звезды в журнале висит на самой звезде, но добывают его в кластерах.
+        # Значок пояса — у планет с кольцами и у тел «Belt Cluster», не у звезды.
+        if body.is_star or body.star_type:
+            body.has_rings = False
+        elif isinstance(rings, list):
             body.has_rings = _mineable_belt(rings, body.name)
         elif _is_belt_body(body.name):
             body.has_rings = True
@@ -847,13 +865,17 @@ class GameState:
             return
         _apply_signal_counts(body, e.get("Signals") or [])
         body.signals_known = True
+        body.signals_local = True
+        self.last_fss_body_id = body.body_id
 
     def _on_saasignalsfound(self, e: dict) -> None:
         body = self._ensure_body(e)
         if body is None:
             return
         body.signals_known = True
+        body.signals_local = True
         body.dss_scanned = True
+        self.last_fss_body_id = body.body_id
         _apply_signal_counts(body, e.get("Signals") or [], merge_bio=True)
         genuses = e.get("Genuses") or []
         if genuses:

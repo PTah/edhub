@@ -15,7 +15,8 @@ from pathlib import Path
 
 APP_NAME = "EDHUD"
 
-DEFAULT_COLORS: dict[str, str] = {
+# Тёмная палитра оверлея и окна. row/sel — таблица тел, ink/paper — ячейка PML.
+DARK_COLORS: dict[str, str] = {
     "bg": "#05070a",
     "panel": "#0b1018",
     "fg": "#ff7100",
@@ -27,7 +28,39 @@ DEFAULT_COLORS: dict[str, str] = {
     "warn": "#ffd24a",
     "bad": "#ff5f56",
     "shadow": "#000000",
+    "row": "#161616",
+    "sel": "#2a1a0a",
+    "ink": "#000000",
+    "paper": "#f2f2f2",
 }
+
+LIGHT_COLORS: dict[str, str] = {
+    "bg": "#f4f1ea",
+    "panel": "#fffdf8",
+    "fg": "#c2410c",
+    "dim": "#a8a29e",
+    "text": "#1c1917",
+    "muted": "#57534e",
+    "accent": "#0e7490",
+    "ok": "#15803d",
+    "warn": "#a16207",
+    "bad": "#b91c1c",
+    "shadow": "#000000",
+    "row": "#ffffff",
+    "sel": "#ffedd5",
+    "ink": "#000000",
+    "paper": "#e7e5e4",
+}
+
+DEFAULT_COLORS: dict[str, str] = DARK_COLORS
+
+THEMES = {"dark": DARK_COLORS, "light": LIGHT_COLORS}
+
+
+def palette(name: str | None) -> dict[str, str]:
+    """Полная палитра темы. Неизвестное имя — тёмная."""
+    source = THEMES.get(name or "", DARK_COLORS)
+    return dict(source)
 
 
 def app_dir() -> Path:
@@ -100,12 +133,17 @@ class Config:
     top_offset: int = 6
     font_family: str = "Consolas"
     font_size: int = 11
+    ui_font_family: str = "Segoe UI"
+    ui_font_size: int = 9
+    theme: str = "dark"
     expanded: bool = False
     show_predictions: bool = True
     max_predictions: int = 6
     hide_delay_sec: float = 0.0
     overlay_x: int | None = None
     overlay_y: int | None = None
+    bio_x: int | None = None
+    bio_y: int | None = None
     copy_next_system: bool = False
     # поведение
     journal_poll_sec: float = 0.25

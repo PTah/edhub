@@ -407,6 +407,34 @@ def build_props(body, system, nebulae: float | None = None, guardian: bool = Fal
     }
 
 
+def forecast_names(body, system, limit: int = 4) -> list[str]:
+    """Короткий список того, что может расти на теле, ещё до DSS.
+
+    Если у рода в прогнозе один вид — пишем «род вид», иначе только род.
+    После DSS список заменяется уже найденными родами.
+    """
+    if body is None:
+        return []
+    if body.genuses:
+        names = [codex.display_name(key) for key in body.genuses]
+        return names[:limit]
+    predictions = predict_for_body(body, system, limit=24)
+    by_genus: dict[str, set[str]] = {}
+    order: list[str] = []
+    for prediction in predictions:
+        if prediction.genus not in by_genus:
+            by_genus[prediction.genus] = set()
+            order.append(prediction.genus)
+        by_genus[prediction.genus].add(prediction.species)
+    names: list[str] = []
+    for genus in order:
+        species = by_genus[genus]
+        names.append(f"{genus} {next(iter(species))}" if len(species) == 1 else genus)
+        if len(names) >= limit:
+            break
+    return names
+
+
 def predict_for_body(body, system, limit: int = 24) -> list[Prediction]:
     """Предсказания для тела с учётом уже известных (DSS) родов."""
     props = build_props(

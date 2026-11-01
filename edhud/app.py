@@ -185,6 +185,7 @@ class App:
                 view.alert = self._voice_alert
                 self._voice_alert = None
             self.overlay.set_view(view)
+            self.overlay.set_bio(hudmodel.build_bio_board(self.state))
         if self.mainwindow is not None:
             self.mainwindow.update_state(self.state)
 
@@ -309,6 +310,7 @@ class App:
         from .mainwindow import MainWindow
 
         self.mainwindow = MainWindow(self.overlay.root)
+        self.mainwindow.apply_look(self.cfg)
         self.mainwindow.show()
         self._start_tray()
 
@@ -444,15 +446,16 @@ class App:
         if self.overlay is not None:
             self.overlay.cfg = self.cfg
             try:
-                self.overlay.root.attributes(
-                    "-alpha", max(0.25, min(1.0, float(self.cfg.opacity)))
-                )
+                alpha = max(0.25, min(1.0, float(self.cfg.opacity)))
+                self.overlay.root.attributes("-alpha", alpha)
+                self.overlay.bio.set_alpha(alpha)
             except Exception:
                 pass
             self.overlay._apply_click_through()
             self.overlay._place_window()
-            if self.overlay._view is not None:
-                self.overlay._draw(self.overlay._view)
+            self.overlay.refresh_look()
+        if self.mainwindow is not None:
+            self.mainwindow.apply_look(self.cfg)
         # EDDN: перезапуск при смене флага
         want_eddn = bool(self.cfg.eddn_enabled and self.cfg.allow_network)
         if want_eddn and self.eddn is None:

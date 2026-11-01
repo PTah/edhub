@@ -480,11 +480,33 @@ class CarrierDistanceTests(unittest.TestCase):
                 "WasDiscovered": True,
             }
         )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Ringed 2",
+                "BodyID": 2,
+                "PlanetClass": "High metal content body",
+                "Rings": [{"Name": "Ringed 2 A Ring", "RingClass": "eRingClass_Icy"}],
+                "WasDiscovered": True,
+            }
+        )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Ringed B A Belt Cluster 1",
+                "BodyID": 3,
+                "WasDiscovered": False,
+            }
+        )
         star = state.system.body(0)
         planet = state.system.body(1)
-        assert star is not None and planet is not None
-        self.assertTrue(star.has_rings)
+        ringed = state.system.body(2)
+        cluster = state.system.body(3)
+        assert star is not None and planet is not None and ringed is not None and cluster is not None
+        self.assertFalse(star.has_rings)
         self.assertFalse(planet.has_rings)
+        self.assertTrue(ringed.has_rings)
+        self.assertTrue(cluster.has_rings)
 
     def test_planetary_mining_locations(self):
         state = GameState()
@@ -526,6 +548,51 @@ class CarrierDistanceTests(unittest.TestCase):
         )
         self.assertEqual(state.system.body(1).mining_locations, 15)
         self.assertTrue(state.system.body(1).dss_scanned)
+
+
+class RouteMarkTests(unittest.TestCase):
+    def test_passed_are_gray_and_current_is_larger(self):
+        from edhud.mainwindow import route_tag
+
+        self.assertEqual(route_tag(0, 2), "done")
+        self.assertEqual(route_tag(1, 2), "done")
+        self.assertEqual(route_tag(2, 2), "here")
+        self.assertEqual(route_tag(3, 2), "")
+        self.assertEqual(route_tag(0, None), "")
+
+    def test_route_tree_tags(self):
+        import tkinter as tk
+        from tkinter import font as tkfont
+
+        from edhud.mainwindow import COLORS, MainWindow
+        from edhud.route import Route, RouteHop
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.system.name = "Beta"
+            state.route = Route(
+                hops=[
+                    RouteHop(system="Alpha", star_class="K"),
+                    RouteHop(system="Beta", star_class="G"),
+                    RouteHop(system="Gamma", star_class="M"),
+                ]
+            )
+            window.update_state(state)
+            window.win.update_idletasks()
+            items = window.route_tree.get_children()
+            self.assertEqual(window.route_tree.item(items[0], "tags"), ("done",))
+            self.assertEqual(window.route_tree.item(items[1], "tags"), ("here",))
+            self.assertEqual(window.route_tree.item(items[2], "tags"), "")
+            self.assertTrue(str(window.route_tree.item(items[1], "values")[1]).startswith("▶ "))
+            self.assertEqual(str(window.route_tree.tag_configure("done", "foreground")), COLORS["muted"])
+            here_font = tkfont.Font(root=root, font=window.route_tree.tag_configure("here", "font"))
+            self.assertEqual(int(here_font.cget("size")), window._ui_size + 1)
+            window.destroy()
+        finally:
+            root.destroy()
 
 
 class BodyColorTests(unittest.TestCase):
@@ -586,6 +653,213 @@ class BodyColorTests(unittest.TestCase):
             self.assertEqual(zeros[columns["geo"]], "#e8e8e8")
             self.assertEqual(zeros[columns["pml"]], "#e8e8e8")
             window.destroy()
+        finally:
+            root.destroy()
+
+    def test_bodies_table_shows_bio_forecast(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import BODY_COLUMNS, COLORS, MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.system.star_pos = (0.0, 0.0, 0.0)
+            state.system.bodies[0] = Body(
+                body_id=0, name="Test A", star_type="K", is_star=True, radius=5e8, surface_temp=4500.0
+            )
+            state.system.bodies[1] = Body(
+                body_id=1,
+                name="Test 1",
+                planet_class="Icy body",
+                radius=6e6,
+                surface_gravity=5.6,
+                surface_temp=118.0,
+                surface_pressure=540.0,
+                atmosphere="thin neon atmosphere",
+                atmosphere_composition={"Neon": 100.0},
+                volcanism="None",
+                materials={"Iron": 19.1, "Sulphur": 15.6, "Carbon": 21.2, "Technetium": 0.71},
+                landable=True,
+                distance_ls=1180.0,
+                parent_ids=[0],
+                bio_signals=2,
+                signals_known=True,
+            )
+            window.update_state(state)
+            window.win.update_idletasks()
+            columns = {key: index for index, (key, *_rest) in enumerate(BODY_COLUMNS)}
+            painted = {}
+            for cell in window._bodies_inner.grid_slaves(row=1):
+                info = cell.grid_info()
+                painted[int(info["column"])] = (cell.cget("text"), cell.cget("fg"))
+            text, fg = painted[columns["guess"]]
+            self.assertTrue(text.startswith("≈ "))
+            self.assertIn("Bacterium", text)
+            self.assertEqual(fg, COLORS["accent"])
+            window.destroy()
+        finally:
+            root.destroy()
+
+
+class BioBoardTests(unittest.TestCase):
+    def _icy(self, state: GameState, body_id: int = 1, signals: int = 2) -> Body:
+        state.system.address = 1
+        state.system.name = "Test"
+        state.system.star_pos = (0.0, 0.0, 0.0)
+        state.system.bodies[0] = Body(
+            body_id=0, name="Test A", star_type="K", is_star=True, radius=5e8, surface_temp=4500.0
+        )
+        body = Body(
+            body_id=body_id,
+            name=f"Test {body_id}",
+            planet_class="Icy body",
+            radius=6e6,
+            surface_gravity=5.6,
+            surface_temp=118.0,
+            surface_pressure=540.0,
+            atmosphere="thin neon atmosphere",
+            atmosphere_composition={"Neon": 100.0},
+            volcanism="None",
+            materials={"Iron": 19.1, "Sulphur": 15.6, "Carbon": 21.2, "Technetium": 0.71},
+            landable=True,
+            distance_ls=1180.0,
+            parent_ids=[0],
+            bio_signals=signals,
+            signals_known=True,
+            signals_local=True,
+        )
+        state.system.bodies[body_id] = body
+        return body
+
+    def test_remote_bio_does_not_open_the_board(self):
+        state = GameState()
+        state.system.bodies[1] = Body(
+            body_id=1, name="Far 1", bio_signals=3, signals_known=True, remote=True, source="edsm"
+        )
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+    def test_fss_marks_local_and_lists_the_body(self):
+        state = GameState()
+        state.system.name = "Test"
+        state.apply(
+            {
+                "event": "FSSBodySignals",
+                "BodyID": 3,
+                "BodyName": "Test 3",
+                "Signals": [{"Type": "Biological", "Count": 2}],
+            }
+        )
+        body = state.system.bodies[3]
+        self.assertTrue(body.signals_local)
+        self.assertEqual(state.last_fss_body_id, 3)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×2")
+        self.assertIn("3", board.lines[0].text)
+        self.assertIn("×2", board.lines[0].text)
+
+    def test_fss_body_card_names_possible_organisms(self):
+        state = GameState()
+        body = self._icy(state)
+        state.last_fss_body_id = body.body_id
+        state.status.gui_focus = 9  # FSS
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "1 · био ×2")
+        text = "\n".join(board.plain())
+        self.assertIn("Bacterium", text)
+        self.assertIn("итого", text)
+        self.assertIn("футфол", text)
+
+    def test_outside_fss_the_board_lists_every_scanned_body(self):
+        state = GameState()
+        self._icy(state, 1, 2)
+        second = self._icy(state, 2, 1)
+        second.distance_ls = 400.0
+        second.name = "Test 2"
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×3")
+        self.assertEqual(len(board.lines), 2)
+        self.assertTrue(any("Bacterium" in line.text for line in board.lines))
+
+    def test_jump_hides_the_board(self):
+        state = GameState()
+        self._icy(state)
+        state.apply({"event": "FSDJump", "StarSystem": "Next", "SystemAddress": 99})
+        self.assertIsNone(state.last_fss_body_id)
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+    def test_panel_draws_the_title(self):
+        import tkinter as tk
+
+        from edhud.biooverlay import BioPanel
+        from edhud.config import Config
+
+        state = GameState()
+        body = self._icy(state)
+        state.last_fss_body_id = body.body_id
+        state.status.gui_focus = 9
+        board = hudmodel.build_bio_board(state)
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            panel = BioPanel(root, Config())
+            assert board is not None
+            panel._draw(board)
+            panel.win.update_idletasks()
+            texts = [
+                panel.canvas.itemcget(item, "text")
+                for item in panel.canvas.find_withtag("all")
+                if panel.canvas.type(item) == "text"
+            ]
+            self.assertIn(board.title, texts)
+            self.assertTrue(any("Bacterium" in text for text in texts))
+            self.assertLess(panel._x, 80)
+            panel.destroy()
+        finally:
+            root.destroy()
+
+
+class AppearanceTests(unittest.TestCase):
+    def test_light_palette_and_settings_tab(self):
+        import tkinter as tk
+        from tkinter import ttk
+
+        from edhud.config import Config, palette
+        from edhud.settings import SettingsDialog, _parse_color
+
+        self.assertEqual(_parse_color("#ABC"), "#aabbcc")
+        self.assertIsNone(_parse_color("нет"))
+        light = palette("light")
+        self.assertNotEqual(light["bg"], palette("dark")["bg"])
+        self.assertNotEqual(light["text"], palette("dark")["text"])
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dialog = SettingsDialog(root, Config())
+            titles: list[str] = []
+
+            def walk(widget) -> None:
+                if isinstance(widget, ttk.Notebook):
+                    titles.extend(widget.tab(tab, "text") for tab in widget.tabs())
+                for child in widget.winfo_children():
+                    walk(child)
+
+            walk(dialog.win)
+            self.assertIn("Оформление", titles)
+            dialog.theme.set("light")
+            dialog._apply_theme_to_fields()
+            self.assertEqual(dialog.color_vars["bg"].get(), light["bg"])
+            self.assertEqual(dialog.color_vars["text"].get(), light["text"])
+            dialog.win.destroy()
         finally:
             root.destroy()
 

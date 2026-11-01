@@ -118,6 +118,7 @@ class PredictionTests(unittest.TestCase):
         predictions = bio.predict_for_body(body, system)
         labels = [p.label for p in predictions]
         self.assertIn("Bacterium Acies - Lime", labels)
+        self.assertTrue(any("Bacterium" in name for name in bio.forecast_names(body, system)))
 
     def test_dss_genuses_filter(self):
         system = self._system()

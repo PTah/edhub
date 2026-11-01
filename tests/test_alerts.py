@@ -47,6 +47,39 @@ class AlertEngineTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "bio")
         self.assertIn("Биологический", alerts[0].text)
+
+    def test_bio_voice_names_possible_organisms(self) -> None:
+        from edhud.model import Body
+
+        self.engine.arm()
+        self.state.system.star_pos = (0.0, 0.0, 0.0)
+        self.state.system.bodies[0] = Body(body_id=0, name="Test System", star_type="K", is_star=True)
+        self.state.system.bodies[3] = Body(
+            body_id=3,
+            name="Test System 3",
+            planet_class="Icy body",
+            landable=True,
+            surface_temp=118.0,
+            surface_gravity=5.6,
+            surface_pressure=540.0,
+            atmosphere="thin neon atmosphere",
+            atmosphere_composition={"Neon": 100.0},
+            volcanism="None",
+            materials={"Iron": 19.1, "Sulphur": 15.6, "Carbon": 21.2, "Technetium": 0.71},
+            parent_ids=[0],
+            bio_signals=2,
+            signals_known=True,
+        )
+        event = {
+            "event": "FSSBodySignals",
+            "BodyID": 3,
+            "BodyName": "Test System 3",
+            "Signals": [{"Type": "Biological", "Count": 2}],
+        }
+        alerts = self.engine.handle(event, self.state)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("Возможно:", alerts[0].text)
+        self.assertIn("Bacterium", alerts[0].text)
         # дубль
         self.assertEqual(self.engine.handle(event, self.state), [])
 

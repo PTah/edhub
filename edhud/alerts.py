@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import bio
 from .model import GameState
 
 
@@ -84,8 +85,13 @@ class AlertEngine:
         body = state.system.bodies.get(body_id)
         body_name = (body.name if body else None) or event.get("BodyName") or "тело"
         short = body_name.split()[-1] if body_name else "тело"
-        text = f"Биологический сигнал найден. {short}."
-        return Alert(kind="bio", text=text, overlay=f"био ×{count}: {body_name}")
+        forecast = bio.forecast_names(body, state.system, limit=3) if body is not None else []
+        possible = f" Возможно: {', '.join(forecast)}." if forecast else ""
+        text = f"Биологический сигнал найден. {short}.{possible}"
+        overlay = f"био ×{count}: {body_name}"
+        if forecast:
+            overlay += " · " + ", ".join(forecast)
+        return Alert(kind="bio", text=text, overlay=overlay)
 
     def _check_discovery(self, event: dict, state: GameState) -> Alert | None:
         # Фраза про систему — только если не открыта сама звезда.

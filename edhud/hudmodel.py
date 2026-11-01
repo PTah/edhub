@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import bio, codex, values
-from .model import Body, GameState
+from .model import FIRST_LOGGED_MULTIPLIER, Body, GameState
 
 
 @dataclass
@@ -309,6 +309,10 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
             genuses = _genuses(candidate, limit=3)
             if genuses:
                 row.segments.append(Segment(f" ({genuses})", "muted"))
+            elif (candidate.bio_signals or 0) > 0 and candidate.landable:
+                forecast = bio.forecast_names(candidate, state.system, limit=3)
+                if forecast:
+                    row.segments.append(Segment(f"  ≈ {', '.join(forecast)}", "accent"))
             if candidate.dss_scanned or candidate.genuses:
                 row.segments.append(Segment("  DSS ✔", "accent"))
             if candidate.remote:
@@ -415,4 +419,299 @@ def build_view(
         alert=alert,
         accent=accent,
         hint=hint,
+    )
+
+
+# ------------------------------------------------------- левая панель биологии
+# Как PlotBioSystem у SrvSurvey: после своего FSS список находок слева.
+# В сканере и у выбранного тела — виды этой планеты, иначе сводка по системе.
+
+_BAR_EDGES = (3_000_000, 7_000_000, 12_000_000)
+
+
+@dataclass
+class BioLine:
+    segments: list[Segment] = field(default_factory=list)
+    tail: list[Segment] = field(default_factory=list)
+    bars: int = 0
+    bars_max: int = 0
+    rule: bool = False
+
+    @property
+    def text(self) -> str:
+        return "".join(segment.text for segment in self.segments + self.tail)
+
+
+@dataclass
+class BioBoard:
+    title: str
+    lines: list[BioLine] = field(default_factory=list)
+    footers: list[tuple[str, str]] = field(default_factory=list)
+
+    def plain(self) -> list[str]:
+        lines = [self.title] + [line.text for line in self.lines]
+        lines.extend(text for text, _style in self.footers)
+        return lines
+
+
+def _short_body(body: Body, system) -> str:
+    name = (body.name or "").strip()
+    system_name = (system.name or "").strip()
+    if system_name and name.lower().startswith(system_name.lower()):
+        rest = name[len(system_name):].strip(" -")
+        if rest:
+            return rest
+    return name or "?"
+
+
+def _reward_bars(value: int) -> int:
+    if value <= 0:
+        return 0
+    bars = 1
+    for edge in _BAR_EDGES:
+        if value > edge:
+            bars += 1
+    return bars
+
+
+def _credit_span(low: int, high: int) -> str:
+    if not low and not high:
+        return "—"
+    if not high or low == high:
+        return values.credits(low or high)
+    return f"{values.credits(low)}–{values.credits(high)}"
+
+
+def _own_bio_bodies(state: GameState) -> list[Body]:
+    bodies = [
+        body
+        for body in state.system.bodies.values()
+        if (body.bio_signals or 0) > 0 and body.signals_local
+    ]
+    return sorted(bodies, key=lambda body: body.body_id)
+
+
+def _focus_bio_body(state: GameState) -> Body | None:
+    """Планета, чьи виды показывать вместо сводки системы."""
+    own = {body.body_id: body for body in _own_bio_bodies(state)}
+    if not own:
+        return None
+    # FSS: карточка последнего тела, и только если на нём есть биология.
+    if state.status.gui_focus == 9:
+        last = own.get(state.last_fss_body_id or -1)
+        return last
+    status = state.status
+    near = status.lat is not None or status.landed or status.altitude is not None
+    if near and status.body_id in own:
+        return own[status.body_id]
+    if status.destination_body in own:
+        return own[status.destination_body]
+    dest = (status.destination_name or "").strip().lower()
+    if dest:
+        for body in own.values():
+            short = _short_body(body, state.system).lower()
+            full = (body.name or "").lower()
+            if dest == short or dest == full:
+                return body
+    if state.status.gui_focus == 10 and state.last_fss_body_id in own:
+        return own[state.last_fss_body_id]
+    return None
+
+
+def _prediction_groups(body: Body, state: GameState) -> list[tuple[str, list[tuple[str, list[str], int]]]]:
+    predictions = bio.predict_for_body(body, state.system, limit=64)
+    grouped: dict[str, dict[str, dict]] = {}
+    order: list[str] = []
+    for prediction in predictions:
+        if prediction.genus not in grouped:
+            grouped[prediction.genus] = {}
+            order.append(prediction.genus)
+        species = grouped[prediction.genus].setdefault(
+            prediction.species, {"variants": [], "reward": prediction.reward}
+        )
+        if prediction.variant and prediction.variant not in species["variants"]:
+            species["variants"].append(prediction.variant)
+        if prediction.reward and not species["reward"]:
+            species["reward"] = prediction.reward
+    result: list[tuple[str, list[tuple[str, list[str], int]]]] = []
+    for genus in order:
+        species_rows = [
+            (species, info["variants"], int(info["reward"] or 0))
+            for species, info in grouped[genus].items()
+        ]
+        result.append((genus, species_rows))
+    return result
+
+
+def _genus_span(species_rows: list[tuple[str, list[str], int]]) -> tuple[int, int]:
+    rewards = [reward for _species, _variants, reward in species_rows if reward]
+    if not rewards:
+        return 0, 0
+    return min(rewards), max(rewards)
+
+
+def _body_reward_span(body: Body, state: GameState) -> tuple[int, int]:
+    groups = _prediction_groups(body, state)
+    if groups:
+        lows, highs = [], []
+        for _genus, species_rows in groups:
+            low, high = _genus_span(species_rows)
+            if low or high:
+                lows.append(low)
+                highs.append(high)
+        if lows:
+            return sum(lows), sum(highs)
+    if body.organisms:
+        payouts = [organic.payout for organic in body.organisms.values() if organic.payout]
+        if payouts:
+            total = sum(payouts)
+            return total, total
+    return 0, 0
+
+
+def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int, int]]:
+    lines: list[BioLine] = []
+    sampled = {(organic.genus_en or "").lower() for organic in body.organisms.values()}
+    for organic in sorted(body.organisms.values(), key=lambda item: item.label):
+        style = "ok" if organic.analysed else "warn"
+        reward = organic.payout
+        lines.append(
+            BioLine(
+                segments=[
+                    Segment(organic.label, style),
+                    Segment(f"  {organic.scans_text}", style),
+                ],
+                tail=[Segment(values.credits(reward) if reward else "—", "muted")],
+                bars=_reward_bars(reward),
+            )
+        )
+    groups = _prediction_groups(body, state)
+    block = 0
+    for genus, species_rows in groups:
+        if genus.lower() in sampled:
+            continue
+        low, high = _genus_span(species_rows)
+        for index, (species, variants, _reward) in enumerate(species_rows):
+            colors = ", ".join(variants)
+            text = f"{species}: {colors}" if colors else species
+            lines.append(
+                BioLine(
+                    segments=[
+                        Segment("? ", "accent"),
+                        Segment(text, "accent"),
+                        Segment(" ?", "accent"),
+                    ],
+                    rule=block > 0 and index == 0,
+                )
+            )
+        lines.append(
+            BioLine(
+                segments=[Segment(genus, "fg")],
+                tail=[Segment(_credit_span(low, high), "muted")],
+                bars=_reward_bars(low),
+                bars_max=_reward_bars(high),
+            )
+        )
+        block += 1
+    if not lines and body.genuses:
+        for key in body.genuses:
+            lines.append(BioLine(segments=[Segment(codex.display_name(key), "ok")]))
+    elif not groups and not body.organisms and not body.genuses:
+        note = "подходящих видов не нашлось" if body.planet_class else "параметров скана ещё нет"
+        lines.append(BioLine(segments=[Segment(note, "dim")]))
+    low, high = _body_reward_span(body, state)
+    return lines, (low, high)
+
+
+def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tuple[int, int]]:
+    lines: list[BioLine] = []
+    total_low = 0
+    total_high = 0
+    ff_low = 0
+    ff_high = 0
+    for body in _own_bio_bodies(state):
+        names = _genuses(body, limit=4)
+        predicted = False
+        if not names and body.landable:
+            forecast = bio.forecast_names(body, state.system, limit=4)
+            if forecast:
+                names = ", ".join(forecast)
+                predicted = True
+        low, high = _body_reward_span(body, state)
+        total_low += low
+        total_high += high
+        bonus = body.landable and not body.was_footfalled
+        if bonus:
+            ff_low += low * FIRST_LOGGED_MULTIPLIER
+            ff_high += high * FIRST_LOGGED_MULTIPLIER
+        else:
+            ff_low += low
+            ff_high += high
+        done = body.bio_signals and body.bio_analysed >= body.bio_signals
+        highlight = _marked(body, state)
+        style = "muted" if done else ("accent" if highlight else "text")
+        genus_style = "muted" if done else ("accent" if predicted else "text")
+        segments = [
+            Segment(_short_body(body, state.system), style),
+            Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
+        ]
+        if names:
+            prefix = "  ≈ " if predicted else "  "
+            segments.append(Segment(f"{prefix}{names}", genus_style))
+        lines.append(
+            BioLine(
+                segments=segments,
+                tail=[
+                    Segment(_credit_span(low, high), "muted"),
+                    Segment(f"   {_ls(body.distance_ls)}", "dim"),
+                ],
+                bars=_reward_bars(low),
+                bars_max=_reward_bars(high),
+            )
+        )
+    return lines, (total_low, total_high), (ff_low, ff_high)
+
+
+def _marked(body: Body, state: GameState) -> bool:
+    status = state.status
+    if status.body_id == body.body_id or status.destination_body == body.body_id:
+        return True
+    dest = (status.destination_name or "").strip().lower()
+    if not dest:
+        return False
+    return dest in {_short_body(body, state.system).lower(), (body.name or "").lower()}
+
+
+def _footers(low: int, high: int, ff_low: int, ff_high: int, with_bonus: bool) -> list[tuple[str, str]]:
+    footers = [(f"итого ≈ {_credit_span(low, high)}", "fg")]
+    if with_bonus and (ff_low or ff_high) and (ff_low != low or ff_high != high):
+        footers.append((f"футфол ×5 ≈ {_credit_span(ff_low, ff_high)}", "accent"))
+    return footers
+
+
+def build_bio_board(state: GameState) -> BioBoard | None:
+    """Левый дашборд биологии. Пусто, пока командир сам не снял биосигналы."""
+    bodies = _own_bio_bodies(state)
+    if not bodies:
+        return None
+    focus = _focus_bio_body(state)
+    if focus is not None:
+        lines, (low, high) = _body_lines(focus, state)
+        bonus = focus.landable and not focus.was_footfalled
+        ff_low = low * FIRST_LOGGED_MULTIPLIER if bonus else low
+        ff_high = high * FIRST_LOGGED_MULTIPLIER if bonus else high
+        count = focus.bio_signals or 0
+        title = f"{_short_body(focus, state.system)} · био ×{count}"
+        return BioBoard(
+            title=title,
+            lines=lines,
+            footers=_footers(low, high, ff_low, ff_high, bonus),
+        )
+    lines, (low, high), (ff_low, ff_high) = _system_lines(state)
+    total = sum(body.bio_signals or 0 for body in bodies)
+    bonus = any(body.landable and not body.was_footfalled for body in bodies)
+    return BioBoard(
+        title=f"биосигналы ×{total}",
+        lines=lines,
+        footers=_footers(low, high, ff_low, ff_high, bonus),
     )
