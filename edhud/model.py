@@ -102,6 +102,44 @@ def surface_distance(lat1: float, lon1: float, lat2: float, lon2: float, radius:
     return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
 
 
+def surface_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Начальный курс от точки 1 к точке 2, градусы 0–360 (0 — север)."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def turn_deg(bearing: float, heading: float | None) -> float | None:
+    """Куда довернуть от текущего курса: вправо положительное, −180…180."""
+    if heading is None:
+        return None
+    return (bearing - float(heading) + 540.0) % 360.0 - 180.0
+
+
+@dataclass(frozen=True)
+class SampleGuide:
+    """Одна стрелка: к пробе, прочь от неё или к уже отмеченному образцу."""
+
+    kind: str  # sample | away | spot
+    title: str
+    distance_m: float
+    need_m: int
+    bearing: float | None
+    turn: float | None
+    ready: bool
+
+
+@dataclass(frozen=True)
+class SamplePlan:
+    name: str
+    scans: str
+    need_m: int
+    ready: bool
+    guides: tuple[SampleGuide, ...]
+
+
 @dataclass
 class Organic:
     key: str
@@ -241,6 +279,8 @@ class Body:
     signals_known: bool = False
     signals_local: bool = False  # сигналы пришли из нашего журнала, не из EDSM/Spansh
     organisms: dict[str, Organic] = field(default_factory=dict)
+    # точки биологии с координатами: кодекс и композиционный сканер (CodexEntry)
+    bio_spots: list[dict] = field(default_factory=list)
     # данные от других командиров (EDSM/Spansh, т.е. EDDN)
     remote: bool = False
     source: str | None = None
@@ -951,6 +991,43 @@ class GameState:
             organic.sample_pos.append((float(lat), float(lon)))
         organic.last_ts = time.time()
 
+    def _on_codexentry(self, e: dict) -> None:
+        """Координата организма: кодекс пишет её при скане на теле."""
+        lat, lon = _f(e.get("Latitude")), _f(e.get("Longitude"))
+        if lat is None or lon is None:
+            return
+        name = e.get("Name") or ""
+        category = e.get("Category") or ""
+        sub = e.get("SubCategory") or ""
+        if "Codex_Ent_" not in name and "Biology" not in category and "Organic" not in sub:
+            return
+        address = e.get("SystemAddress")
+        if address is not None and self.system.address is not None and int(address) != int(self.system.address):
+            return
+        body = self._ensure_body(
+            {
+                "BodyID": e.get("BodyID"),
+                "BodyName": e.get("BodyName") or "",
+                "SystemAddress": address,
+            }
+        )
+        if body is None:
+            return
+        genus = codex.genus_key_from_name(name)
+        if not genus:
+            return
+        label = e.get("Name_Localised") or codex.display_name(name)
+        self._add_bio_spot(body, lat, lon, genus, label)
+
+    def _add_bio_spot(self, body: Body, lat: float, lon: float, genus: str | None, label: str) -> None:
+        radius = body.radius or self.status.planet_radius or 0.0
+        for spot in body.bio_spots:
+            if surface_distance(lat, lon, float(spot["lat"]), float(spot["lon"]), radius) < 30:
+                return
+        body.bio_spots.append(
+            {"lat": float(lat), "lon": float(lon), "genus": genus, "name": label}
+        )
+
     def _on_died(self, _e: dict) -> None:
         # при смерти прогресс проб сбрасывается
         for organic in self._current_body_organisms():
@@ -1065,6 +1142,102 @@ class GameState:
         if not active:
             return None
         return max(active, key=lambda o: o.last_ts)
+
+    def sample_plan(self) -> SamplePlan | None:
+        """Курсы для второй и третьей пробы. Широта есть и пешком, и в SRV, и над планетой."""
+        organic = self.active_organic()
+        lat, lon = self.status.lat, self.status.lon
+        if organic is None or lat is None or lon is None or not organic.sample_pos:
+            return None
+        body = self.body_for_status()
+        radius = self.status.planet_radius or (body.radius if body else 0.0) or 0.0
+        need = codex.sample_range(organic.genus)
+        heading = self.status.heading
+        guides: list[SampleGuide] = []
+        closest_gap: tuple[float, float] | None = None  # (distance, bearing to sample)
+        for index, (slat, slon) in enumerate(organic.sample_pos, start=1):
+            dist = surface_distance(float(lat), float(lon), slat, slon, radius)
+            bearing = surface_bearing(float(lat), float(lon), slat, slon) if dist >= 20 else None
+            guides.append(
+                SampleGuide(
+                    kind="sample",
+                    title=f"проба {index}",
+                    distance_m=dist,
+                    need_m=need,
+                    bearing=bearing,
+                    turn=turn_deg(bearing, heading) if bearing is not None else None,
+                    ready=dist >= need,
+                )
+            )
+            if dist < need and (closest_gap is None or dist < closest_gap[0]):
+                closest_gap = (dist, bearing if bearing is not None else -1.0)
+        ready = all(guide.ready for guide in guides)
+        if closest_gap is not None and closest_gap[1] >= 0:
+            away = (closest_gap[1] + 180.0) % 360.0
+            guides.append(
+                SampleGuide(
+                    kind="away",
+                    title="дальше",
+                    distance_m=max(0.0, need - closest_gap[0]),
+                    need_m=need,
+                    bearing=away,
+                    turn=turn_deg(away, heading),
+                    ready=False,
+                )
+            )
+        if body is not None:
+            spots = self._valid_spots(body, organic, radius, need, float(lat), float(lon))
+            for spot, dist, bearing in spots[:3]:
+                guides.append(
+                    SampleGuide(
+                        kind="spot",
+                        title=str(spot.get("name") or "образец"),
+                        distance_m=dist,
+                        need_m=need,
+                        bearing=bearing,
+                        turn=turn_deg(bearing, heading),
+                        ready=True,
+                    )
+                )
+        return SamplePlan(
+            name=organic.genus_en or "био",
+            scans=organic.scans_text,
+            need_m=need,
+            ready=ready,
+            guides=tuple(guides),
+        )
+
+    def _valid_spots(
+        self,
+        body: Body,
+        organic: Organic,
+        radius: float,
+        need: int,
+        lat: float,
+        lon: float,
+    ) -> list[tuple[dict, float, float]]:
+        """Отмеченные образцы того же рода, уже дальше колонии от всех проб."""
+        genus = organic.genus
+        found: list[tuple[dict, float, float]] = []
+        for spot in body.bio_spots:
+            spot_genus = spot.get("genus")
+            if genus and spot_genus and spot_genus != genus:
+                continue
+            slat, slon = float(spot["lat"]), float(spot["lon"])
+            if any(
+                surface_distance(slat, slon, plat, plon, radius) < 30
+                for plat, plon in organic.sample_pos
+            ):
+                continue
+            if any(
+                surface_distance(slat, slon, plat, plon, radius) < need
+                for plat, plon in organic.sample_pos
+            ):
+                continue
+            dist = surface_distance(lat, lon, slat, slon, radius)
+            found.append((spot, dist, surface_bearing(lat, lon, slat, slon)))
+        found.sort(key=lambda item: item[1])
+        return found
 
     def colony_distance(self) -> tuple[float, int] | None:
         """(расстояние от последней пробы, требуемый интервал) в метрах."""

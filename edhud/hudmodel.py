@@ -228,6 +228,57 @@ def _body_row(state: GameState, cfg) -> Row:
     return row
 
 
+def _guide_turn(turn: float | None) -> str:
+    if turn is None:
+        return ""
+    if abs(turn) <= 12:
+        return "  ▲"
+    arrow = "▶" if turn > 0 else "◀"
+    return f"  {arrow} {abs(turn):.0f}°"
+
+
+def _guide_dist(meters: float) -> str:
+    if meters >= 10_000:
+        return f"{meters / 1000:.1f} км"
+    return f"{meters:,.0f} м".replace(",", " ")
+
+
+def _sample_rows(state: GameState) -> list[Row]:
+    """Направления проб: видны и без F8, с корабля над планетой тоже."""
+    plan = state.sample_plan()
+    if plan is None:
+        return []
+    head = Row(
+        [
+            Segment(f"{plan.name} {plan.scans}", "warn"),
+            Segment(f"  · интервал {plan.need_m} м", "dim"),
+        ]
+    )
+    if plan.ready:
+        head.segments.append(Segment("  · можно брать", "ok"))
+    rows = [head]
+    for guide in plan.guides:
+        if guide.kind == "away":
+            course = f"{guide.bearing:.0f}°" if guide.bearing is not None else "—"
+            text = f"дальше  {_guide_dist(guide.distance_m)}  курс {course}{_guide_turn(guide.turn)}"
+            rows.append(Row([Segment("  ", "dim"), Segment(text, "warn")]))
+            continue
+        style = "ok" if guide.ready else "bad"
+        mark = "можно" if guide.ready else "мало"
+        course = f"  на {guide.bearing:.0f}°" if guide.bearing is not None else ""
+        title = guide.title if guide.kind == "spot" else guide.title
+        rows.append(
+            Row(
+                [
+                    Segment(f"  {title}  ", "text"),
+                    Segment(f"{_guide_dist(guide.distance_m)}/{guide.need_m} м", style),
+                    Segment(f"{course}{_guide_turn(guide.turn)}  {mark}", style),
+                ]
+            )
+        )
+    return rows
+
+
 def _organism_rows(state: GameState, body: Body) -> list[Row]:
     rows: list[Row] = []
     for organic in sorted(body.organisms.values(), key=lambda o: (o.analysed, o.last_ts), reverse=True):
@@ -406,7 +457,9 @@ def build_view(
     route_row, progress, dots, accent = _route_row(state, cfg)
     body_row = _body_row(state, cfg)
     expanded = cfg.expanded if expanded is None else expanded
-    detail = _detail_rows(state, cfg, now) if expanded else []
+    detail = _sample_rows(state)
+    if expanded:
+        detail.extend(_detail_rows(state, cfg, now))
     alert = None
     if state.organic_alert and now - state.organic_alert_ts < 6:
         alert = state.organic_alert
@@ -697,6 +750,12 @@ def build_bio_board(state: GameState) -> BioBoard | None:
     focus = _focus_bio_body(state)
     if focus is not None:
         lines, (low, high) = _body_lines(focus, state)
+        if state.status.body_id == focus.body_id:
+            extra = [
+                BioLine(segments=list(row.segments), tail=list(row.tail))
+                for row in _sample_rows(state)
+            ]
+            lines = extra + lines
         bonus = focus.landable and not focus.was_footfalled
         ff_low = low * FIRST_LOGGED_MULTIPLIER if bonus else low
         ff_high = high * FIRST_LOGGED_MULTIPLIER if bonus else high

@@ -827,6 +827,101 @@ class BioBoardTests(unittest.TestCase):
             root.destroy()
 
 
+class SampleGuideTests(unittest.TestCase):
+    def _state(self) -> GameState:
+        state = GameState()
+        state.system.address = 1
+        state.system.name = "Test"
+        state.system.bodies[4] = Body(body_id=4, name="Test 1 a", radius=6_000_000.0, landable=True)
+        state.apply(
+            {
+                "event": "ScanOrganic",
+                "ScanType": "Log",
+                "Genus": "$Codex_Ent_Fonticulus_Genus_Name;",
+                "Genus_Localised": "Fonticulua",
+                "Species": "$Codex_Ent_Fonticulus_01_Name;",
+                "Species_Localised": "Fonticulua Segmentatus",
+                "BodyID": 4,
+                "BodyName": "Test 1 a",
+                "SystemAddress": 1,
+            }
+        )
+        state.system.bodies[4].organisms[
+            "$Codex_Ent_Fonticulus_01_Name;"
+        ].sample_pos = [(0.0, 0.0)]
+        return state
+
+    def _status(self, state: GameState, lat: float, lon: float, heading: float = 0.0) -> None:
+        state.apply_status(
+            {
+                "Latitude": lat,
+                "Longitude": lon,
+                "Heading": heading,
+                "PlanetRadius": 6_000_000.0,
+                "BodyID": 4,
+                "Flags": 1 << 19,
+            }
+        )
+
+    def test_close_sample_points_away_even_from_the_ship(self):
+        state = self._state()
+        self._status(state, 0.0, 0.001, heading=0.0)
+        self.assertEqual(state.mode, "Ship")
+        plan = state.sample_plan()
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertEqual(plan.need_m, 500)
+        self.assertFalse(plan.ready)
+        sample = next(guide for guide in plan.guides if guide.kind == "sample")
+        away = next(guide for guide in plan.guides if guide.kind == "away")
+        self.assertAlmostEqual(sample.distance_m, 104.7, delta=2)
+        self.assertFalse(sample.ready)
+        self.assertAlmostEqual(sample.bearing or 0, 270, delta=2)
+        self.assertAlmostEqual(away.bearing or 0, 90, delta=2)
+        self.assertGreater(away.distance_m, 300)
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        text = "\n".join(view.plain())
+        self.assertIn("интервал 500 м", text)
+        self.assertIn("дальше", text)
+        self.assertIn("курс", text)
+
+    def test_far_enough_sample_can_be_taken(self):
+        state = self._state()
+        self._status(state, 0.0, 0.01, heading=90.0)
+        plan = state.sample_plan()
+        assert plan is not None
+        self.assertTrue(plan.ready)
+        self.assertTrue(all(guide.kind != "away" for guide in plan.guides))
+
+    def test_codex_spot_is_a_bearing_when_outside_the_colony(self):
+        state = self._state()
+        state.apply(
+            {
+                "event": "CodexEntry",
+                "Name": "$Codex_Ent_Fonticulus_01_M_Name;",
+                "Name_Localised": "Fonticulua Segmentatus - Amethyst",
+                "Category": "$Codex_Category_Biology;",
+                "SubCategory": "$Codex_SubCategory_Organic_Structures;",
+                "SystemAddress": 1,
+                "BodyID": 4,
+                "Latitude": 0.02,
+                "Longitude": 0.01,
+            }
+        )
+        self._status(state, 0.0, 0.01, heading=0.0)
+        plan = state.sample_plan()
+        assert plan is not None
+        spots = [guide for guide in plan.guides if guide.kind == "spot"]
+        self.assertEqual(len(spots), 1)
+        self.assertIn("Fonticulua", spots[0].title)
+        self.assertAlmostEqual(spots[0].bearing or 0, 0, delta=5)
+        self.assertTrue(spots[0].ready)
+
+    def test_without_coordinates_there_is_no_plan(self):
+        state = self._state()
+        self.assertIsNone(state.sample_plan())
+
+
 class AppearanceTests(unittest.TestCase):
     def test_light_palette_and_settings_tab(self):
         import tkinter as tk

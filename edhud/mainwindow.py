@@ -400,6 +400,13 @@ class MainWindow:
         )
         route = tuple((h.system, h.star_class) for h in state.route.hops)
         dist = state.carrier_distance_ly()
+        here = None
+        if state.active_organic() is not None and state.status.lat is not None:
+            here = (
+                round(state.status.lat, 4),
+                round(state.status.lon or 0, 4),
+                None if state.status.heading is None else round(state.status.heading),
+            )
         return (
             sys.address,
             sys.name,
@@ -411,6 +418,7 @@ class MainWindow:
             state.carrier.callsign,
             state.carrier.system,
             None if dist is None else round(dist, 1),
+            here,
         )
 
     def _apply_tab(self, state: GameState) -> None:

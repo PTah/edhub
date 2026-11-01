@@ -161,6 +161,20 @@ def sample_range(codex_name: str | None) -> int:
     return GENUS_RANGE.get(codex_name, DEFAULT_RANGE)
 
 
+def genus_key_from_name(name: str | None) -> str | None:
+    """Род по строке кодекса: и у «…_Genus_Name», и у вида «Fonticulus_01_M»."""
+    if not name:
+        return None
+    best: str | None = None
+    best_len = 0
+    for key in GENUS_RANGE:
+        stem = key.split("_Ent_")[-1].replace("_Genus_Name;", "").replace("_Name;", "")
+        if stem and stem in name and len(stem) > best_len:
+            best = key
+            best_len = len(stem)
+    return best
+
+
 def reward_for(genus_en: str | None, species_en: str | None, variant_en: str | None) -> int:
     """Базовая награда Vista Genomics за анализ (без множителей)."""
     if not genus_en or not species_en:
