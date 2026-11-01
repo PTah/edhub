@@ -58,6 +58,18 @@ def _ly(value: float) -> str:
     return f"{value:,.1f}".replace(",", " ") if value else "—"
 
 
+def _jumps_word(count: int) -> str:
+    n = abs(int(count)) % 100
+    if 11 <= n <= 14:
+        return "прыжков"
+    last = n % 10
+    if last == 1:
+        return "прыжок"
+    if 2 <= last <= 4:
+        return "прыжка"
+    return "прыжков"
+
+
 def _ls(value: float) -> str:
     if not value:
         return "—"
@@ -103,12 +115,12 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
     if not route.hops:
         row.segments.append(Segment("МАРШРУТ ", "dim"))
         if state.fsd_target:
-            row.segments.append(Segment("нет ", "muted"))
             row.segments.append(Segment(state.fsd_target, "accent"))
             if state.jumps_in_route:
                 row.segments.append(Segment(f" · {state.jumps_in_route} прыжк.", "text"))
         else:
             row.segments.append(Segment("не задан — проложите в карте галактики", "muted"))
+        _append_carrier(row, state)
         return row, (0, 0), [], "muted"
 
     done, total = route.progress(system)
@@ -125,7 +137,11 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
         row.segments.append(Segment(f" ({star} · {_ly(next_hop.distance)} ly)", "muted"))
         if remaining:
             row.segments.append(Segment("   осталось ", "dim"))
-            row.segments.append(Segment(f"{remaining} · {_ly(remaining_ly)} ly", "text"))
+            row.segments.append(
+                Segment(f"{remaining} {_jumps_word(remaining)} из {total}", "text")
+            )
+            if remaining_ly:
+                row.segments.append(Segment(f" · {_ly(remaining_ly)} ly", "muted"))
         row.segments.append(Segment("  ", "text"))
         if next_hop.scoopable:
             row.segments.append(Segment("заправка ✔", "ok"))
@@ -136,6 +152,7 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
 
     if route.locked:
         row.segments.append(Segment("  [залочен]", "warn"))
+    _append_carrier(row, state)
 
     dots_total = max(1, total)
     dots = [i < done for i in range(min(dots_total, 40))]
@@ -302,10 +319,39 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     return rows
 
 
+def _carrier_label(state: GameState) -> str | None:
+    carrier = state.carrier
+    if not carrier.known:
+        return None
+    who = carrier.callsign or carrier.name or "карриер"
+    dist = state.carrier_distance_ly()
+    if dist is None:
+        where = carrier.system or "—"
+        return f"{who} · {where}"
+    if dist < 0.05:
+        return f"{who} · здесь"
+    text = f"{dist:,.1f}".replace(",", " ")
+    return f"{who} · {text} ly"
+
+
+def _append_carrier(row: Row, state: GameState) -> None:
+    label = _carrier_label(state)
+    if not label:
+        return
+    row.segments.append(Segment("   карриер ", "dim"))
+    row.segments.append(Segment(label, "accent"))
+
+
 def _system_row(state: GameState) -> Row:
     system = state.system
     scan_sum, mapped_sum = values.system_totals(system, odyssey=state.odyssey)
     row = Row([Segment("система: ", "dim")])
+    if system.name:
+        row.segments.append(Segment(system.name, "fg"))
+        row.segments.append(Segment(" · ", "muted"))
+    if system.discovered_by_me:
+        row.segments.append(Segment("открыта вами", "ok"))
+        row.segments.append(Segment(" · ", "muted"))
     row.segments.append(Segment(f"{len(system.bodies)} тел", "text"))
     if scan_sum:
         row.segments.append(Segment(f" · данных ≈{values.credits(scan_sum)}", "text"))
@@ -325,6 +371,8 @@ def _system_row(state: GameState) -> Row:
 def _session_row(state: GameState) -> Row:
     row = Row([Segment("сессия: ", "dim")])
     row.segments.append(Segment(f"{state.session_jumps} прыжк.", "text"))
+    fresh = "ok" if state.session_new_systems else "text"
+    row.segments.append(Segment(f" · новых систем: {state.session_new_systems}", fresh))
     if state.avg_jump_sec >= 10:
         row.segments.append(Segment(f" · ~{state.avg_jump_sec:.0f} с/прыжок", "muted"))
     if state.session_scan_value:

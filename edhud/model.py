@@ -28,6 +28,50 @@ FLAG_IN_FIGHTER = 1 << 20
 FLAG_IN_SRV = 1 << 21
 FLAG_FSD_JUMP = 1 << 25
 
+# Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
+_MINEABLE_RING = {
+    "eRingClass_Icy",
+    "eRingClass_Rocky",
+    "eRingClass_MetalRich",
+    "eRingClass_Metallic",
+}
+
+
+def _apply_signal_counts(body: Body, signals: list, merge_bio: bool = False) -> None:
+    """Био, гео и Planetary Mining Location из FSSBodySignals / SAASignalsFound."""
+    for sig in signals:
+        if not isinstance(sig, dict):
+            continue
+        kind = (sig.get("Type") or "").lower()
+        local = (sig.get("Type_Localised") or "").lower()
+        count = int(sig.get("Count") or 0)
+        if "biological" in kind:
+            if merge_bio:
+                body.bio_signals = max(body.bio_signals or 0, count)
+            else:
+                body.bio_signals = count
+        elif "geological" in kind:
+            body.geo_signals = count
+        elif "planetarymining" in kind or "mining location" in local:
+            body.mining_locations = count
+
+
+def _is_belt_body(name: str | None) -> bool:
+    return "belt cluster" in (name or "").lower()
+
+
+def _mineable_belt(rings: list, name: str | None = None) -> bool:
+    """Кольцо или пояс астероидов, где есть добыча."""
+    if _is_belt_body(name):
+        return True
+    for ring in rings:
+        if not isinstance(ring, dict):
+            continue
+        kind = str(ring.get("RingClass") or "")
+        if kind in _MINEABLE_RING or "belt" in str(ring.get("Name") or "").lower():
+            return True
+    return False
+
 # Vista Genomics: бонус "First Logged" — пробу ещё никто не сдавал, платят ×5
 FIRST_LOGGED_MULTIPLIER = 5
 
@@ -184,12 +228,13 @@ class Body:
     semi_major_axis: float | None = None
     parent_ids: list[int] = field(default_factory=list)
     terraform_state: str | None = None
-    has_rings: bool = False
+    has_rings: bool = False  # ледяной/каменный/металлический пояс — там можно добывать
     was_discovered: bool = False
     was_mapped: bool = False
     was_footfalled: bool = False
     bio_signals: int | None = None
     geo_signals: int | None = None
+    mining_locations: int | None = None  # Planetary Mining Location, штук на теле
     genuses: dict[str, int] = field(default_factory=dict)
     dss_scanned: bool = False
     dss_remote: bool = False
@@ -252,6 +297,23 @@ class Body:
 
 
 @dataclass
+class Carrier:
+    """Свой флотоносец командира. Чужие носители из FSS сюда не попадают."""
+
+    carrier_id: int | None = None
+    callsign: str | None = None
+    name: str | None = None
+    system: str | None = None
+    address: int | None = None
+    body_id: int | None = None
+    star_pos: tuple[float, float, float] | None = None
+
+    @property
+    def known(self) -> bool:
+        return bool(self.carrier_id or self.callsign or self.system)
+
+
+@dataclass
 class System:
     address: int | None = None
     name: str | None = None
@@ -263,6 +325,8 @@ class System:
     remote_sources: list[str] = field(default_factory=list)
     remote_scan_value: int | None = None
     remote_mapped_value: int | None = None
+    # звезда системы не была открыта до нашего скана
+    discovered_by_me: bool = False
 
     def body(self, body_id: int | None) -> Body | None:
         if body_id is None:
@@ -437,11 +501,17 @@ class GameState:
     current_body_name: str | None = None
     status: Status = field(default_factory=Status)
     route: Route = field(default_factory=Route)
+    carrier: Carrier = field(default_factory=Carrier)
+    # какую вкладку окна показать: route пока идёт гиперпрыжок, bodies в системе
+    view_tab: str = "bodies"
     fsd_target: str | None = None
     fsd_target_class: str | None = None
     jumps_in_route: int | None = None
+    # журнал прислал NavRoute без списка — надо перечитать NavRoute.json
+    navroute_stale: bool = False
     jump_dist: float = 0.0
     session_jumps: int = 0
+    session_new_systems: int = 0
     last_jump_ts: float = 0.0
     avg_jump_sec: float = 0.0
     session_started: float = field(default_factory=time.time)
@@ -462,6 +532,9 @@ class GameState:
     session_organic_sold: int = 0  # реально проданная биология (SellOrganicData)
     _jump_times: list[float] = field(default_factory=list)
     _valued_bodies: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)
+    _new_systems: set[int] = field(default_factory=set)
+    _star_pos: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    _star_names: dict[str, tuple[float, float, float]] = field(default_factory=dict)
 
     # ------------------------------------------------------------- события
     def apply(self, event: dict) -> None:
@@ -524,6 +597,7 @@ class GameState:
         self.system.name = name or self.system.name
         if isinstance(pos, (list, tuple)) and len(pos) == 3:
             self.system.star_pos = (float(pos[0]), float(pos[1]), float(pos[2]))
+            self._remember_star(self.system.address, self.system.name, self.system.star_pos)
         if e.get("Population") is not None:
             self.system.population = e.get("Population")
         if e.get("FuelLevel") is not None:
@@ -536,13 +610,32 @@ class GameState:
 
     def _on_location(self, e: dict) -> None:
         self._set_system(e)
+        self.view_tab = "bodies"
         if e.get("Docked"):
             self.mode = "Ship"
 
-    _on_carrierjump = _on_location
+    def _on_carrierjump(self, e: dict) -> None:
+        """Прыжок носителя, на котором мы сидим: прибытие в систему и новая точка носителя."""
+        self._on_location(e)
+        cid = e.get("MarketID") or e.get("CarrierID")
+        own = self.carrier.carrier_id
+        callsign = (self.carrier.callsign or "").lower()
+        station = (e.get("StationName") or "").lower()
+        if own and cid and int(cid) != int(own) and station != callsign:
+            return
+        if not own and station != callsign and not e.get("CarrierID"):
+            return
+        if e.get("StarSystem"):
+            self.carrier.system = e.get("StarSystem")
+        if e.get("SystemAddress") is not None:
+            self.carrier.address = e.get("SystemAddress")
+        if isinstance(e.get("StarPos"), (list, tuple)) and len(e["StarPos"]) == 3:
+            pos = e["StarPos"]
+            self.carrier.star_pos = (float(pos[0]), float(pos[1]), float(pos[2]))
 
     def _on_fsdjump(self, e: dict) -> None:
         self._set_system(e)
+        self.view_tab = "bodies"
         now = time.time()
         if self.last_jump_ts:
             self._jump_times.append(now - self.last_jump_ts)
@@ -556,9 +649,91 @@ class GameState:
         self.current_body_id = None
         self.current_body_name = None
 
+    def _on_startjump(self, e: dict) -> None:
+        """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
+        if (e.get("JumpType") or "").lower() == "hyperspace":
+            self.view_tab = "route"
+
+    def _on_carrierlocation(self, e: dict) -> None:
+        self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
+        if e.get("StarSystem"):
+            self.carrier.system = e.get("StarSystem")
+        if e.get("SystemAddress") is not None:
+            self.carrier.address = e.get("SystemAddress")
+        if e.get("BodyID") is not None:
+            self.carrier.body_id = e.get("BodyID")
+        self._adopt_carrier_pos()
+
+    def _on_carrierstats(self, e: dict) -> None:
+        self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
+        if e.get("Callsign"):
+            self.carrier.callsign = e.get("Callsign")
+        if e.get("Name"):
+            self.carrier.name = e.get("Name")
+
+    def _remember_star(
+        self,
+        address: int | None,
+        name: str | None,
+        pos: tuple[float, float, float] | None,
+    ) -> None:
+        if not pos:
+            return
+        if address is not None:
+            self._star_pos[int(address)] = pos
+        if name:
+            self._star_names[name.lower()] = pos
+        self._adopt_carrier_pos()
+
+    def _adopt_carrier_pos(self) -> None:
+        if self.carrier.star_pos:
+            return
+        pos = None
+        if self.carrier.address is not None:
+            pos = self._star_pos.get(int(self.carrier.address))
+        if pos is None and self.carrier.system:
+            pos = self._star_names.get(self.carrier.system.lower())
+        if pos is not None:
+            self.carrier.star_pos = pos
+
+    def carrier_star_pos(self) -> tuple[float, float, float] | None:
+        self._adopt_carrier_pos()
+        if self.carrier.star_pos:
+            return self.carrier.star_pos
+        for hop in self.route.hops:
+            same_addr = self.carrier.address is not None and hop.address == self.carrier.address
+            same_name = bool(self.carrier.system) and hop.system.lower() == self.carrier.system.lower()
+            if (same_addr or same_name) and hop.star_pos:
+                self.carrier.star_pos = hop.star_pos
+                return hop.star_pos
+        return None
+
+    def carrier_distance_ly(self) -> float | None:
+        """None — носителя нет или нет координат. 0 — он в текущей системе."""
+        if not self.carrier.known:
+            return None
+        here = self.system.address is not None and self.carrier.address is not None and int(
+            self.system.address
+        ) == int(self.carrier.address)
+        if not here and self.carrier.system and self.system.name:
+            here = self.carrier.system.lower() == self.system.name.lower()
+        if here:
+            return 0.0
+        pos = self.carrier_star_pos()
+        if not pos or not self.system.star_pos:
+            return None
+        return math.dist(pos, self.system.star_pos)
+
     def _on_navroute(self, e: dict) -> None:
-        if not self.route.locked:
+        if self.route.locked:
+            return
+        # Игра часто пишет в журнал только {"event":"NavRoute"} без массива Route.
+        # Полный список систем лежит в NavRoute.json — его перечитает журнал-вотчер.
+        if e.get("Route"):
             self.route = Route.from_navroute(e)
+            self.navroute_stale = False
+        else:
+            self.navroute_stale = True
 
     def _on_navrouteclear(self, _e: dict) -> None:
         if not self.route.locked and self.route.source == "game":
@@ -615,10 +790,14 @@ class GameState:
                             ids.append(value)
             body.parent_ids = ids
         body.terraform_state = e.get("TerraformState") or body.terraform_state
-        if e.get("Rings") is not None:
-            body.has_rings = bool(e.get("Rings"))
+        rings = e.get("Rings")
+        if isinstance(rings, list):
+            body.has_rings = _mineable_belt(rings, body.name)
+        elif _is_belt_body(body.name):
+            body.has_rings = True
         if e.get("WasDiscovered") is not None:
             body.was_discovered = bool(e.get("WasDiscovered"))
+        self._note_first_discovery(e)
         if e.get("WasMapped") is not None:
             body.was_mapped = bool(e.get("WasMapped"))
         if e.get("WasFootfalled") is not None:
@@ -626,6 +805,21 @@ class GameState:
         if e.get("BodyCount") is not None:
             self.system.body_count = e.get("BodyCount")
         self._account_scan(body_id)
+
+    def _note_first_discovery(self, e: dict) -> None:
+        """Звезда с WasDiscovered=false — эту систему открыли мы."""
+        if e.get("WasDiscovered") is not False or not e.get("StarType"):
+            return
+        address = e.get("SystemAddress") or self.system.address
+        if address is None:
+            return
+        address = int(address)
+        if self.system.address is not None and int(self.system.address) != address:
+            return
+        self.system.discovered_by_me = True
+        if address not in self._new_systems:
+            self._new_systems.add(address)
+            self.session_new_systems = len(self._new_systems)
 
     def _account_scan(self, body_id: int | None = None, mapped: bool = False) -> None:
         """Считает стоимость тела: скан сразу, картографию — по факту DSS."""
@@ -651,13 +845,7 @@ class GameState:
         body = self._ensure_body(e)
         if body is None:
             return
-        for sig in e.get("Signals") or []:
-            kind = (sig.get("Type") or "").lower()
-            count = int(sig.get("Count") or 0)
-            if "biological" in kind:
-                body.bio_signals = count
-            elif "geological" in kind:
-                body.geo_signals = count
+        _apply_signal_counts(body, e.get("Signals") or [])
         body.signals_known = True
 
     def _on_saasignalsfound(self, e: dict) -> None:
@@ -666,13 +854,7 @@ class GameState:
             return
         body.signals_known = True
         body.dss_scanned = True
-        for sig in e.get("Signals") or []:
-            kind = (sig.get("Type") or "").lower()
-            count = int(sig.get("Count") or 0)
-            if "biological" in kind:
-                body.bio_signals = max(body.bio_signals or 0, count)
-            elif "geological" in kind:
-                body.geo_signals = count
+        _apply_signal_counts(body, e.get("Signals") or [], merge_bio=True)
         genuses = e.get("Genuses") or []
         if genuses:
             body.genuses = {}

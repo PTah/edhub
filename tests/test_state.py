@@ -93,6 +93,7 @@ class JournalPipelineTests(unittest.TestCase):
         route_row, body_row = view.route_row.text, view.body_row.text
         self.assertIn("МАРШРУТ", route_row)
         self.assertIn("HIP 36601", route_row)
+        self.assertIn("осталось 2 прыжка из ", route_row)
         self.assertIn("ТЕЛО", body_row)
         self.assertIn("БИО", body_row)
         detail = "\n".join(row.text for row in view.detail)
@@ -282,6 +283,249 @@ class StatusTests(unittest.TestCase):
         self.assertAlmostEqual(state.status.fuel_main, 3.2)
         self.assertEqual(state.status.gui_focus, 9)
         self.assertFalse(state.status.docked)
+
+
+class RouteFileTests(unittest.TestCase):
+    def test_journal_navroute_without_list_reloads_file(self):
+        """Игра пишет в журнал {"event":"NavRoute"} без Route, список — в NavRoute.json."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            payload = {
+                "event": "NavRoute",
+                "Route": [
+                    {"StarSystem": "Sol", "SystemAddress": 1, "StarPos": [0, 0, 0], "StarClass": "G"},
+                    {"StarSystem": "Alpha", "SystemAddress": 2, "StarPos": [0, 0, 10], "StarClass": "K"},
+                ],
+            }
+            (folder / "NavRoute.json").write_text(json.dumps(payload), encoding="utf-8")
+            (folder / "Journal.2026-11-01T000000.01.log").write_text("", encoding="utf-8")
+            state = GameState()
+            watcher = journal.JournalWatcher(folder, state, replay=True)
+            watcher.read_navroute()
+            self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+
+            with (folder / "Journal.2026-11-01T000000.01.log").open("a", encoding="utf-8") as handle:
+                handle.write('{"event":"NavRoute"}\n')
+            watcher.read_journal()
+            self.assertTrue(state.navroute_stale)
+            self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+            watcher.read_navroute()
+            self.assertFalse(state.navroute_stale)
+            self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+
+
+class FirstDiscoveryTests(unittest.TestCase):
+    def _jump(self, state: GameState, name: str, address: int) -> None:
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": name,
+                "SystemAddress": address,
+                "StarPos": [0, 0, 0],
+                "JumpDist": 20.0,
+            }
+        )
+
+    def _star(self, state: GameState, name: str, address: int, discovered: bool) -> None:
+        state.apply(
+            {
+                "event": "Scan",
+                "ScanType": "AutoScan",
+                "BodyName": name,
+                "BodyID": 0,
+                "StarSystem": name,
+                "SystemAddress": address,
+                "StarType": "M",
+                "StellarMass": 0.3,
+                "WasDiscovered": discovered,
+                "WasMapped": False,
+            }
+        )
+
+    def test_new_star_marks_system_and_session(self):
+        state = GameState()
+        self._jump(state, "New A", 1)
+        self._star(state, "New A", 1, discovered=False)
+        self.assertTrue(state.system.discovered_by_me)
+        self.assertEqual(state.session_new_systems, 1)
+        # повторный скан той же звезды не увеличивает счётчик
+        self._star(state, "New A", 1, discovered=False)
+        self.assertEqual(state.session_new_systems, 1)
+
+        self._jump(state, "Known", 2)
+        self._star(state, "Known", 2, discovered=True)
+        self.assertFalse(state.system.discovered_by_me)
+        self.assertEqual(state.session_new_systems, 1)
+
+        self._jump(state, "New B", 3)
+        # неоткрытая планета — это не «система открыта вами»
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "New B 1",
+                "BodyID": 1,
+                "SystemAddress": 3,
+                "PlanetClass": "Icy body",
+                "WasDiscovered": False,
+            }
+        )
+        self.assertFalse(state.system.discovered_by_me)
+        self._star(state, "New B", 3, discovered=False)
+        self.assertTrue(state.system.discovered_by_me)
+        self.assertEqual(state.session_new_systems, 2)
+
+        view = hudmodel.build_view(state, Config(), expanded=True)
+        detail = "\n".join(row.text for row in view.detail)
+        self.assertIn("New B", detail)
+        self.assertIn("открыта вами", detail)
+        self.assertIn("новых систем: 2", detail)
+
+
+class JumpTabTests(unittest.TestCase):
+    def test_hyperspace_opens_route_and_arrival_opens_bodies(self):
+        state = GameState()
+        state.apply({"event": "StartJump", "JumpType": "Supercruise"})
+        self.assertEqual(state.view_tab, "bodies")
+        state.apply(
+            {
+                "event": "StartJump",
+                "JumpType": "Hyperspace",
+                "StarSystem": "Alpha",
+                "SystemAddress": 2,
+            }
+        )
+        self.assertEqual(state.view_tab, "route")
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Alpha",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 10],
+                "JumpDist": 10,
+            }
+        )
+        self.assertEqual(state.view_tab, "bodies")
+
+
+class CarrierDistanceTests(unittest.TestCase):
+    def test_distance_from_carrier_system(self):
+        state = GameState()
+        state.apply(
+            {
+                "event": "CarrierLocation",
+                "CarrierID": 7,
+                "StarSystem": "Home",
+                "SystemAddress": 1,
+                "BodyID": 0,
+            }
+        )
+        state.apply({"event": "CarrierStats", "CarrierID": 7, "Callsign": "GHY-7TZ", "Name": "pedrikakis"})
+        state.apply(
+            {
+                "event": "Location",
+                "StarSystem": "Home",
+                "SystemAddress": 1,
+                "StarPos": [0, 0, 0],
+            }
+        )
+        self.assertEqual(state.carrier.callsign, "GHY-7TZ")
+        self.assertEqual(state.carrier_distance_ly(), 0.0)
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Away",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 40],
+                "JumpDist": 40,
+            }
+        )
+        self.assertAlmostEqual(state.carrier_distance_ly(), 40.0, places=3)
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        self.assertIn("GHY-7TZ", view.route_row.text)
+        self.assertIn("40.0 ly", view.route_row.text)
+
+    def test_rings_mark_mineable_belt(self):
+        state = GameState()
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Ringed",
+                "SystemAddress": 3,
+                "StarPos": [1, 2, 3],
+                "JumpDist": 5,
+            }
+        )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Ringed",
+                "BodyID": 0,
+                "StarType": "M",
+                "StellarMass": 0.4,
+                "Rings": [
+                    {"Name": "Ringed A Belt", "RingClass": "eRingClass_Rocky"},
+                    {"Name": "Ringed B Belt", "RingClass": "eRingClass_Icy"},
+                ],
+                "WasDiscovered": True,
+            }
+        )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Ringed 1",
+                "BodyID": 1,
+                "PlanetClass": "Icy body",
+                "WasDiscovered": True,
+            }
+        )
+        star = state.system.body(0)
+        planet = state.system.body(1)
+        assert star is not None and planet is not None
+        self.assertTrue(star.has_rings)
+        self.assertFalse(planet.has_rings)
+
+    def test_planetary_mining_locations(self):
+        state = GameState()
+        state.apply(
+            {
+                "event": "FSSBodySignals",
+                "BodyName": "Ringed 1",
+                "BodyID": 1,
+                "SystemAddress": 3,
+                "Signals": [
+                    {
+                        "Type": "$PlanetaryMiningLocation_Name;",
+                        "Type_Localised": "Planetary Mining Location",
+                        "Count": 15,
+                    },
+                    {"Type": "$SAA_SignalType_Geological;", "Count": 2},
+                ],
+            }
+        )
+        body = state.system.body(1)
+        assert body is not None
+        self.assertEqual(body.mining_locations, 15)
+        self.assertEqual(body.geo_signals, 2)
+        state.apply(
+            {
+                "event": "SAASignalsFound",
+                "BodyName": "Ringed 1",
+                "BodyID": 1,
+                "SystemAddress": 3,
+                "Signals": [
+                    {"Type": "$SAA_SignalType_Geological;", "Count": 2},
+                    {
+                        "Type": "$PlanetaryMiningLocation_Name;",
+                        "Type_Localised": "Planetary Mining Location",
+                        "Count": 15,
+                    },
+                ],
+            }
+        )
+        self.assertEqual(state.system.body(1).mining_locations, 15)
+        self.assertTrue(state.system.body(1).dss_scanned)
 
 
 if __name__ == "__main__":

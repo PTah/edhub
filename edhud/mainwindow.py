@@ -43,6 +43,28 @@ def _type_of(body: Body) -> str:
     return body.planet_class or "—"
 
 
+def _ring_icon(master: tk.Misc) -> tk.PhotoImage:
+    """Маленький Сатурн: так Exploration Buddy помечает тело с добываемым поясом."""
+    w, h = 18, 14
+    img = tk.PhotoImage(master=master, width=w, height=h)
+    cx, cy = (w - 1) / 2, (h - 1) / 2
+    ring = "#e6a23c"
+    planet = "#e8e8e8"
+    for y in range(h):
+        for x in range(w):
+            dx = x - cx
+            dy = y - cy
+            in_planet = dx * dx + dy * dy <= 9.0
+            band = (dx / 8.0) ** 2 + (dy / 2.5) ** 2
+            in_ring = 0.55 <= band <= 1.08
+            # кольцо проходит перед нижней половиной планеты и за верхней
+            if in_planet and not (in_ring and dy >= 0):
+                img.put(planet, (x, y))
+            elif in_ring:
+                img.put(ring, (x, y))
+    return img
+
+
 def _value_of(body: Body, odyssey: bool) -> str:
     breakdown = values.body_values(body, odyssey=odyssey)
     if breakdown is None:
@@ -67,6 +89,8 @@ class MainWindow:
         self.win.configure(bg=COLORS["bg"])
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
         self._visible = True
+        self._shown_tab = "bodies"
+        self._ring_icon: tk.PhotoImage | None = None
         self._style()
         self._build()
         self._last_key: tuple | None = None
@@ -114,6 +138,7 @@ class MainWindow:
 
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.nb = nb
 
         self.tab_route = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
@@ -149,15 +174,19 @@ class MainWindow:
             "temp",
             "bio",
             "geo",
+            "pml",
             "dss",
             "value",
             "first",
             "dist",
             "src",
         )
+        self._ring_icon = _ring_icon(self.win)
         self.bodies_tree = ttk.Treeview(
-            self.tab_bodies, columns=cols, show="headings", style="ED.Treeview"
+            self.tab_bodies, columns=cols, show="tree headings", style="ED.Treeview"
         )
+        self.bodies_tree.column("#0", width=28, minwidth=28, stretch=False, anchor="center")
+        self.bodies_tree.heading("#0", text="")
         headings = {
             "name": ("Имя", 200, "w"),
             "type": ("Тип", 140, "w"),
@@ -165,6 +194,7 @@ class MainWindow:
             "temp": ("T", 70, "e"),
             "bio": ("Био", 50, "center"),
             "geo": ("Гео", 50, "center"),
+            "pml": ("PML", 50, "center"),
             "dss": ("DSS", 50, "center"),
             "value": ("≈ Cr", 100, "e"),
             "first": ("1-е", 50, "center"),
@@ -210,6 +240,7 @@ class MainWindow:
 
     # --------------------------------------------------------------- update
     def update_state(self, state: GameState) -> None:
+        self._apply_tab(state)
         if not self._visible:
             # всё равно обновляем редко — но дешевле пропускать, если скрыто
             key = self._snapshot_key(state)
@@ -230,24 +261,53 @@ class MainWindow:
                 b.body_id,
                 b.bio_signals,
                 b.geo_signals,
+                b.mining_locations,
                 b.dss_scanned,
                 b.was_discovered,
+                b.has_rings,
                 b.source,
                 round(b.distance_ls or 0, 1),
             )
             for b in sorted(sys.bodies.values(), key=lambda x: x.body_id)
         )
         route = tuple((h.system, h.star_class) for h in state.route.hops)
-        return (sys.address, sys.name, sys.body_count, bodies, route, state.route.locked)
+        dist = state.carrier_distance_ly()
+        return (
+            sys.address,
+            sys.name,
+            sys.body_count,
+            sys.discovered_by_me,
+            bodies,
+            route,
+            state.route.locked,
+            state.carrier.callsign,
+            state.carrier.system,
+            None if dist is None else round(dist, 1),
+        )
+
+    def _apply_tab(self, state: GameState) -> None:
+        tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
+        if tab == self._shown_tab:
+            return
+        self._shown_tab = tab
+        self.nb.select(self.tab_route if tab == "route" else self.tab_bodies)
 
     def _update_header(self, state: GameState) -> None:
         name = state.system.name or "—"
         known = len(state.system.bodies)
         total = state.system.body_count or known
         bio = sum(1 for b in state.system.bodies.values() if (b.bio_signals or 0) > 0)
-        self.lbl_system.configure(text=f"Система: {name}")
+        opened = " — открыта вами" if state.system.discovered_by_me else ""
+        self.lbl_system.configure(text=f"Система: {name}{opened}")
+        carrier = ""
+        dist = state.carrier_distance_ly()
+        if state.carrier.known and dist is not None:
+            if dist < 0.05:
+                carrier = " · карриер здесь"
+            else:
+                carrier = f" · карриер {dist:,.0f} ly".replace(",", " ")
         self.lbl_status.configure(
-            text=f"тел {known}/{total} · био-тел {bio}"
+            text=f"тел {known}/{total} · био-тел {bio}{carrier}"
             + (" · маршрут залочен" if state.route.locked else "")
         )
 
@@ -261,15 +321,21 @@ class MainWindow:
         lock = " · залочен" if route.locked else ""
         extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
         self.route_info.configure(text=f"Источник: {src}{lock}{extra}")
+        current_item = None
+        here = (current or "").lower()
         for i, hop in enumerate(route.hops, start=1):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
-            mark = "▶ " if current and hop.system == current else ""
-            self.route_tree.insert(
+            mark = "▶ " if here and hop.system.lower() == here else ""
+            item = self.route_tree.insert(
                 "",
                 "end",
                 values=(i, f"{mark}{hop.system}", hop.star_class or "—", ly_text),
             )
+            if mark:
+                current_item = item
+        if current_item is not None:
+            self.route_tree.see(current_item)
 
     def _update_bodies(self, state: GameState) -> None:
         self.bodies_tree.delete(*self.bodies_tree.get_children())
@@ -280,12 +346,15 @@ class MainWindow:
         for body in bodies:
             bio = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
             geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
+            pml = "—" if body.mining_locations is None else str(body.mining_locations)
             dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
             first = "✔" if not body.was_discovered and not body.remote else "—"
             src = body.source or ("своё" if not body.remote else "?")
+            extra = {"image": self._ring_icon} if body.has_rings and self._ring_icon is not None else {}
             self.bodies_tree.insert(
                 "",
                 "end",
+                text="",
                 values=(
                     body.name or f"#{body.body_id}",
                     _type_of(body),
@@ -293,10 +362,12 @@ class MainWindow:
                     _temp(body.surface_temp),
                     bio,
                     geo,
+                    pml,
                     dss,
                     _value_of(body, state.odyssey),
                     first,
                     _ls(body.distance_ls),
                     src,
                 ),
+                **extra,
             )

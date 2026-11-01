@@ -163,13 +163,15 @@ class JournalWatcher(threading.Thread):
             mtime = path.stat().st_mtime
         except OSError:
             return
-        if mtime == self._navroute_mtime:
+        stale = bool(self.state.navroute_stale)
+        if mtime == self._navroute_mtime and not stale:
             return
         self._navroute_mtime = mtime
         try:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return
+        self.state.navroute_stale = False
         if self.state.route.locked:
             return
         route = Route.from_navroute(data)
