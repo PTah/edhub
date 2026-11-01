@@ -52,7 +52,16 @@ class Hotkeys(threading.Thread):
         self._ready.set()
         msg = wintypes.MSG()
         try:
-            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            while True:
+                code = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if code == 0:
+                    break
+                if code < 0:
+                    # Ошибка очереди не должна крутить ядро вхолостую.
+                    import time
+
+                    time.sleep(0.05)
+                    continue
                 if msg.message == WM_HOTKEY:
                     callback = self.bindings.get(int(msg.wParam))
                     if callback:

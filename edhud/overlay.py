@@ -57,6 +57,7 @@ class Overlay:
         self._y = 0
         self._drag: tuple[int, int] | None = None
         self._last_draw = 0.0
+        self._drawn: tuple | None = None
         self.fullscreen: bool | None = None
         self._keeper: winapi.TopmostKeeper | None = None
         self._menu = None
@@ -80,25 +81,27 @@ class Overlay:
         self._start_keeper()
 
     def _start_keeper(self) -> None:
-        """Держим окно поверх всех и следим за полноэкранным режимом игры."""
+        """Z-order только из потока окна. Фоновый SetWindowPos будил ядро на каждом кадре."""
         if not winapi.IS_WINDOWS or not getattr(self.cfg, "keep_topmost", True):
             return
-        self._keeper = winapi.TopmostKeeper(
-            hwnd_provider=self._topmost_hwnd,
-            interval=2.0,
-            on_fullscreen=self._on_fullscreen,
-        )
-        self._keeper.start()
+        self.root.after(2000, self._keep_top)
 
-    def _topmost_hwnd(self) -> int:
-        if getattr(self, "bio", None) is not None and self.bio.wants_topmost():
-            extra = self.bio.hwnd()
-            if extra:
-                winapi.keep_topmost(extra)
-        return winapi.hwnd_of(self.root)
-
-    def _on_fullscreen(self, state: bool | None) -> None:
-        self.fullscreen = state
+    def _keep_top(self) -> None:
+        if not getattr(self.cfg, "keep_topmost", True):
+            return
+        try:
+            winapi.keep_topmost(winapi.hwnd_of(self.root))
+            if getattr(self, "bio", None) is not None and self.bio.wants_topmost():
+                winapi.keep_topmost(self.bio.hwnd())
+            state = winapi.foreground_fullscreen(exclude_hwnd=winapi.hwnd_of(self.root))
+            if state != self.fullscreen:
+                self.fullscreen = state
+        except Exception:
+            pass
+        try:
+            self.root.after(2000, self._keep_top)
+        except Exception:
+            pass
 
     def _apply_click_through(self) -> None:
         hwnd = winapi.hwnd_of(self.root)
@@ -279,6 +282,10 @@ class Overlay:
             self.bio.set_board(board)
 
     def set_view(self, view: HudView) -> None:
+        signature = (tuple(view.plain()), view.alert)
+        if signature == self._drawn:
+            return
+        self._drawn = signature
         try:
             self._queue.put_nowait(view)
         except queue.Full:

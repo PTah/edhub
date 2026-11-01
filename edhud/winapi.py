@@ -89,12 +89,36 @@ def hwnd_of(widget) -> int:
             return 0
 
 
+def _user32():
+    """Прототипы user32. Без них HWND_TOPMOST (−1) на 64-бит обрезается и ядро крутит z-order."""
+    user32 = ctypes.windll.user32
+    if getattr(_user32, "ready", False):
+        return user32
+    hwnd = ctypes.c_void_p
+    user32.GetWindowLongW.argtypes = [hwnd, ctypes.c_int]
+    user32.GetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowLongW.argtypes = [hwnd, ctypes.c_int, ctypes.c_long]
+    user32.SetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowPos.argtypes = [
+        hwnd,
+        hwnd,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    user32.SetWindowPos.restype = ctypes.c_int
+    _user32.ready = True
+    return user32
+
+
 def apply_overlay_styles(hwnd: int, click_through: bool, topmost: bool = True) -> bool:
     """Сквозной, неактивируемый, всегда сверху. Возвращает True при успехе."""
     if not IS_WINDOWS or not hwnd:
         return False
     try:
-        user32 = ctypes.windll.user32
+        user32 = _user32()
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         style |= WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
         if click_through:
@@ -111,7 +135,7 @@ def apply_overlay_styles(hwnd: int, click_through: bool, topmost: bool = True) -
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         )
         return True
     except Exception:
@@ -119,16 +143,17 @@ def apply_overlay_styles(hwnd: int, click_through: bool, topmost: bool = True) -
 
 
 def keep_topmost(hwnd: int) -> bool:
-    """Повторно «прибивает» окно поверх всех (игра сбрасывает topmost при старте)."""
+    """Повторно «прибивает» окно поверх всех, не показывая скрытое и не дёргая z-order зря."""
     if not IS_WINDOWS or not hwnd:
         return False
     try:
-        user32 = ctypes.windll.user32
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        if not style & WS_EX_TOPMOST:
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TOPMOST)
+        user32 = _user32()
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) or 0
+        if style & WS_EX_TOPMOST:
+            return True
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TOPMOST)
         user32.SetWindowPos(
-            hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
+            hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
         )
         return True
     except Exception:

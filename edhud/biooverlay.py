@@ -27,6 +27,8 @@ class BioPanel:
         self._y = 96
         self._drag: tuple[int, int] | None = None
         self._fonts: dict[tuple[int, bool], object] = {}
+        self._signature: tuple | None = None
+        self._mapped = False
 
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD bio")
@@ -68,18 +70,28 @@ class BioPanel:
 
     def set_parent_visible(self, visible: bool) -> None:
         self._parent_visible = visible
+        self._signature = None
         self._sync()
 
     def set_board(self, board: BioBoard | None) -> None:
         self._board = board
+        signature = None if board is None or not self._parent_visible else tuple(board.plain())
+        if signature == self._signature:
+            return
+        self._signature = signature
         self._sync()
 
     def _sync(self) -> None:
         if self._board is None or not self._parent_visible:
-            self.win.withdraw()
+            if self._mapped:
+                self.win.withdraw()
+                self._mapped = False
             return
         self._draw(self._board)
+        if self._mapped:
+            return
         self.win.deiconify()
+        self._mapped = True
         try:
             self.win.attributes("-topmost", True)
         except tk.TclError:

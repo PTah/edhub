@@ -209,7 +209,15 @@ class TrayIcon(threading.Thread):
 
         msg = wintypes.MSG()
         try:
-            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            while True:
+                code = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if code == 0:
+                    break
+                if code < 0:
+                    import time
+
+                    time.sleep(0.05)
+                    continue
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))
         finally:
