@@ -137,6 +137,23 @@ class TrayIcon(threading.Thread):
 
         user32.DefWindowProcW.argtypes = [HWND, wintypes.UINT, WPARAM, LPARAM]
         user32.DefWindowProcW.restype = LRESULT
+        kernel32.GetModuleHandleW.restype = HINSTANCE
+        user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+        user32.RegisterClassW.restype = wintypes.ATOM
+        user32.CreateWindowExW.argtypes = [
+            wintypes.DWORD,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            HWND,
+            HMENU,
+            HINSTANCE,
+            ctypes.c_void_p,
+        ]
         user32.CreateWindowExW.restype = HWND
         user32.LoadImageW.restype = HICON
 
@@ -173,12 +190,21 @@ class TrayIcon(threading.Thread):
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
         nid.hWnd = self._hwnd
         nid.uID = 1
-        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP
+        # NIF_SHOWTIP требует расширенную структуру и на части систем иконку просто не ставит.
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_TRAY
         nid.hIcon = self._hicon
         nid.szTip = self.tip
         self._nid = nid
-        shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATA)]
+        shell32.Shell_NotifyIconW.restype = wintypes.BOOL
+        if not shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
+            shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+            nid.hIcon = self._load_icon()
+            self._hicon = nid.hIcon
+            shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        user32.RegisterWindowMessageW.restype = wintypes.UINT
+        self._taskbar_created = int(user32.RegisterWindowMessageW("TaskbarCreated") or 0)
         self._ready.set()
 
         msg = wintypes.MSG()
@@ -196,6 +222,17 @@ class TrayIcon(threading.Thread):
 
     def _load_icon(self):
         user32 = ctypes.windll.user32
+        user32.LoadImageW.argtypes = [
+            HINSTANCE,
+            wintypes.LPCWSTR,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
+        user32.LoadImageW.restype = HICON
+        user32.LoadIconW.argtypes = [HINSTANCE, ctypes.c_void_p]
+        user32.LoadIconW.restype = HICON
         path = str(Path(self.icon_path).resolve()) if self.icon_path else ""
         if path and Path(path).exists():
             handle = user32.LoadImageW(None, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
@@ -208,6 +245,10 @@ class TrayIcon(threading.Thread):
 
     def _on_wndproc(self, hwnd, msg, wparam, lparam):  # noqa: ANN001
         user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        if msg == getattr(self, "_taskbar_created", 0) and self._nid is not None:
+            shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._nid))
+            return 0
         if msg == WM_TRAY:
             if lparam in (WM_RBUTTONUP, WM_LBUTTONUP):
                 self._popup_menu()

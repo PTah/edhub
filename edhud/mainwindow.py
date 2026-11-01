@@ -213,6 +213,7 @@ class MainWindow:
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.nb = nb
+        nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self.tab_route = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
@@ -400,26 +401,37 @@ class MainWindow:
         )
         route = tuple((h.system, h.star_class) for h in state.route.hops)
         dist = state.carrier_distance_ly()
-        here = None
-        if state.active_organic() is not None and state.status.lat is not None:
-            here = (
-                round(state.status.lat, 4),
-                round(state.status.lon or 0, 4),
-                None if state.status.heading is None else round(state.status.heading),
-            )
+        names = tuple(
+            (b.body_id, b.name)
+            for b in sorted(sys.bodies.values(), key=lambda x: x.body_id)
+        )
         return (
             sys.address,
             sys.name,
             sys.body_count,
             sys.discovered_by_me,
             bodies,
+            names,
             route,
             state.route.locked,
             state.carrier.callsign,
             state.carrier.system,
+            state.carrier.address,
             None if dist is None else round(dist, 1),
-            here,
+            state.view_tab,
         )
+
+    def _on_tab_changed(self, _event=None) -> None:
+        """Показ Bodies заново рисует таблицу: скрытая вкладка могла остаться от прошлой системы."""
+        if self._state is None:
+            return
+        try:
+            current = self.nb.select()
+        except tk.TclError:
+            return
+        if current == str(self.tab_bodies):
+            self._update_header(self._state)
+            self._update_bodies(self._state)
 
     def _apply_tab(self, state: GameState) -> None:
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
@@ -478,6 +490,7 @@ class MainWindow:
     def _update_bodies(self, state: GameState) -> None:
         for child in self._bodies_inner.winfo_children():
             child.destroy()
+        jumped = state.system.address != getattr(self, "_bodies_address", None)
         bodies = sorted(
             state.system.bodies.values(),
             key=lambda b: (0 if b.is_star or b.star_type else 1, b.distance_ls or 0, b.body_id),
@@ -533,3 +546,8 @@ class MainWindow:
                         pady=2,
                     )
                 cell.grid(row=row, column=col, sticky="ew")
+        self._bodies_address = state.system.address
+        self._bodies_inner.update_idletasks()
+        self._bodies_canvas.configure(scrollregion=self._bodies_canvas.bbox("all") or (0, 0, 0, 0))
+        if jumped:
+            self._bodies_canvas.yview_moveto(0)

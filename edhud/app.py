@@ -63,6 +63,8 @@ class App:
         self._stop = threading.Event()
         self._settings_open = False
         self._voice_alert: str | None = None
+        self._carrier_lookup: str | None = None
+        self._carrier_lookup_at = 0.0
 
     def _make_remote_client(self) -> remote.RemoteClient | None:
         if not self.cfg.remote_enabled:
@@ -173,21 +175,72 @@ class App:
 
     # ------------------------------------------------------------------- loop
     def tick(self) -> None:
-        self.sync_system()
-        self.collect_remote()
-        self.collect_eddn()
-        self.autosave()
-        if self.overlay is not None:
-            view = hudmodel.build_view(
-                self.state, self.cfg, expanded=self.expanded, hint=self.hint()
-            )
-            if self._voice_alert and not view.alert:
-                view.alert = self._voice_alert
-                self._voice_alert = None
-            self.overlay.set_view(view)
-            self.overlay.set_bio(hudmodel.build_bio_board(self.state))
-        if self.mainwindow is not None:
-            self.mainwindow.update_state(self.state)
+        try:
+            self.sync_system()
+            self.collect_remote()
+            self.collect_eddn()
+            self._lookup_carrier_pos()
+            self.autosave()
+            if self.overlay is not None:
+                view = hudmodel.build_view(
+                    self.state, self.cfg, expanded=self.expanded, hint=self.hint()
+                )
+                if self._voice_alert and not view.alert:
+                    view.alert = self._voice_alert
+                    self._voice_alert = None
+                self.overlay.set_view(view)
+                self.overlay.set_bio(hudmodel.build_bio_board(self.state))
+            if self.mainwindow is not None:
+                self.mainwindow.update_state(self.state)
+        except Exception:
+            self._note_tick_error()
+
+    def _note_tick_error(self) -> None:
+        """Ошибка кадра не должна останавливать окно: иначе нет ни трея, ни выхода."""
+        now = time.time()
+        if now - getattr(self, "_tick_error_at", 0.0) < 30:
+            return
+        self._tick_error_at = now
+        try:
+            import traceback
+
+            path = config_mod.app_dir() / "error.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(traceback.format_exc() + "\n")
+        except OSError:
+            pass
+
+    def _lookup_carrier_pos(self) -> None:
+        """CarrierLocation не содержит StarPos — координаты новой системы берём с EDSM."""
+        if not self.state.carrier_pos_pending or not self.cfg.allow_network:
+            return
+        name = self.state.carrier.system
+        if not name:
+            return
+        now = time.time()
+        if name == self._carrier_lookup and now - self._carrier_lookup_at < 60:
+            return
+        self._carrier_lookup = name
+        self._carrier_lookup_at = now
+
+        def work() -> None:
+            pos = remote.system_coordinates(name)
+
+            def apply() -> None:
+                current = self.state.carrier.system or ""
+                if current.lower() != name.lower():
+                    self._carrier_lookup = None
+                    return
+                if not pos:
+                    return
+                self.state.carrier.star_pos = pos
+                self.state.carrier_pos_pending = False
+                self.state._remember_star(self.state.carrier.address, name, pos)
+
+            self._ui(apply)
+
+        threading.Thread(target=work, name="edhud-carrier-pos", daemon=True).start()
 
     def hint(self) -> str | None:
         hints: list[str] = []
@@ -300,10 +353,10 @@ class App:
             system_address_provider=lambda: self.state.system.address,
         )
         bindings = {
-            0x77: self.toggle_expanded,  # F8
-            0x78: self.toggle_click_through,  # F9
-            0x79: self.toggle_visible,  # F10
-            0x7B: self.request_quit,  # F12
+            0x77: lambda: self._ui(self.toggle_expanded),  # F8
+            0x78: lambda: self._ui(self.toggle_click_through),  # F9
+            0x79: lambda: self._ui(self.toggle_visible),  # F10
+            0x7B: lambda: self._ui(self.request_quit),  # F12
         }
         self.hotkeys = Hotkeys(bindings)
         self.hotkeys.start()
@@ -503,7 +556,8 @@ class App:
             if self._stop.is_set():
                 return
             self.tick()
-            self.overlay.root.after(200, loop)
+            if self.overlay is not None and not self._stop.is_set():
+                self.overlay.root.after(200, loop)
 
         loop()
         try:

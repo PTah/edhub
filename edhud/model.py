@@ -21,12 +21,13 @@ FLAG_DOCKED = 1 << 0
 FLAG_LANDED = 1 << 1
 FLAG_SUPERCRUISE = 1 << 4
 FLAG_SCOOPING = 1 << 11
-FLAG_FSD_CHARGING = 1 << 12
+# Бит 17 — FsdCharging в Status.json (журнал Frontier). Бит 12 — ручник ТРП.
+FLAG_FSD_CHARGING = 1 << 17
+FLAG_FSD_JUMP = 1 << 30
 FLAG_LOW_FUEL = 1 << 14
 FLAG_IN_MAINSHIP = 1 << 19
 FLAG_IN_FIGHTER = 1 << 20
 FLAG_IN_SRV = 1 << 21
-FLAG_FSD_JUMP = 1 << 25
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
 _MINEABLE_RING = {
@@ -449,6 +450,7 @@ class Status:
     body_id: int | None = None
     destination_name: str | None = None
     destination_body: int | None = None
+    destination_system: int | None = None
     balance: int | None = None
     gui_focus: int = 0
     legal_state: str | None = None
@@ -477,9 +479,12 @@ class Status:
             self.destination_name = dest.get("Name")
             body = dest.get("Body")
             self.destination_body = int(body) if isinstance(body, int) else None
+            system = dest.get("System")
+            self.destination_system = int(system) if isinstance(system, int) else None
         else:
             self.destination_name = None
             self.destination_body = None
+            self.destination_system = None
         self.balance = data.get("Balance")
         self.gui_focus = int(data.get("GuiFocus") or 0)
         self.legal_state = data.get("LegalState")
@@ -539,6 +544,28 @@ def _f(value: Any) -> float | None:
         return None
 
 
+def parse_materials(raw: Any) -> dict[str, float]:
+    """Журнал отдаёт материалы списком {Name, Percent}, старые события — словарём."""
+    rows: list = []
+    if isinstance(raw, dict):
+        rows = [{"Name": key, "Percent": value} for key, value in raw.items()]
+    elif isinstance(raw, list):
+        rows = raw
+    found: dict[str, float] = {}
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("Name") if item.get("Name") is not None else item.get("name")
+        percent = item.get("Percent") if "Percent" in item else item.get("percent")
+        if not name:
+            continue
+        value = _f(percent)
+        if value is None:
+            continue
+        found[str(name)] = value
+    return found
+
+
 @dataclass
 class GameState:
     cmdr: str | None = None
@@ -555,8 +582,12 @@ class GameState:
     status: Status = field(default_factory=Status)
     route: Route = field(default_factory=Route)
     carrier: Carrier = field(default_factory=Carrier)
-    # какую вкладку окна показать: route пока идёт гиперпрыжок, bodies в системе
+    # какую вкладку окна показать: route на разгоне к прыжку, bodies в системе
     view_tab: str = "bodies"
+    # носитель сменил систему, а координат в журнале нет — их доберёт сеть
+    carrier_pos_pending: bool = False
+    _jump_tab_latched: bool = False
+    _was_in_supercruise: bool = False
     fsd_target: str | None = None
     fsd_target_class: str | None = None
     jumps_in_route: int | None = None
@@ -679,13 +710,7 @@ class GameState:
             return
         if not own and station != callsign and not e.get("CarrierID"):
             return
-        if e.get("StarSystem"):
-            self.carrier.system = e.get("StarSystem")
-        if e.get("SystemAddress") is not None:
-            self.carrier.address = e.get("SystemAddress")
-        if isinstance(e.get("StarPos"), (list, tuple)) and len(e["StarPos"]) == 3:
-            pos = e["StarPos"]
-            self.carrier.star_pos = (float(pos[0]), float(pos[1]), float(pos[2]))
+        self._move_carrier(e.get("StarSystem"), e.get("SystemAddress"), e.get("BodyID"), e.get("StarPos"))
 
     def _on_fsdjump(self, e: dict) -> None:
         self._set_system(e)
@@ -710,13 +735,27 @@ class GameState:
 
     def _on_carrierlocation(self, e: dict) -> None:
         self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
-        if e.get("StarSystem"):
-            self.carrier.system = e.get("StarSystem")
-        if e.get("SystemAddress") is not None:
-            self.carrier.address = e.get("SystemAddress")
-        if e.get("BodyID") is not None:
-            self.carrier.body_id = e.get("BodyID")
+        self._move_carrier(e.get("StarSystem"), e.get("SystemAddress"), e.get("BodyID"), e.get("StarPos"))
+
+    def _move_carrier(self, system: str | None, address, body_id, star_pos) -> None:
+        """Новая система носителя. Старые координаты больше не годятся: в CarrierLocation их нет."""
+        moved = False
+        if address is not None and self.carrier.address is not None and int(address) != int(self.carrier.address):
+            moved = True
+        elif system and self.carrier.system and str(system).lower() != self.carrier.system.lower():
+            moved = True
+        if moved:
+            self.carrier.star_pos = None
+        if system:
+            self.carrier.system = system
+        if address is not None:
+            self.carrier.address = int(address)
+        if body_id is not None:
+            self.carrier.body_id = body_id
+        if isinstance(star_pos, (list, tuple)) and len(star_pos) == 3:
+            self.carrier.star_pos = (float(star_pos[0]), float(star_pos[1]), float(star_pos[2]))
         self._adopt_carrier_pos()
+        self.carrier_pos_pending = self.carrier.star_pos is None and bool(self.carrier.system or self.carrier.address is not None)
 
     def _on_carrierstats(self, e: dict) -> None:
         self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
@@ -747,20 +786,20 @@ class GameState:
             pos = self._star_pos.get(int(self.carrier.address))
         if pos is None and self.carrier.system:
             pos = self._star_names.get(self.carrier.system.lower())
+        if pos is None:
+            for hop in self.route.hops:
+                same_addr = self.carrier.address is not None and hop.address == self.carrier.address
+                same_name = bool(self.carrier.system) and hop.system.lower() == self.carrier.system.lower()
+                if (same_addr or same_name) and hop.star_pos:
+                    pos = hop.star_pos
+                    break
         if pos is not None:
             self.carrier.star_pos = pos
+            self.carrier_pos_pending = False
 
     def carrier_star_pos(self) -> tuple[float, float, float] | None:
         self._adopt_carrier_pos()
-        if self.carrier.star_pos:
-            return self.carrier.star_pos
-        for hop in self.route.hops:
-            same_addr = self.carrier.address is not None and hop.address == self.carrier.address
-            same_name = bool(self.carrier.system) and hop.system.lower() == self.carrier.system.lower()
-            if (same_addr or same_name) and hop.star_pos:
-                self.carrier.star_pos = hop.star_pos
-                return hop.star_pos
-        return None
+        return self.carrier.star_pos
 
     def carrier_distance_ly(self) -> float | None:
         """None — носителя нет или нет координат. 0 — он в текущей системе."""
@@ -827,9 +866,9 @@ class GameState:
         if isinstance(comp, dict):
             body.atmosphere_composition = {k: float(v) for k, v in comp.items()}
         body.volcanism = e.get("Volcanism") or body.volcanism
-        mats = e.get("Materials")
-        if isinstance(mats, dict):
-            body.materials = {k: float(v) for k, v in mats.items()}
+        mats = parse_materials(e.get("Materials"))
+        if mats:
+            body.materials = mats
         if e.get("Landable") is not None:
             body.landable = bool(e.get("Landable"))
         body.distance_ls = _f(e.get("DistanceFromArrivalLS")) or body.distance_ls
@@ -1083,6 +1122,31 @@ class GameState:
                 self.current_body_name = self.status.body_name or self.current_body_name
         if self.status.body_name and not self.current_body_name:
             self.current_body_name = self.status.body_name
+        self._sync_travel_tab()
+        if self.status.supercruise:
+            self._was_in_supercruise = True
+        elif not self.status.fsd_charging:
+            self._was_in_supercruise = False
+
+    def _sync_travel_tab(self) -> None:
+        """Route — в момент разгона к другой системе, не при входе в суперкруиз."""
+        spool = self._hyperspace_spool()
+        if spool and not self._jump_tab_latched:
+            self.view_tab = "route"
+            self._jump_tab_latched = True
+        if not self.status.fsd_charging:
+            self._jump_tab_latched = False
+
+    def _hyperspace_spool(self) -> bool:
+        if not self.status.fsd_charging:
+            return False
+        dest = self.status.destination_system
+        here = self.system.address
+        if not isinstance(dest, int) or here is None or int(dest) == int(here):
+            return False
+        # Разгон суперкруиза идёт ещё из обычного пространства.
+        # Межзвёздный — когда суперкруиз уже включён (или только что был).
+        return bool(self.status.supercruise or self._was_in_supercruise or self.status.flag(FLAG_FSD_JUMP))
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:

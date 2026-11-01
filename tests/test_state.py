@@ -408,6 +408,64 @@ class JumpTabTests(unittest.TestCase):
         )
         self.assertEqual(state.view_tab, "bodies")
 
+    def test_hyperspace_charge_opens_route_supercruise_charge_does_not(self):
+        state = GameState()
+        state.system.address = 1
+        state.system.name = "Here"
+        state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        self.assertEqual(state.view_tab, "bodies")
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 17),
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        self.assertEqual(state.view_tab, "route")
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "There",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 10],
+                "JumpDist": 10,
+            }
+        )
+        self.assertEqual(state.view_tab, "bodies")
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "There 1",
+                "BodyID": 1,
+                "SystemAddress": 2,
+                "PlanetClass": "Icy body",
+                "Materials": [{"Name": "iron", "Percent": 20.0}],
+            }
+        )
+        self.assertEqual(state.system.name, "There")
+        self.assertIn(1, state.system.bodies)
+        self.assertEqual(state.system.bodies[1].materials.get("iron"), 20.0)
+        from edhud.remote import apply_eddn
+
+        self.assertTrue(
+            apply_eddn(
+                state.system,
+                {
+                    "event": "Scan",
+                    "BodyID": 2,
+                    "BodyName": "There 2",
+                    "SystemAddress": 2,
+                    "PlanetClass": "Rocky body",
+                    "Materials": [{"Name": "iron", "Percent": 11.5}],
+                },
+            )
+        )
+        self.assertEqual(state.system.bodies[2].materials.get("iron"), 11.5)
+
 
 class CarrierDistanceTests(unittest.TestCase):
     def test_distance_from_carrier_system(self):
@@ -445,6 +503,58 @@ class CarrierDistanceTests(unittest.TestCase):
         view = hudmodel.build_view(state, Config(), expanded=False)
         self.assertIn("GHY-7TZ", view.route_row.text)
         self.assertIn("40.0 ly", view.route_row.text)
+
+    def test_carrier_relocation_drops_the_old_distance(self):
+        from edhud.route import Route, RouteHop
+
+        state = GameState()
+        state.apply(
+            {
+                "event": "CarrierLocation",
+                "CarrierID": 7,
+                "StarSystem": "Home",
+                "SystemAddress": 1,
+            }
+        )
+        state.apply({"event": "CarrierStats", "CarrierID": 7, "Callsign": "GHY-7TZ", "Name": "pedrikakis"})
+        state.apply(
+            {
+                "event": "Location",
+                "StarSystem": "Home",
+                "SystemAddress": 1,
+                "StarPos": [0, 0, 0],
+            }
+        )
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Away",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 40],
+                "JumpDist": 40,
+            }
+        )
+        state.route = Route(
+            hops=[
+                RouteHop(system="Away", address=2, star_pos=(0, 0, 40)),
+                RouteHop(system="Near", address=3, star_pos=(0, 0, 10)),
+            ]
+        )
+        self.assertAlmostEqual(state.carrier_distance_ly(), 40.0, places=3)
+        state.apply(
+            {
+                "event": "CarrierLocation",
+                "CarrierID": 7,
+                "StarSystem": "Near",
+                "SystemAddress": 3,
+                "BodyID": 1,
+            }
+        )
+        self.assertEqual(state.carrier.system, "Near")
+        self.assertFalse(state.carrier_pos_pending)
+        self.assertAlmostEqual(state.carrier_distance_ly(), 30.0, places=3)
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        self.assertIn("30.0 ly", view.route_row.text)
 
     def test_rings_mark_mineable_belt(self):
         state = GameState()

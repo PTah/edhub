@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config
-from .model import Body, System
+from .model import Body, System, parse_materials
 
 USER_AGENT = "EDHUD/1.2 (+local overlay; python-urllib)"
 EDSM_BODIES = "https://www.edsm.net/api-system-v1/bodies?systemName={name}"
@@ -82,6 +82,33 @@ def _f(value) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
+        return None
+
+
+def _composition(raw) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+    found: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            found[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return found
+
+
+def system_coordinates(name: str, timeout: float = 8.0) -> tuple[float, float, float] | None:
+    """Координаты системы с EDSM. CarrierLocation их не пишет."""
+    if not name:
+        return None
+    url = "https://www.edsm.net/api-v1/system?systemName=" + urllib.parse.quote(name) + "&showCoordinates=1"
+    data = _http_json(url, timeout=timeout)
+    coords = data.get("coords") if isinstance(data, dict) else None
+    if not isinstance(coords, dict):
+        return None
+    try:
+        return (float(coords["x"]), float(coords["y"]), float(coords["z"]))
+    except (KeyError, TypeError, ValueError):
         return None
 
 
@@ -526,11 +553,9 @@ def body_from_journal_scan(event: dict) -> Body | None:
         surface_gravity=_f(event.get("SurfaceGravity")),
         surface_pressure=_f(event.get("SurfacePressure")),
         atmosphere=event.get("Atmosphere") or None,
-        atmosphere_composition={
-            k: float(v) for k, v in (event.get("AtmosphereComposition") or {}).items()
-        },
+        atmosphere_composition=_composition(event.get("AtmosphereComposition")),
         volcanism=event.get("Volcanism") or None,
-        materials={k: float(v) for k, v in (event.get("Materials") or {}).items()},
+        materials=parse_materials(event.get("Materials")),
         landable=bool(event.get("Landable")),
         distance_ls=_f(event.get("DistanceFromArrivalLS")) or 0.0,
         semi_major_axis=_f(event.get("SemiMajorAxis")),
