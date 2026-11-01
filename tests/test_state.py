@@ -528,5 +528,67 @@ class CarrierDistanceTests(unittest.TestCase):
         self.assertTrue(state.system.body(1).dss_scanned)
 
 
+class BodyColorTests(unittest.TestCase):
+    def test_signal_colors(self):
+        from edhud.mainwindow import signal_colors
+
+        self.assertIsNone(signal_colors("bio", 0))
+        self.assertIsNone(signal_colors("bio", None))
+        self.assertEqual(signal_colors("bio", 2)[0], "#7ddb6a")
+        self.assertEqual(signal_colors("geo", 1)[0], "#ff5f56")
+        fg, bg = signal_colors("pml", 15)
+        self.assertEqual(fg, "#000000")
+        self.assertNotEqual(bg, "#161616")
+
+    def test_bodies_table_paints_counts(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import BODY_COLUMNS, MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.system.bodies[1] = Body(
+                body_id=1,
+                name="Test 1",
+                planet_class="Icy body",
+                bio_signals=2,
+                geo_signals=3,
+                mining_locations=15,
+                signals_known=True,
+            )
+            state.system.bodies[2] = Body(
+                body_id=2,
+                name="Test 2",
+                planet_class="Rocky body",
+                bio_signals=0,
+                geo_signals=0,
+                mining_locations=0,
+                signals_known=True,
+            )
+            window.update_state(state)
+            window.win.update_idletasks()
+            columns = {key: index for index, (key, *_rest) in enumerate(BODY_COLUMNS)}
+            painted = {}
+            for cell in window._bodies_inner.grid_slaves(row=0):
+                info = cell.grid_info()
+                painted[int(info["column"])] = (cell.cget("text"), cell.cget("fg"))
+            self.assertEqual(painted[columns["bio"]][1], "#7ddb6a")
+            self.assertEqual(painted[columns["geo"]][1], "#ff5f56")
+            self.assertEqual(painted[columns["pml"]][1], "#000000")
+            zeros = {}
+            for cell in window._bodies_inner.grid_slaves(row=1):
+                info = cell.grid_info()
+                zeros[int(info["column"])] = cell.cget("fg")
+            self.assertEqual(zeros[columns["bio"]], "#e8e8e8")
+            self.assertEqual(zeros[columns["geo"]], "#e8e8e8")
+            self.assertEqual(zeros[columns["pml"]], "#e8e8e8")
+            window.destroy()
+        finally:
+            root.destroy()
+
+
 if __name__ == "__main__":
     unittest.main()

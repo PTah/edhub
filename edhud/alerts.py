@@ -88,9 +88,10 @@ class AlertEngine:
         return Alert(kind="bio", text=text, overlay=f"био ×{count}: {body_name}")
 
     def _check_discovery(self, event: dict, state: GameState) -> Alert | None:
-        if event.get("WasDiscovered") is not False:
+        # Фраза про систему — только если не открыта сама звезда.
+        # Первая неоткрытая планета в уже известной системе её не произносит.
+        if event.get("WasDiscovered") is not False or not event.get("StarType"):
             return None
-        # только «наши» сканы, не remote
         address = state.system.address or event.get("SystemAddress")
         if address is None:
             return None

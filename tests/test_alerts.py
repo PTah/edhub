@@ -90,6 +90,17 @@ class AlertEngineTests(unittest.TestCase):
         self.state.system.address = 99
         self.state.apply(event)
         self.assertEqual(self.engine.handle(event, self.state), [])
+        # известная звезда, первая неоткрытая планета на FSS — не «система открыта вами»
+        planet = {
+            "event": "Scan",
+            "BodyID": 1,
+            "BodyName": "Known 1",
+            "PlanetClass": "Icy body",
+            "WasDiscovered": False,
+            "SystemAddress": 99,
+        }
+        self.state.apply(planet)
+        self.assertEqual(self.engine.handle(planet, self.state), [])
 
     def test_voice_flags(self) -> None:
         self.engine.arm()

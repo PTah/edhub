@@ -18,9 +18,29 @@ COLORS = {
     "muted": "#8a8a8a",
     "ok": "#7ddb6a",
     "warn": "#ffd24a",
+    "bad": "#ff5f56",
     "row": "#161616",
     "sel": "#2a1a0a",
+    "ink": "#000000",
+    "paper": "#f2f2f2",
 }
+
+# Колонки таблицы тел. Пояс — отдельная узкая ячейка со значком кольца.
+BODY_COLUMNS = (
+    ("belt", "", 28, "center"),
+    ("name", "Имя", 200, "w"),
+    ("type", "Тип", 140, "w"),
+    ("atmos", "Атмосфера", 110, "w"),
+    ("temp", "T", 70, "e"),
+    ("bio", "Био", 50, "center"),
+    ("geo", "Гео", 50, "center"),
+    ("pml", "PML", 50, "center"),
+    ("dss", "DSS", 50, "center"),
+    ("value", "≈ Cr", 100, "e"),
+    ("first", "1-е", 50, "center"),
+    ("dist", "ls", 80, "e"),
+    ("src", "Ист.", 70, "center"),
+)
 
 
 def _ls(value: float | None) -> str:
@@ -35,6 +55,23 @@ def _temp(value: float | None) -> str:
     if value is None:
         return "—"
     return f"{value:,.0f} K".replace(",", " ")
+
+
+def signal_colors(column: str, count: int | None) -> tuple[str, str] | None:
+    """Цвет ненулевого счётчика: био — зелёный, гео — красный, PML — чёрный.
+
+    Чёрный текст на тёмной строке не виден, поэтому у PML светлый фон ячейки.
+    Ноль и неизвестное значение остаются цветом таблицы.
+    """
+    if not count:
+        return None
+    if column == "bio":
+        return COLORS["ok"], COLORS["row"]
+    if column == "geo":
+        return COLORS["bad"], COLORS["row"]
+    if column == "pml":
+        return COLORS["ink"], COLORS["paper"]
+    return None
 
 
 def _type_of(body: Body) -> str:
@@ -167,48 +204,60 @@ class MainWindow:
         self.route_tree.pack(side="left", fill="both", expand=True)
         route_scroll.pack(side="right", fill="y")
 
-        cols = (
-            "name",
-            "type",
-            "atmos",
-            "temp",
-            "bio",
-            "geo",
-            "pml",
-            "dss",
-            "value",
-            "first",
-            "dist",
-            "src",
-        )
         self._ring_icon = _ring_icon(self.win)
-        self.bodies_tree = ttk.Treeview(
-            self.tab_bodies, columns=cols, show="tree headings", style="ED.Treeview"
-        )
-        self.bodies_tree.column("#0", width=28, minwidth=28, stretch=False, anchor="center")
-        self.bodies_tree.heading("#0", text="")
-        headings = {
-            "name": ("Имя", 200, "w"),
-            "type": ("Тип", 140, "w"),
-            "atmos": ("Атмосфера", 110, "w"),
-            "temp": ("T", 70, "e"),
-            "bio": ("Био", 50, "center"),
-            "geo": ("Гео", 50, "center"),
-            "pml": ("PML", 50, "center"),
-            "dss": ("DSS", 50, "center"),
-            "value": ("≈ Cr", 100, "e"),
-            "first": ("1-е", 50, "center"),
-            "dist": ("ls", 80, "e"),
-            "src": ("Ист.", 70, "center"),
-        }
-        for col in cols:
-            title, w, anchor = headings[col]
-            self.bodies_tree.heading(col, text=title)
-            self.bodies_tree.column(col, width=w, anchor=anchor, stretch=(col == "name"))
-        body_scroll = ttk.Scrollbar(self.tab_bodies, orient="vertical", command=self.bodies_tree.yview)
-        self.bodies_tree.configure(yscrollcommand=body_scroll.set)
-        self.bodies_tree.pack(side="left", fill="both", expand=True)
-        body_scroll.pack(side="right", fill="y")
+        self._build_bodies_table()
+
+    def _build_bodies_table(self) -> None:
+        """Таблица тел на метках: Treeview не умеет красить отдельные ячейки."""
+        host = tk.Frame(self.tab_bodies, bg=COLORS["bg"])
+        host.pack(fill="both", expand=True)
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(1, weight=1)
+
+        header = tk.Frame(host, bg=COLORS["panel"])
+        header.grid(row=0, column=0, sticky="ew")
+        for index, (key, title, width, anchor) in enumerate(BODY_COLUMNS):
+            weight = 1 if key == "name" else 0
+            header.grid_columnconfigure(index, minsize=width, weight=weight)
+            tk.Label(
+                header,
+                text=title,
+                bg=COLORS["panel"],
+                fg=COLORS["fg"],
+                anchor=anchor,
+                font=("Segoe UI", 9, "bold"),
+                padx=4,
+                pady=4,
+            ).grid(row=0, column=index, sticky="ew")
+
+        canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
+        scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.grid(row=1, column=0, sticky="nsew")
+        scroll.grid(row=1, column=1, sticky="ns")
+        tk.Frame(host, width=16, bg=COLORS["bg"]).grid(row=0, column=1)
+
+        inner = tk.Frame(canvas, bg=COLORS["row"])
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        for index, (key, _title, width, _anchor) in enumerate(BODY_COLUMNS):
+            inner.grid_columnconfigure(index, minsize=width, weight=(1 if key == "name" else 0))
+
+        def _fit(event) -> None:
+            canvas.itemconfigure(window, width=event.width)
+
+        def _scrollregion(_event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _wheel(event) -> None:
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind("<Configure>", _fit)
+        inner.bind("<Configure>", _scrollregion)
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        self._bodies_canvas = canvas
+        self._bodies_inner = inner
 
     # ----------------------------------------------------------------- show
     def show(self) -> None:
@@ -338,36 +387,55 @@ class MainWindow:
             self.route_tree.see(current_item)
 
     def _update_bodies(self, state: GameState) -> None:
-        self.bodies_tree.delete(*self.bodies_tree.get_children())
+        for child in self._bodies_inner.winfo_children():
+            child.destroy()
         bodies = sorted(
             state.system.bodies.values(),
             key=lambda b: (0 if b.is_star or b.star_type else 1, b.distance_ls or 0, b.body_id),
         )
-        for body in bodies:
+        for row, body in enumerate(bodies):
             bio = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
             geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
             pml = "—" if body.mining_locations is None else str(body.mining_locations)
             dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
             first = "✔" if not body.was_discovered and not body.remote else "—"
             src = body.source or ("своё" if not body.remote else "?")
-            extra = {"image": self._ring_icon} if body.has_rings and self._ring_icon is not None else {}
-            self.bodies_tree.insert(
-                "",
-                "end",
-                text="",
-                values=(
-                    body.name or f"#{body.body_id}",
-                    _type_of(body),
-                    body.atmosphere_type or body.atmosphere or "—",
-                    _temp(body.surface_temp),
-                    bio,
-                    geo,
-                    pml,
-                    dss,
-                    _value_of(body, state.odyssey),
-                    first,
-                    _ls(body.distance_ls),
-                    src,
-                ),
-                **extra,
-            )
+            values = {
+                "name": body.name or f"#{body.body_id}",
+                "type": _type_of(body),
+                "atmos": body.atmosphere_type or body.atmosphere or "—",
+                "temp": _temp(body.surface_temp),
+                "bio": bio,
+                "geo": geo,
+                "pml": pml,
+                "dss": dss,
+                "value": _value_of(body, state.odyssey),
+                "first": first,
+                "dist": _ls(body.distance_ls),
+                "src": src,
+            }
+            counts = {
+                "bio": body.bio_signals,
+                "geo": body.geo_signals,
+                "pml": body.mining_locations,
+            }
+            for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
+                if key == "belt":
+                    icon = self._ring_icon if body.has_rings and self._ring_icon is not None else None
+                    cell = tk.Label(self._bodies_inner, bg=COLORS["row"], image=icon)
+                    if icon is not None:
+                        cell.image = icon
+                else:
+                    paint = signal_colors(key, counts.get(key))
+                    fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
+                    cell = tk.Label(
+                        self._bodies_inner,
+                        text=values[key],
+                        bg=bg,
+                        fg=fg,
+                        anchor=anchor,
+                        font=("Segoe UI", 9),
+                        padx=4,
+                        pady=2,
+                    )
+                cell.grid(row=row, column=col, sticky="ew")

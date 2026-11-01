@@ -51,6 +51,7 @@ class Overlay:
         self._queue: queue.Queue = queue.Queue(maxsize=2)
         self._visible = True
         self._height = 66
+        self._width = int(cfg.width)
         self._x = 0
         self._y = 0
         self._drag: tuple[int, int] | None = None
@@ -131,13 +132,22 @@ class Overlay:
         x = max(0, min(x, screen_w - 200))
         y = max(0, min(y, screen_h - 80))
         self._x, self._y = x, y
+        self._width = width
         self.root.geometry(f"{width}x{self._height}+{x}+{y}")
 
-    def _resize(self, height: int) -> None:
-        if abs(height - self._height) < 2:
+    def _resize(self, height: int, width: int | None = None) -> None:
+        width = self._width if width is None else int(width)
+        screen_w = self.root.winfo_screenwidth()
+        width = max(200, min(width, screen_w))
+        x = self._x
+        if x + width > screen_w:
+            x = max(0, screen_w - width)
+        if abs(height - self._height) < 2 and abs(width - self._width) < 2 and x == self._x:
             return
         self._height = height
-        self.root.geometry(f"{int(self.cfg.width)}x{height}+{self._x}+{self._y}")
+        self._width = width
+        self._x = x
+        self.root.geometry(f"{width}x{height}+{x}+{self._y}")
 
     def _bind_keys(self) -> None:
         self.root.bind("<F8>", lambda _e: self._toggle_expanded())
@@ -230,7 +240,7 @@ class Overlay:
         self._drag = (event.x_root, event.y_root)
         self._x += dx
         self._y += dy
-        self.root.geometry(f"{int(self.cfg.width)}x{self._height}+{self._x}+{self._y}")
+        self.root.geometry(f"{self._width}x{self._height}+{self._x}+{self._y}")
 
     def _drag_end(self, _event) -> None:
         self._drag = None
@@ -264,7 +274,6 @@ class Overlay:
         canvas = self.canvas
         cfg = self.cfg
         canvas.delete("all")
-        width = int(cfg.width)
 
         route_font = self._font(1, bold=True)
         body_font = self._font(0)
@@ -280,7 +289,8 @@ class Overlay:
         if detail_lines:
             height += 6 + line_detail * len(detail_lines)
         height = max(46, height)
-        self._resize(height)
+        width = self._fitted_width(view, route_font, body_font, detail_font)
+        self._resize(height, width)
 
         canvas.configure(bg=cfg.color("panel"))
         canvas.create_rectangle(0, 0, width, height, fill=cfg.color("panel"), outline="")
@@ -343,29 +353,37 @@ class Overlay:
             tags=("close",),
         )
 
-    def _draw_row(
-        self,
-        row,
-        x: int,
-        y: int,
-        font,
-        width: int,
-        line_height: int | None = None,
-        text_limit: int | None = None,
-    ) -> int:
+    def _text_width(self, segments, font) -> int:
+        return sum(font.measure(segment.text) for segment in segments if segment.text)
+
+    def _fitted_width(self, view: HudView, route_font, body_font, detail_font) -> int:
+        """Ширина панели: не уже настройки и достаточная, чтобы влез карриер."""
+        rows = [
+            (view.route_row, route_font),
+            (view.body_row, body_font),
+            *((row, detail_font) for row in view.detail),
+        ]
+        content = 0
+        for row, font in rows:
+            content = max(content, self._text_width(row.segments + row.tail, font))
+        extra = PAD * 2 + 8
+        if not self.cfg.click_through:
+            extra += CLOSE_SIZE + 6
+        screen_w = self.root.winfo_screenwidth()
+        return min(screen_w, max(int(self.cfg.width), content + extra))
+
+    def _draw_segments(self, segments, x: int, y: int, font, limit: int) -> int:
         canvas = self.canvas
         cfg = self.cfg
-        limit = width - PAD * 2 if text_limit is None else text_limit
         cursor = x
-        for segment in row.segments:
-            if cursor > width - PAD:
+        for segment in segments:
+            if cursor > limit:
                 break
             text = segment.text
             if not text:
                 continue
             seg_width = font.measure(text)
             if cursor + seg_width > limit:
-                # обрезаем по символам
                 while text and font.measure(text + "…") > limit - cursor:
                     text = text[:-1]
                 if not text:
@@ -383,6 +401,38 @@ class Overlay:
             cursor += seg_width
             if text.endswith("…"):
                 break
+        return cursor
+
+    def _draw_row(
+        self,
+        row,
+        x: int,
+        y: int,
+        font,
+        width: int,
+        line_height: int | None = None,
+        text_limit: int | None = None,
+    ) -> int:
+        limit = width - PAD * 2 if text_limit is None else text_limit
+        tail = row.tail
+        tail_width = self._text_width(tail, font)
+        main_width = self._text_width(row.segments, font)
+        main_limit = limit
+        tail_x = None
+        if tail and tail_width > 0:
+            if x + main_width + tail_width <= limit:
+                tail_x = x + main_width
+                main_limit = tail_x
+            elif tail_width >= limit - x:
+                tail_x = x
+                main_limit = x
+            else:
+                # панель уже не растянуть — карриер остаётся целиком у правого края
+                tail_x = limit - tail_width
+                main_limit = tail_x
+        self._draw_segments(row.segments, x, y, font, main_limit)
+        if tail_x is not None:
+            self._draw_segments(tail, tail_x, y, font, limit)
         metrics = font.metrics("linespace")
         return y + (line_height or metrics)
 

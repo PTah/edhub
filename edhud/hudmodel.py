@@ -22,10 +22,12 @@ class Segment:
 @dataclass
 class Row:
     segments: list[Segment] = field(default_factory=list)
+    # правый хвост строки: рисуется целиком, даже если левая часть не влезает
+    tail: list[Segment] = field(default_factory=list)
 
     @property
     def text(self) -> str:
-        return "".join(s.text for s in self.segments)
+        return "".join(s.text for s in self.segments + self.tail)
 
 
 @dataclass
@@ -338,8 +340,8 @@ def _append_carrier(row: Row, state: GameState) -> None:
     label = _carrier_label(state)
     if not label:
         return
-    row.segments.append(Segment("   карриер ", "dim"))
-    row.segments.append(Segment(label, "accent"))
+    row.tail.append(Segment("   карриер ", "dim"))
+    row.tail.append(Segment(label, "accent"))
 
 
 def _system_row(state: GameState) -> Row:
