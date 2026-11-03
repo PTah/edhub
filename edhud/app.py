@@ -362,7 +362,7 @@ class App:
         self.hotkeys.start()
         from .mainwindow import MainWindow
 
-        self.mainwindow = MainWindow(self.overlay.root)
+        self.mainwindow = MainWindow(self.overlay.root, cfg=self.cfg)
         self.mainwindow.apply_look(self.cfg)
         self.mainwindow.show()
         self._start_tray()

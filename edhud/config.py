@@ -171,6 +171,10 @@ class Config:
     keep_topmost: bool = True
     warn_fullscreen: bool = True
     locked_route: str | None = None
+    # окно Route/Bodies: геометрия и ширины колонок
+    main_geometry: str | None = None
+    bodies_columns: dict[str, int] = field(default_factory=dict)
+    route_columns: dict[str, int] = field(default_factory=dict)
     colors: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLORS))
 
     # ---------------------------------------------------------------- пути
@@ -191,6 +195,14 @@ class Config:
                 colors = dict(DEFAULT_COLORS)
                 colors.update({k: str(v) for k, v in value.items()})
                 self.colors = colors
+            elif key in ("bodies_columns", "route_columns") and isinstance(value, dict):
+                cleaned: dict[str, int] = {}
+                for name, raw in value.items():
+                    try:
+                        cleaned[str(name)] = int(raw)
+                    except (TypeError, ValueError):
+                        continue
+                setattr(self, key, cleaned)
             elif key in known:
                 setattr(self, key, value)
         return self

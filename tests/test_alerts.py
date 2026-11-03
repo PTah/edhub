@@ -47,6 +47,9 @@ class AlertEngineTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "bio")
         self.assertIn("Биологический", alerts[0].text)
+        self.assertIn("Сигналов: 2", alerts[0].text)
+        self.assertIn("на 3", alerts[0].text)
+        self.assertIn("×2", alerts[0].overlay or "")
 
     def test_bio_voice_names_possible_organisms(self) -> None:
         from edhud.model import Body

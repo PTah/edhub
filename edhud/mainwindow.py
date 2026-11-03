@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from . import bio, values
+from . import bio, values, winapi
 from .model import Body, GameState
 from .route import Route
 
@@ -24,6 +24,7 @@ COLORS = {
     "ink": "#000000",
     "paper": "#f2f2f2",
     "accent": "#54dfed",
+    "grid": "#3a3a3a",
 }
 
 # Колонки таблицы тел. Пояс — отдельная узкая ячейка со значком кольца.
@@ -43,6 +44,16 @@ BODY_COLUMNS = (
     ("dist", "ls", 80, "e"),
     ("src", "Ист.", 70, "center"),
 )
+
+ROUTE_COLUMNS = (
+    ("idx", "#", 48, "center"),
+    ("system", "Система", 320, "w"),
+    ("star", "Класс", 80, "center"),
+    ("ly", "До след., ly", 120, "e"),
+)
+
+MIN_COL_WIDTH = 28
+RESIZE_EDGE = 6
 
 
 def _ls(value: float | None) -> str:
@@ -70,6 +81,70 @@ def _forecast(body: Body, state: GameState) -> tuple[str, str | None]:
     if not names:
         return "—", None
     return "≈ " + ", ".join(names), "accent"
+
+
+def _forecast_tip(body: Body, state: GameState) -> str | None:
+    """Полный список био для подсказки по цифре «Био» (до/после DSS)."""
+    if body.genuses:
+        names = bio.forecast_names(body, state.system, limit=24)
+        if not names:
+            return None
+        return "DSS:\n" + "\n".join(f"• {name}" for name in names)
+    if (body.bio_signals or 0) <= 0:
+        return None
+    names = bio.forecast_names(body, state.system, limit=24)
+    if not names:
+        return None
+    return "Предположительно:\n" + "\n".join(f"• {name}" for name in names)
+
+
+class _CellTip:
+    """Всплывающая подсказка у ячейки таблицы Bodies."""
+
+    def __init__(self, widget: tk.Misc, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _show(self, _event=None) -> None:
+        if self._tip is not None or not self.text:
+            return
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        try:
+            tip.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        label = tk.Label(
+            tip,
+            text=self.text,
+            justify="left",
+            background=COLORS["panel"],
+            foreground=COLORS["text"],
+            relief="solid",
+            borderwidth=1,
+            font=("Segoe UI", 9),
+            padx=8,
+            pady=6,
+        )
+        label.pack()
+        tip.update_idletasks()
+        x = self.widget.winfo_rootx() + 12
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tip = tip
+
+    def _hide(self, _event=None) -> None:
+        tip = self._tip
+        self._tip = None
+        if tip is not None:
+            try:
+                tip.destroy()
+            except tk.TclError:
+                pass
 
 
 def route_tag(hop_index: int, current_index: int | None) -> str:
@@ -136,6 +211,19 @@ def _value_of(body: Body, odyssey: bool) -> str:
     return values.credits(amount)
 
 
+def _paint_grid(widget: tk.Misc, bg: str | None = None) -> None:
+    """Рамка ячейки — видимая табличная сетка."""
+    opts = {
+        "highlightthickness": 1,
+        "highlightbackground": COLORS["grid"],
+        "highlightcolor": COLORS["grid"],
+        "bd": 0,
+    }
+    if bg is not None:
+        opts["bg"] = bg
+    widget.configure(**opts)
+
+
 class MainWindow:
     """Окно программы: скрытие = withdraw, выход только через App.request_quit."""
 
@@ -143,11 +231,14 @@ class MainWindow:
         self,
         root: tk.Misc,
         on_close: Callable[[], None] | None = None,
+        cfg=None,
     ) -> None:
         self.on_close = on_close
+        self.cfg = cfg
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD")
-        self.win.geometry("980x520")
+        geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
+        self.win.geometry(geometry or "980x520")
         self.win.minsize(720, 360)
         self.win.configure(bg=COLORS["bg"])
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
@@ -158,9 +249,18 @@ class MainWindow:
         self._ui_size = 9
         self._state: GameState | None = None
         self._header_labels: list[tk.Label] = []
+        self._route_header_labels: list[tk.Label] = []
+        self._body_widths = {key: width for key, _title, width, _anchor in BODY_COLUMNS}
+        self._route_widths = {key: width for key, _title, width, _anchor in ROUTE_COLUMNS}
+        self._load_column_widths()
+        self._col_drag: tuple[str, int, int, int] | None = None  # table, index, start_x, start_w
+        self._save_after: str | None = None
         self._style()
         self._build()
         self._last_key: tuple | None = None
+        self._layout_ready = False
+        self.win.after(80, self._enable_layout_persist)
+        self.win.bind("<Configure>", self._on_window_configure, add="+")
 
     def _style(self) -> None:
         style = ttk.Style(self.win)
@@ -184,23 +284,6 @@ class MainWindow:
             background=[("selected", COLORS["panel"])],
             foreground=[("selected", COLORS["fg"])],
         )
-        style.configure(
-            "ED.Treeview",
-            background=COLORS["row"],
-            foreground=COLORS["text"],
-            fieldbackground=COLORS["row"],
-            borderwidth=0,
-            rowheight=max(22, self._ui_size + 14),
-            font=(self._ui_family, self._ui_size),
-        )
-        style.configure(
-            "ED.Treeview.Heading",
-            background=COLORS["panel"],
-            foreground=COLORS["fg"],
-            relief="flat",
-            font=(self._ui_family, self._ui_size, "bold"),
-        )
-        style.map("ED.Treeview", background=[("selected", COLORS["sel"])], foreground=[("selected", COLORS["fg"])])
 
     def _build(self) -> None:
         top = ttk.Frame(self.win, style="ED.TFrame", padding=(12, 10))
@@ -223,43 +306,159 @@ class MainWindow:
 
         self.route_info = ttk.Label(self.tab_route, text="Маршрут пуст", style="ED.TLabel")
         self.route_info.pack(anchor="w", pady=(0, 6))
-        self.route_tree = ttk.Treeview(
-            self.tab_route,
-            columns=("idx", "system", "star", "ly"),
-            show="headings",
-            style="ED.Treeview",
-        )
-        for col, title, w, anchor in (
-            ("idx", "#", 40, "center"),
-            ("system", "Система", 320, "w"),
-            ("star", "Класс", 80, "center"),
-            ("ly", "До след., ly", 120, "e"),
-        ):
-            self.route_tree.heading(col, text=title)
-            self.route_tree.column(col, width=w, anchor=anchor)
-        self.route_tree.tag_configure("done", foreground=COLORS["muted"])
-        self.route_tree.tag_configure("here", font=(self._ui_family, self._ui_size + 1))
-        route_scroll = ttk.Scrollbar(self.tab_route, orient="vertical", command=self.route_tree.yview)
-        self.route_tree.configure(yscrollcommand=route_scroll.set)
-        self.route_tree.pack(side="left", fill="both", expand=True)
-        route_scroll.pack(side="right", fill="y")
-
         self._ring_icon = _ring_icon(self.win)
+        self._build_route_table()
         self._build_bodies_table()
 
-    def _build_bodies_table(self) -> None:
-        """Таблица тел на метках: Treeview не умеет красить отдельные ячейки."""
-        host = tk.Frame(self.tab_bodies, bg=COLORS["bg"])
+    def _load_column_widths(self) -> None:
+        if self.cfg is None:
+            return
+        for key, width in (getattr(self.cfg, "bodies_columns", None) or {}).items():
+            if key in self._body_widths:
+                self._body_widths[key] = max(MIN_COL_WIDTH, int(width))
+        for key, width in (getattr(self.cfg, "route_columns", None) or {}).items():
+            if key in self._route_widths:
+                self._route_widths[key] = max(MIN_COL_WIDTH, int(width))
+
+    def _enable_layout_persist(self) -> None:
+        """После первой отрисовки: починить рамку и разрешить запись геометрии."""
+        try:
+            self.win.update_idletasks()
+            winapi.detach_owner(winapi.hwnd_of(self.win))
+        except Exception:
+            pass
+        self._layout_ready = True
+
+    def _on_window_configure(self, event) -> None:
+        if not self._layout_ready or event.widget is not self.win:
+            return
+        if self.win.state() != "normal":
+            return
+        geometry = self.win.geometry()
+        if self.cfg is not None and getattr(self.cfg, "main_geometry", None) != geometry:
+            self.cfg.main_geometry = geometry
+            self._schedule_save()
+
+    def _schedule_save(self) -> None:
+        if self.cfg is None or not self._layout_ready:
+            return
+        if self._save_after is not None:
+            try:
+                self.win.after_cancel(self._save_after)
+            except tk.TclError:
+                pass
+        self._save_after = self.win.after(400, lambda: self._persist_layout(write=True))
+
+    def _persist_layout(self, write: bool = False) -> None:
+        self._save_after = None
+        if self.cfg is None:
+            return
+        self.cfg.bodies_columns = dict(self._body_widths)
+        self.cfg.route_columns = dict(self._route_widths)
+        try:
+            self.cfg.main_geometry = self.win.geometry()
+        except tk.TclError:
+            pass
+        if not write:
+            return
+        try:
+            self.cfg.save()
+        except OSError:
+            pass
+
+    def _col_width(self, table: str, key: str, default: int) -> int:
+        widths = self._body_widths if table == "bodies" else self._route_widths
+        return max(MIN_COL_WIDTH, int(widths.get(key, default)))
+
+    def _set_col_width(self, table: str, index: int, width: int) -> None:
+        columns = BODY_COLUMNS if table == "bodies" else ROUTE_COLUMNS
+        key = columns[index][0]
+        width = max(MIN_COL_WIDTH, int(width))
+        if table == "bodies":
+            self._body_widths[key] = width
+            stretch = 1 if key == "name" else 0
+            self._bodies_header.grid_columnconfigure(index, minsize=width, weight=stretch)
+            self._bodies_inner.grid_columnconfigure(index, minsize=width, weight=stretch)
+        else:
+            self._route_widths[key] = width
+            stretch = 1 if key == "system" else 0
+            self._route_header.grid_columnconfigure(index, minsize=width, weight=stretch)
+            self._route_inner.grid_columnconfigure(index, minsize=width, weight=stretch)
+
+    def _bind_col_resize(self, label: tk.Label, table: str, index: int) -> None:
+        columns = BODY_COLUMNS if table == "bodies" else ROUTE_COLUMNS
+
+        def on_motion(event) -> None:
+            if self._col_drag is not None:
+                return
+            near = event.widget.winfo_width() - event.x <= RESIZE_EDGE
+            event.widget.configure(cursor="sb_h_double_arrow" if near else "")
+
+        def on_leave(_event) -> None:
+            if self._col_drag is None:
+                label.configure(cursor="")
+
+        def on_press(event) -> None:
+            if event.widget.winfo_width() - event.x > RESIZE_EDGE:
+                return
+            key = columns[index][0]
+            start_w = self._col_width(table, key, columns[index][2])
+            self._col_drag = (table, index, event.x_root, start_w)
+            label.configure(cursor="sb_h_double_arrow")
+            label.grab_set()
+
+        def on_drag(event) -> None:
+            if self._col_drag is None:
+                return
+            drag_table, drag_index, start_x, start_w = self._col_drag
+            if drag_table != table or drag_index != index:
+                return
+            self._set_col_width(table, index, start_w + (event.x_root - start_x))
+
+        def on_release(_event) -> None:
+            if self._col_drag is None:
+                return
+            self._col_drag = None
+            try:
+                label.grab_release()
+            except tk.TclError:
+                pass
+            label.configure(cursor="")
+            self._schedule_save()
+
+        label.bind("<Motion>", on_motion, add="+")
+        label.bind("<Leave>", on_leave, add="+")
+        label.bind("<ButtonPress-1>", on_press, add="+")
+        label.bind("<B1-Motion>", on_drag, add="+")
+        label.bind("<ButtonRelease-1>", on_release, add="+")
+
+    def _build_scroll_table(
+        self,
+        parent: tk.Misc,
+        columns: tuple,
+        widths: dict[str, int],
+        stretch_key: str,
+        header_attr: str,
+        labels_attr: str,
+        canvas_attr: str,
+        inner_attr: str,
+        gutter_attr: str,
+        host_attr: str,
+        table: str,
+    ) -> None:
+        host = tk.Frame(parent, bg=COLORS["bg"])
         host.pack(fill="both", expand=True)
-        self._bodies_host = host
+        setattr(self, host_attr, host)
         host.grid_columnconfigure(0, weight=1)
         host.grid_rowconfigure(1, weight=1)
 
         header = tk.Frame(host, bg=COLORS["panel"])
         header.grid(row=0, column=0, sticky="ew")
-        self._bodies_header = header
-        for index, (key, title, width, anchor) in enumerate(BODY_COLUMNS):
-            weight = 1 if key == "name" else 0
+        setattr(self, header_attr, header)
+        labels: list[tk.Label] = []
+        for index, (key, title, default_w, anchor) in enumerate(columns):
+            width = max(MIN_COL_WIDTH, int(widths.get(key, default_w)))
+            weight = 1 if key == stretch_key else 0
             header.grid_columnconfigure(index, minsize=width, weight=weight)
             label = tk.Label(
                 header,
@@ -271,8 +470,11 @@ class MainWindow:
                 padx=4,
                 pady=4,
             )
-            label.grid(row=0, column=index, sticky="ew")
-            self._header_labels.append(label)
+            _paint_grid(label)
+            label.grid(row=0, column=index, sticky="nsew")
+            self._bind_col_resize(label, table, index)
+            labels.append(label)
+        setattr(self, labels_attr, labels)
 
         canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
         scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
@@ -281,15 +483,16 @@ class MainWindow:
         scroll.grid(row=1, column=1, sticky="ns")
         gutter = tk.Frame(host, width=16, bg=COLORS["bg"])
         gutter.grid(row=0, column=1)
-        self._bodies_gutter = gutter
+        setattr(self, gutter_attr, gutter)
 
         inner = tk.Frame(canvas, bg=COLORS["row"])
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
-        for index, (key, _title, width, _anchor) in enumerate(BODY_COLUMNS):
-            inner.grid_columnconfigure(index, minsize=width, weight=(1 if key == "name" else 0))
+        for index, (key, _title, default_w, _anchor) in enumerate(columns):
+            width = max(MIN_COL_WIDTH, int(widths.get(key, default_w)))
+            inner.grid_columnconfigure(index, minsize=width, weight=(1 if key == stretch_key else 0))
 
         def _fit(event) -> None:
-            canvas.itemconfigure(window, width=event.width)
+            canvas.itemconfigure(window, width=max(event.width, inner.winfo_reqwidth()))
 
         def _scrollregion(_event) -> None:
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -301,9 +504,39 @@ class MainWindow:
         inner.bind("<Configure>", _scrollregion)
         canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _wheel))
         canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        setattr(self, canvas_attr, canvas)
+        setattr(self, inner_attr, inner)
 
-        self._bodies_canvas = canvas
-        self._bodies_inner = inner
+    def _build_bodies_table(self) -> None:
+        """Таблица тел на метках: Treeview не умеет красить отдельные ячейки."""
+        self._build_scroll_table(
+            self.tab_bodies,
+            BODY_COLUMNS,
+            self._body_widths,
+            "name",
+            "_bodies_header",
+            "_header_labels",
+            "_bodies_canvas",
+            "_bodies_inner",
+            "_bodies_gutter",
+            "_bodies_host",
+            "bodies",
+        )
+
+    def _build_route_table(self) -> None:
+        self._build_scroll_table(
+            self.tab_route,
+            ROUTE_COLUMNS,
+            self._route_widths,
+            "system",
+            "_route_header",
+            "_route_header_labels",
+            "_route_canvas",
+            "_route_inner",
+            "_route_gutter",
+            "_route_host",
+            "route",
+        )
 
     # ----------------------------------------------------------------- show
     def show(self) -> None:
@@ -314,8 +547,10 @@ class MainWindow:
             self.win.focus_force()
         except tk.TclError:
             pass
+        self.win.after(30, self._enable_layout_persist)
 
     def hide(self) -> None:
+        self._persist_layout(write=False)
         self._visible = False
         self.win.withdraw()
         if self.on_close:
@@ -329,6 +564,10 @@ class MainWindow:
 
     def destroy(self) -> None:
         try:
+            self._persist_layout(write=False)
+        except Exception:
+            pass
+        try:
             self.win.destroy()
         except tk.TclError:
             pass
@@ -338,14 +577,21 @@ class MainWindow:
         """Шрифт и палитра окна из настроек. Цвета таблицы живут в COLORS."""
         from .config import DARK_COLORS
 
+        self.cfg = cfg
         for key in list(COLORS):
+            if key == "grid":
+                continue
             COLORS[key] = cfg.colors.get(key) or DARK_COLORS.get(key, COLORS[key])
+        COLORS["grid"] = cfg.colors.get("grid") or "#3a3a3a"
         self._ui_family = cfg.ui_font_family or "Segoe UI"
         self._ui_size = max(8, min(24, int(cfg.ui_font_size or 9)))
+        self._load_column_widths()
+        for index, (key, _title, default_w, _anchor) in enumerate(BODY_COLUMNS):
+            self._set_col_width("bodies", index, self._col_width("bodies", key, default_w))
+        for index, (key, _title, default_w, _anchor) in enumerate(ROUTE_COLUMNS):
+            self._set_col_width("route", index, self._col_width("route", key, default_w))
         self._style()
         self._paint_chrome()
-        self.route_tree.tag_configure("done", foreground=COLORS["muted"])
-        self.route_tree.tag_configure("here", font=(self._ui_family, self._ui_size + 1))
         self._last_key = None
         if self._state is not None:
             self.update_state(self._state)
@@ -353,15 +599,35 @@ class MainWindow:
     def _paint_chrome(self) -> None:
         font = (self._ui_family, self._ui_size, "bold")
         self.win.configure(bg=COLORS["bg"])
-        host = getattr(self, "_bodies_host", None)
-        if host is not None:
+        for host_name, header_name, canvas_name, inner_name, gutter_name, labels in (
+            (
+                "_bodies_host",
+                "_bodies_header",
+                "_bodies_canvas",
+                "_bodies_inner",
+                "_bodies_gutter",
+                self._header_labels,
+            ),
+            (
+                "_route_host",
+                "_route_header",
+                "_route_canvas",
+                "_route_inner",
+                "_route_gutter",
+                self._route_header_labels,
+            ),
+        ):
+            host = getattr(self, host_name, None)
+            if host is None:
+                continue
             host.configure(bg=COLORS["bg"])
-            self._bodies_header.configure(bg=COLORS["panel"])
-            self._bodies_canvas.configure(bg=COLORS["row"])
-            self._bodies_inner.configure(bg=COLORS["row"])
-            self._bodies_gutter.configure(bg=COLORS["bg"])
-        for label in self._header_labels:
-            label.configure(bg=COLORS["panel"], fg=COLORS["fg"], font=font)
+            getattr(self, header_name).configure(bg=COLORS["panel"])
+            getattr(self, canvas_name).configure(bg=COLORS["row"])
+            getattr(self, inner_name).configure(bg=COLORS["row"])
+            getattr(self, gutter_name).configure(bg=COLORS["bg"])
+            for label in labels:
+                label.configure(bg=COLORS["panel"], fg=COLORS["fg"], font=font)
+                _paint_grid(label)
 
     def update_state(self, state: GameState) -> None:
         self._state = state
@@ -460,32 +726,56 @@ class MainWindow:
         )
 
     def _update_route(self, route: Route, current: str | None) -> None:
-        self.route_tree.delete(*self.route_tree.get_children())
+        for child in self._route_inner.winfo_children():
+            child.destroy()
         if not route.hops:
             self.route_info.configure(text="Маршрут пуст (проложите в игре или plot/import)")
+            self._route_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
         remaining = route.distance_remaining(current)
         src = route.source or "game"
         lock = " · залочен" if route.locked else ""
         extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
         self.route_info.configure(text=f"Источник: {src}{lock}{extra}")
-        current_item = None
         here = route.index_of(current)
-        for i, hop in enumerate(route.hops):
+        here_row = None
+        for row, hop in enumerate(route.hops):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
-            tag = route_tag(i, here)
+            tag = route_tag(row, here)
             mark = "▶ " if tag == "here" else ""
-            item = self.route_tree.insert(
-                "",
-                "end",
-                values=(i + 1, f"{mark}{hop.system}", hop.star_class or "—", ly_text),
-                tags=(tag,) if tag else (),
-            )
+            fg = COLORS["muted"] if tag == "done" else COLORS["text"]
+            font = (self._ui_family, self._ui_size + (1 if tag == "here" else 0))
+            cells = {
+                "idx": str(row + 1),
+                "system": f"{mark}{hop.system}",
+                "star": hop.star_class or "—",
+                "ly": ly_text,
+            }
+            for col, (key, _title, _width, anchor) in enumerate(ROUTE_COLUMNS):
+                cell = tk.Label(
+                    self._route_inner,
+                    text=cells[key],
+                    bg=COLORS["row"],
+                    fg=fg,
+                    anchor=anchor,
+                    font=font,
+                    padx=4,
+                    pady=2,
+                )
+                _paint_grid(cell)
+                cell.grid(row=row, column=col, sticky="nsew")
             if tag == "here":
-                current_item = item
-        if current_item is not None:
-            self.route_tree.see(current_item)
+                here_row = row
+        self._route_inner.update_idletasks()
+        self._route_canvas.configure(scrollregion=self._route_canvas.bbox("all") or (0, 0, 0, 0))
+        if here_row is not None:
+            self._route_inner.update_idletasks()
+            row_widgets = self._route_inner.grid_slaves(row=here_row)
+            if row_widgets:
+                y = row_widgets[0].winfo_y()
+                total = max(1, self._route_inner.winfo_height())
+                self._route_canvas.yview_moveto(max(0.0, y / total))
 
     def _update_bodies(self, state: GameState) -> None:
         for child in self._bodies_inner.winfo_children():
@@ -496,19 +786,19 @@ class MainWindow:
             key=lambda b: (0 if b.is_star or b.star_type else 1, b.distance_ls or 0, b.body_id),
         )
         for row, body in enumerate(bodies):
-            bio = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
+            bio_text = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
             geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
             pml = "—" if body.mining_locations is None else str(body.mining_locations)
             guess, guess_color = _forecast(body, state)
             dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
             first = "✔" if not body.was_discovered and not body.remote else "—"
             src = body.source or ("своё" if not body.remote else "?")
-            values = {
+            cell_values = {
                 "name": body.name or f"#{body.body_id}",
                 "type": _type_of(body),
                 "atmos": body.atmosphere_type or body.atmosphere or "—",
                 "temp": _temp(body.surface_temp),
-                "bio": bio,
+                "bio": bio_text,
                 "guess": guess,
                 "geo": geo,
                 "pml": pml,
@@ -523,6 +813,7 @@ class MainWindow:
                 "geo": body.geo_signals,
                 "pml": body.mining_locations,
             }
+            tip = _forecast_tip(body, state)
             for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
                 if key == "belt":
                     icon = self._ring_icon if body.has_rings and self._ring_icon is not None else None
@@ -537,7 +828,7 @@ class MainWindow:
                         fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
                     cell = tk.Label(
                         self._bodies_inner,
-                        text=values[key],
+                        text=cell_values[key],
                         bg=bg,
                         fg=fg,
                         anchor=anchor,
@@ -545,7 +836,10 @@ class MainWindow:
                         padx=4,
                         pady=2,
                     )
-                cell.grid(row=row, column=col, sticky="ew")
+                    if key == "bio" and tip:
+                        cell.tip = _CellTip(cell, tip)
+                _paint_grid(cell)
+                cell.grid(row=row, column=col, sticky="nsew")
         self._bodies_address = state.system.address
         self._bodies_inner.update_idletasks()
         self._bodies_canvas.configure(scrollregion=self._bodies_canvas.bbox("all") or (0, 0, 0, 0))

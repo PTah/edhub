@@ -87,7 +87,8 @@ class AlertEngine:
         short = body_name.split()[-1] if body_name else "тело"
         forecast = bio.forecast_names(body, state.system, limit=3) if body is not None else []
         possible = f" Возможно: {', '.join(forecast)}." if forecast else ""
-        text = f"Биологический сигнал найден. {short}.{possible}"
+        # short — обозначение тела (часто «2»/«A 4»), count — число биосигналов
+        text = f"Биологический сигнал найден на {short}. Сигналов: {count}.{possible}"
         overlay = f"био ×{count}: {body_name}"
         if forecast:
             overlay += " · " + ", ".join(forecast)

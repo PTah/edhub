@@ -33,8 +33,10 @@ SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
+SWP_FRAMECHANGED = 0x0020
 HWND_TOPMOST = -1
 GA_ROOT = 2
+GWLP_HWNDPARENT = -8
 MONITOR_DEFAULTTONEAREST = 2
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
@@ -109,8 +111,40 @@ def _user32():
         ctypes.c_uint,
     ]
     user32.SetWindowPos.restype = ctypes.c_int
+    if hasattr(user32, "SetWindowLongPtrW"):
+        user32.SetWindowLongPtrW.argtypes = [hwnd, ctypes.c_int, hwnd]
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
     _user32.ready = True
     return user32
+
+
+def detach_owner(hwnd: int) -> bool:
+    """Убрать owner у обычного Toplevel.
+
+    Дочернее окно безрамочного root ломает NC-хиттест: стрелки ресайза
+    «уезжают» в сторону от реального курсора. После отвязки рамка ведёт себя нормально.
+    """
+    if not IS_WINDOWS or not hwnd:
+        return False
+    try:
+        user32 = _user32()
+        handle = ctypes.c_void_p(hwnd)
+        if hasattr(user32, "SetWindowLongPtrW"):
+            user32.SetWindowLongPtrW(handle, GWLP_HWNDPARENT, ctypes.c_void_p(0))
+        else:
+            user32.SetWindowLongW(hwnd, GWLP_HWNDPARENT, 0)
+        user32.SetWindowPos(
+            handle,
+            ctypes.c_void_p(0),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def apply_overlay_styles(hwnd: int, click_through: bool, topmost: bool = True) -> bool:

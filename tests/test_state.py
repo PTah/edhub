@@ -670,11 +670,10 @@ class RouteMarkTests(unittest.TestCase):
         self.assertEqual(route_tag(3, 2), "")
         self.assertEqual(route_tag(0, None), "")
 
-    def test_route_tree_tags(self):
+    def test_route_table_marks_current(self):
         import tkinter as tk
-        from tkinter import font as tkfont
 
-        from edhud.mainwindow import COLORS, MainWindow
+        from edhud.mainwindow import BODY_COLUMNS, COLORS, MainWindow, ROUTE_COLUMNS
         from edhud.route import Route, RouteHop
 
         root = tk.Tk()
@@ -692,17 +691,51 @@ class RouteMarkTests(unittest.TestCase):
             )
             window.update_state(state)
             window.win.update_idletasks()
-            items = window.route_tree.get_children()
-            self.assertEqual(window.route_tree.item(items[0], "tags"), ("done",))
-            self.assertEqual(window.route_tree.item(items[1], "tags"), ("here",))
-            self.assertEqual(window.route_tree.item(items[2], "tags"), "")
-            self.assertTrue(str(window.route_tree.item(items[1], "values")[1]).startswith("▶ "))
-            self.assertEqual(str(window.route_tree.tag_configure("done", "foreground")), COLORS["muted"])
-            here_font = tkfont.Font(root=root, font=window.route_tree.tag_configure("here", "font"))
-            self.assertEqual(int(here_font.cget("size")), window._ui_size + 1)
+            columns = {key: index for index, (key, *_rest) in enumerate(ROUTE_COLUMNS)}
+            rows = {}
+            for cell in window._route_inner.winfo_children():
+                info = cell.grid_info()
+                rows.setdefault(int(info["row"]), {})[int(info["column"])] = cell
+            self.assertEqual(rows[0][columns["system"]].cget("fg"), COLORS["muted"])
+            self.assertTrue(str(rows[1][columns["system"]].cget("text")).startswith("▶ "))
+            self.assertEqual(int(rows[0][columns["system"]].cget("highlightthickness")), 1)
+            self.assertEqual(len(BODY_COLUMNS), len(window._header_labels))
             window.destroy()
         finally:
             root.destroy()
+
+    def test_column_widths_persist(self):
+        import tempfile
+        from pathlib import Path
+        import tkinter as tk
+
+        from edhud.config import Config
+        from edhud.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            cfg = Config()
+            cfg.bodies_columns = {"name": 260, "bio": 64}
+            cfg.route_columns = {"system": 400}
+            cfg.main_geometry = "1000x500+10+20"
+            cfg.save(path)
+            loaded = Config.load(path)
+            self.assertEqual(loaded.bodies_columns["name"], 260)
+            self.assertEqual(loaded.route_columns["system"], 400)
+            self.assertEqual(loaded.main_geometry, "1000x500+10+20")
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                window = MainWindow(root, cfg=loaded)
+                self.assertEqual(window._body_widths["name"], 260)
+                self.assertEqual(window._body_widths["bio"], 64)
+                self.assertEqual(window._route_widths["system"], 400)
+                window._set_col_width("bodies", 1, 300)
+                self.assertEqual(window._body_widths["name"], 300)
+                window.destroy()
+            finally:
+                root.destroy()
 
 
 class BodyColorTests(unittest.TestCase):
@@ -769,7 +802,7 @@ class BodyColorTests(unittest.TestCase):
     def test_bodies_table_shows_bio_forecast(self):
         import tkinter as tk
 
-        from edhud.mainwindow import BODY_COLUMNS, COLORS, MainWindow
+        from edhud.mainwindow import BODY_COLUMNS, COLORS, MainWindow, _forecast_tip
 
         root = tk.Tk()
         root.withdraw()
@@ -802,16 +835,46 @@ class BodyColorTests(unittest.TestCase):
             window.win.update_idletasks()
             columns = {key: index for index, (key, *_rest) in enumerate(BODY_COLUMNS)}
             painted = {}
+            bio_cell = None
             for cell in window._bodies_inner.grid_slaves(row=1):
                 info = cell.grid_info()
-                painted[int(info["column"])] = (cell.cget("text"), cell.cget("fg"))
+                col = int(info["column"])
+                painted[col] = (cell.cget("text"), cell.cget("fg"))
+                if col == columns["bio"]:
+                    bio_cell = cell
             text, fg = painted[columns["guess"]]
             self.assertTrue(text.startswith("≈ "))
             self.assertIn("Bacterium", text)
             self.assertEqual(fg, COLORS["accent"])
+            tip = _forecast_tip(state.system.bodies[1], state)
+            self.assertIsNotNone(tip)
+            self.assertTrue(tip.startswith("Предположительно:"))
+            self.assertIn("Bacterium", tip)
+            self.assertIsNotNone(bio_cell)
+            self.assertTrue(hasattr(bio_cell, "tip"))
+            self.assertEqual(bio_cell.tip.text, tip)
             window.destroy()
         finally:
             root.destroy()
+
+    def test_forecast_tip_uses_dss_names(self):
+        from edhud.mainwindow import _forecast_tip
+
+        state = GameState()
+        body = Body(
+            body_id=1,
+            name="Test 1",
+            planet_class="Icy body",
+            bio_signals=1,
+            signals_known=True,
+            genuses={"$Codex_Ent_Bacterial_Genus_Name;": 1},
+            dss_scanned=True,
+        )
+        state.system.bodies[1] = body
+        tip = _forecast_tip(body, state)
+        self.assertIsNotNone(tip)
+        self.assertTrue(tip.startswith("DSS:"))
+        self.assertIn("Bacterium", tip)
 
 
 class BioBoardTests(unittest.TestCase):
