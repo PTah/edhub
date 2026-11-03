@@ -97,13 +97,53 @@ def _composition(raw) -> dict[str, float]:
     return found
 
 
-def system_coordinates(name: str, timeout: float = 8.0) -> tuple[float, float, float] | None:
-    """Координаты системы с EDSM. CarrierLocation их не пишет."""
-    if not name:
+def system_coordinates(
+    name: str | None = None,
+    address: int | None = None,
+    timeout: float = 8.0,
+) -> tuple[float, float, float] | None:
+    """Координаты системы: EDSM по имени/id64, иначе Spansh autocomplete."""
+    if name:
+        url = (
+            "https://www.edsm.net/api-v1/system?systemName="
+            + urllib.parse.quote(name)
+            + "&showCoordinates=1"
+        )
+        data = _http_json(url, timeout=timeout)
+        pos = _coords_from_edsm(data)
+        if pos:
+            return pos
+    if address is not None:
+        url = f"https://www.edsm.net/api-v1/system?systemId64={int(address)}&showCoordinates=1"
+        data = _http_json(url, timeout=timeout)
+        pos = _coords_from_edsm(data)
+        if pos:
+            return pos
+    if name:
+        url = (
+            "https://spansh.co.uk/api/systems/field_values/system_names?q="
+            + urllib.parse.quote(name)
+        )
+        data = _http_json(url, timeout=timeout)
+        rows = data.get("min_max") if isinstance(data, dict) else None
+        if isinstance(rows, list):
+            needle = name.lower()
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("name") or "").lower() != needle:
+                    continue
+                try:
+                    return (float(row["x"]), float(row["y"]), float(row["z"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+    return None
+
+
+def _coords_from_edsm(data) -> tuple[float, float, float] | None:
+    if not isinstance(data, dict):
         return None
-    url = "https://www.edsm.net/api-v1/system?systemName=" + urllib.parse.quote(name) + "&showCoordinates=1"
-    data = _http_json(url, timeout=timeout)
-    coords = data.get("coords") if isinstance(data, dict) else None
+    coords = data.get("coords")
     if not isinstance(coords, dict):
         return None
     try:

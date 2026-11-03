@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -374,6 +375,11 @@ class Carrier:
     address: int | None = None
     body_id: int | None = None
     star_pos: tuple[float, float, float] | None = None
+    # отложенный прыжок: после DepartureTime локация обновится сама
+    jump_dest_system: str | None = None
+    jump_dest_address: int | None = None
+    jump_dest_body_id: int | None = None
+    jump_departure: float | None = None
 
     @property
     def known(self) -> bool:
@@ -593,6 +599,23 @@ def _event_body_id(e: dict) -> int | None:
     return None
 
 
+def _journal_ts(value: Any) -> float | None:
+    """ISO-время журнала (…Z) → unix. Нужно для DepartureTime носителя."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
 def parse_materials(raw: Any) -> dict[str, float]:
     """Журнал отдаёт материалы списком {Name, Percent}, старые события — словарём."""
     rows: list = []
@@ -759,6 +782,7 @@ class GameState:
             return
         if not own and station != callsign and not e.get("CarrierID"):
             return
+        self._clear_carrier_jump()
         self._move_carrier(e.get("StarSystem"), e.get("SystemAddress"), e.get("BodyID"), e.get("StarPos"))
 
     def _on_fsdjump(self, e: dict) -> None:
@@ -784,7 +808,55 @@ class GameState:
 
     def _on_carrierlocation(self, e: dict) -> None:
         self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
+        self._clear_carrier_jump()
         self._move_carrier(e.get("StarSystem"), e.get("SystemAddress"), e.get("BodyID"), e.get("StarPos"))
+
+    def _on_carrierjumprequest(self, e: dict) -> None:
+        """Носитель заложил прыжок. После DepartureTime локация обновится сама (без CarrierLocation)."""
+        if not self._is_own_carrier(e):
+            return
+        self.carrier.jump_dest_system = e.get("SystemName") or e.get("StarSystem")
+        address = e.get("SystemAddress")
+        self.carrier.jump_dest_address = int(address) if address is not None else None
+        body = e.get("BodyID")
+        self.carrier.jump_dest_body_id = int(body) if body is not None else None
+        self.carrier.jump_departure = _journal_ts(e.get("DepartureTime")) or time.time()
+        self.apply_due_carrier_jump()
+
+    def _on_carrierjumpcancelled(self, e: dict) -> None:
+        if not self._is_own_carrier(e):
+            return
+        self._clear_carrier_jump()
+
+    def _is_own_carrier(self, e: dict) -> bool:
+        cid = e.get("CarrierID") or e.get("MarketID")
+        own = self.carrier.carrier_id
+        if own and cid is not None:
+            try:
+                return int(cid) == int(own)
+            except (TypeError, ValueError):
+                return False
+        return bool(own) or cid is not None
+
+    def _clear_carrier_jump(self) -> None:
+        self.carrier.jump_dest_system = None
+        self.carrier.jump_dest_address = None
+        self.carrier.jump_dest_body_id = None
+        self.carrier.jump_departure = None
+
+    def apply_due_carrier_jump(self) -> bool:
+        """Если время отбытия прошло — переносим носитель в целевую систему."""
+        dep = self.carrier.jump_departure
+        if dep is None:
+            return False
+        if time.time() + 1.0 < dep:
+            return False
+        system = self.carrier.jump_dest_system
+        address = self.carrier.jump_dest_address
+        body_id = self.carrier.jump_dest_body_id
+        self._clear_carrier_jump()
+        self._move_carrier(system, address, body_id, None)
+        return True
 
     def _move_carrier(self, system: str | None, address, body_id, star_pos) -> None:
         """Новая система носителя. Старые координаты больше не годятся: в CarrierLocation их нет."""
@@ -1191,15 +1263,14 @@ class GameState:
             self._jump_tab_latched = False
 
     def _hyperspace_spool(self) -> bool:
+        """Charging FSD к другой системе → вкладка Route (и из обычного космоса)."""
         if not self.status.fsd_charging:
             return False
         dest = self.status.destination_system
         here = self.system.address
-        if not isinstance(dest, int) or here is None or int(dest) == int(here):
+        if not isinstance(dest, int) or here is None:
             return False
-        # Разгон суперкруиза идёт ещё из обычного пространства.
-        # Межзвёздный — когда суперкруиз уже включён (или только что был).
-        return bool(self.status.supercruise or self._was_in_supercruise or self.status.flag(FLAG_FSD_JUMP))
+        return int(dest) != int(here)
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:

@@ -386,9 +386,13 @@ def _carrier_label(state: GameState) -> str | None:
     if not carrier.known:
         return None
     who = carrier.callsign or carrier.name or "карриер"
+    where = carrier.system or "—"
     dist = state.carrier_distance_ly()
     if dist is None:
-        where = carrier.system or "—"
+        if carrier.jump_departure and carrier.jump_dest_system:
+            return f"{who} · прыжок → {carrier.jump_dest_system}"
+        if state.carrier_pos_pending:
+            return f"{who} · {where} · ищем ly…"
         return f"{who} · {where}"
     if dist < 0.05:
         return f"{who} · здесь"

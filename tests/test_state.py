@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -456,20 +457,22 @@ class JumpTabTests(unittest.TestCase):
         )
         self.assertEqual(state.view_tab, "bodies")
 
-    def test_hyperspace_charge_opens_route_supercruise_charge_does_not(self):
+    def test_fsd_charging_to_other_system_opens_route(self):
         state = GameState()
         state.system.address = 1
         state.system.name = "Here"
+        # зарядка суперкруиза в той же системе — вкладку не трогаем
         state.apply_status(
             {
                 "Flags": 1 << 17,
-                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+                "Destination": {"System": 1, "Body": 0, "Name": "Here"},
             }
         )
         self.assertEqual(state.view_tab, "bodies")
+        # зарядка гиперпрыжка (даже без суперкруиза) → Route
         state.apply_status(
             {
-                "Flags": (1 << 4) | (1 << 17),
+                "Flags": 1 << 17,
                 "Destination": {"System": 2, "Body": 0, "Name": "There"},
             }
         )
@@ -600,6 +603,47 @@ class CarrierDistanceTests(unittest.TestCase):
         )
         self.assertEqual(state.carrier.system, "Near")
         self.assertFalse(state.carrier_pos_pending)
+        self.assertAlmostEqual(state.carrier_distance_ly(), 30.0, places=3)
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        self.assertIn("30.0 ly", view.route_row.text)
+
+    def test_carrier_jump_request_moves_after_departure(self):
+        state = GameState()
+        state.apply(
+            {
+                "event": "CarrierLocation",
+                "CarrierID": 7,
+                "StarSystem": "Home",
+                "SystemAddress": 1,
+            }
+        )
+        state.apply({"event": "CarrierStats", "CarrierID": 7, "Callsign": "GHY-7TZ", "Name": "pedrikakis"})
+        state.apply(
+            {
+                "event": "Location",
+                "StarSystem": "Away",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 40],
+            }
+        )
+        state._remember_star(1, "Home", (0, 0, 0))
+        self.assertAlmostEqual(state.carrier_distance_ly(), 40.0, places=3)
+        past = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 120))
+        state.apply(
+            {
+                "event": "CarrierJumpRequest",
+                "CarrierID": 7,
+                "SystemName": "Near",
+                "SystemAddress": 3,
+                "BodyID": 1,
+                "DepartureTime": past,
+            }
+        )
+        self.assertEqual(state.carrier.system, "Near")
+        self.assertEqual(state.carrier.address, 3)
+        self.assertTrue(state.carrier_pos_pending)
+        self.assertIsNone(state.carrier_distance_ly())
+        state._remember_star(3, "Near", (0, 0, 10))
         self.assertAlmostEqual(state.carrier_distance_ly(), 30.0, places=3)
         view = hudmodel.build_view(state, Config(), expanded=False)
         self.assertIn("30.0 ly", view.route_row.text)

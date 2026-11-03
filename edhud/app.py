@@ -212,31 +212,42 @@ class App:
             pass
 
     def _lookup_carrier_pos(self) -> None:
-        """CarrierLocation не содержит StarPos — координаты новой системы берём с EDSM."""
+        """CarrierLocation/прыжок носителя без StarPos — координаты с EDSM/Spansh."""
+        self.state.apply_due_carrier_jump()
         if not self.state.carrier_pos_pending or not self.cfg.allow_network:
             return
         name = self.state.carrier.system
-        if not name:
+        address = self.state.carrier.address
+        if not name and address is None:
             return
+        key = (name or "").lower() or str(address)
         now = time.time()
-        if name == self._carrier_lookup and now - self._carrier_lookup_at < 60:
+        if key == self._carrier_lookup and now - self._carrier_lookup_at < 45:
             return
-        self._carrier_lookup = name
+        self._carrier_lookup = key
         self._carrier_lookup_at = now
 
         def work() -> None:
-            pos = remote.system_coordinates(name)
+            pos = remote.system_coordinates(name, address=address)
 
             def apply() -> None:
-                current = self.state.carrier.system or ""
-                if current.lower() != name.lower():
+                current = (self.state.carrier.system or "").lower()
+                same_name = bool(name) and current == name.lower()
+                same_addr = (
+                    address is not None
+                    and self.state.carrier.address is not None
+                    and int(address) == int(self.state.carrier.address)
+                )
+                if not (same_name or same_addr):
                     self._carrier_lookup = None
                     return
                 if not pos:
+                    # сброс ключа — повторим поиск позже
+                    self._carrier_lookup = None
                     return
                 self.state.carrier.star_pos = pos
                 self.state.carrier_pos_pending = False
-                self.state._remember_star(self.state.carrier.address, name, pos)
+                self.state._remember_star(self.state.carrier.address, self.state.carrier.system, pos)
 
             self._ui(apply)
 
