@@ -569,6 +569,30 @@ def _f(value: Any) -> float | None:
         return None
 
 
+def _event_body_name(e: dict) -> str | None:
+    """Имя тела из события. ScanOrganic пишет в Body числовой BodyID — это не имя."""
+    for key in ("BodyName", "Body"):
+        value = e.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _event_body_id(e: dict) -> int | None:
+    """BodyID; в ScanOrganic тот же id иногда лежит в поле Body."""
+    for key in ("BodyID", "Body"):
+        value = e.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value == int(value):
+            return int(value)
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value)
+    return None
+
+
 def parse_materials(raw: Any) -> dict[str, float]:
     """Журнал отдаёт материалы списком {Name, Percent}, старые события — словарём."""
     rows: list = []
@@ -1107,16 +1131,20 @@ class GameState:
 
     def _on_supercruiseexit(self, e: dict) -> None:
         self.mode = "Ship"
-        if e.get("Body"):
-            self.current_body_name = e.get("Body")
-            if e.get("BodyID") is not None:
-                self.current_body_id = e.get("BodyID")
+        name = _event_body_name(e)
+        body_id = _event_body_id(e)
+        if name:
+            self.current_body_name = name
+        if body_id is not None:
+            self.current_body_id = body_id
 
     def _on_approachbody(self, e: dict) -> None:
-        if e.get("Body"):
-            self.current_body_name = e.get("Body")
-        if e.get("BodyID") is not None:
-            self.current_body_id = e.get("BodyID")
+        name = _event_body_name(e)
+        body_id = _event_body_id(e)
+        if name:
+            self.current_body_name = name
+        if body_id is not None:
+            self.current_body_id = body_id
 
     def _on_leavebody(self, _e: dict) -> None:
         self.current_body_id = None
@@ -1175,8 +1203,8 @@ class GameState:
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:
-        body_id = e.get("BodyID")
-        name = e.get("BodyName") or e.get("Body")
+        body_id = _event_body_id(e)
+        name = _event_body_name(e)
         if body_id is None:
             body_id = self.current_body_id
         if body_id is None and name and self.current_body_name == name:
@@ -1186,11 +1214,16 @@ class GameState:
         body = self.system.bodies.get(body_id)
         if body is None:
             body = Body(body_id=body_id, name=name or f"Body {body_id}")
-            if self.current_body_id == body_id and self.current_body_name:
+            if self.current_body_id == body_id and isinstance(self.current_body_name, str):
                 body.name = self.current_body_name
             self.system.bodies[body_id] = body
         if name:
             body.name = name
+        elif not isinstance(body.name, str) or not body.name:
+            if isinstance(self.current_body_name, str) and self.current_body_name:
+                body.name = self.current_body_name
+            else:
+                body.name = f"Body {body_id}"
         return body
 
     def _alert(self, text: str) -> None:

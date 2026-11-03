@@ -18,6 +18,11 @@ class Segment:
     text: str
     style: str = "text"
 
+    def __post_init__(self) -> None:
+        # журнал иногда отдаёт Body как int — не роняем "".join в plain()
+        if not isinstance(self.text, str):
+            self.text = "" if self.text is None else str(self.text)
+
 
 @dataclass
 class Row:
@@ -27,7 +32,7 @@ class Row:
 
     @property
     def text(self) -> str:
-        return "".join(s.text for s in self.segments + self.tail)
+        return "".join(str(s.text) for s in self.segments + self.tail)
 
 
 @dataclass

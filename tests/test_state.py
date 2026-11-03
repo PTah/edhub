@@ -285,6 +285,54 @@ class StatusTests(unittest.TestCase):
         self.assertFalse(state.status.docked)
 
 
+class ScanOrganicBodyIdTests(unittest.TestCase):
+    def test_scanorganic_body_int_does_not_break_hud(self):
+        """ScanOrganic пишет Body как BodyID (число) без BodyName — имя не должно стать int."""
+        from edhud.config import Config
+        from edhud import hudmodel
+
+        state = GameState()
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Test",
+                "SystemAddress": 7,
+                "StarPos": [0, 0, 0],
+                "JumpDist": 10.0,
+            }
+        )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyID": 25,
+                "BodyName": "Test 5",
+                "PlanetClass": "Icy body",
+                "Landable": True,
+                "Radius": 6e6,
+                "WasDiscovered": True,
+                "WasMapped": False,
+            }
+        )
+        state.apply(
+            {
+                "event": "ScanOrganic",
+                "ScanType": "Log",
+                "Genus": "$Codex_Ent_Fonticulus_Genus_Name;",
+                "Genus_Localised": "Fonticulua",
+                "Species": "$Codex_Ent_Fonticulus_01_Name;",
+                "Species_Localised": "Fonticulua Segmentatus",
+                "Body": 25,
+                "SystemAddress": 7,
+            }
+        )
+        body = state.system.bodies[25]
+        self.assertIsInstance(body.name, str)
+        self.assertEqual(body.name, "Test 5")
+        view = hudmodel.build_view(state, Config(), expanded=True)
+        self.assertTrue(any(isinstance(line, str) for line in view.plain()))
+        self.assertIn("Test", view.plain()[0] + view.plain()[1])
+
+
 class RouteFileTests(unittest.TestCase):
     def test_journal_navroute_without_list_reloads_file(self):
         """Игра пишет в журнал {"event":"NavRoute"} без Route, список — в NavRoute.json."""

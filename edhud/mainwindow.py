@@ -53,6 +53,14 @@ ROUTE_COLUMNS = (
 )
 
 MIN_COL_WIDTH = 28
+MIN_COL_WIDTHS = {
+    "belt": 28,
+    "name": 120,
+    "type": 80,
+    "atmos": 70,
+    "guess": 100,
+    "system": 140,
+}
 RESIZE_EDGE = 6
 
 
@@ -319,10 +327,10 @@ class MainWindow:
             return
         for key, width in (getattr(self.cfg, "bodies_columns", None) or {}).items():
             if key in self._body_widths:
-                self._body_widths[key] = max(MIN_COL_WIDTH, int(width))
+                self._body_widths[key] = max(self._min_col_width(key), int(width))
         for key, width in (getattr(self.cfg, "route_columns", None) or {}).items():
             if key in self._route_widths:
-                self._route_widths[key] = max(MIN_COL_WIDTH, int(width))
+                self._route_widths[key] = max(self._min_col_width(key), int(width))
 
     def _enable_layout_persist(self) -> None:
         """После первой отрисовки: починить рамку и разрешить запись геометрии."""
@@ -370,9 +378,12 @@ class MainWindow:
         except OSError:
             pass
 
+    def _min_col_width(self, key: str) -> int:
+        return max(MIN_COL_WIDTH, int(MIN_COL_WIDTHS.get(key, MIN_COL_WIDTH)))
+
     def _col_width(self, table: str, key: str, default: int) -> int:
         widths = self._body_widths if table == "bodies" else self._route_widths
-        return max(MIN_COL_WIDTH, int(widths.get(key, default)))
+        return max(self._min_col_width(key), int(widths.get(key, default)))
 
     def _table_spec(self, table: str) -> tuple[tuple, dict[str, int], str]:
         if table == "bodies":
@@ -381,7 +392,10 @@ class MainWindow:
 
     def _effective_widths(self, table: str, avail: int | None = None) -> list[int]:
         columns, widths_map, stretch_key = self._table_spec(table)
-        widths = [max(MIN_COL_WIDTH, int(widths_map[key])) for key, _title, _default, _anchor in columns]
+        widths = [
+            max(self._min_col_width(key), int(widths_map[key]))
+            for key, _title, _default, _anchor in columns
+        ]
         if avail is not None and avail > sum(widths):
             stretch_i = next(i for i, (key, *_rest) in enumerate(columns) if key == stretch_key)
             widths[stretch_i] += avail - sum(widths)
@@ -417,7 +431,7 @@ class MainWindow:
     def _set_col_width(self, table: str, index: int, width: int) -> None:
         columns, widths_map, _stretch = self._table_spec(table)
         key = columns[index][0]
-        widths_map[key] = max(MIN_COL_WIDTH, int(width))
+        widths_map[key] = max(self._min_col_width(key), int(width))
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
         try:
             avail = int(canvas.winfo_width())
@@ -524,7 +538,10 @@ class MainWindow:
         header.place(x=0, y=0, relheight=1)
         setattr(self, header_attr, header)
 
-        pixel_widths = [max(MIN_COL_WIDTH, int(widths.get(key, default))) for key, _t, default, _a in columns]
+        pixel_widths = [
+            max(self._min_col_width(key), int(widths.get(key, default)))
+            for key, _t, default, _a in columns
+        ]
         labels: list[tk.Label] = []
         head_h = _row_height(self._ui_size) + 8
         for index, (key, title, _default_w, anchor) in enumerate(columns):

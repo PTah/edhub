@@ -166,11 +166,12 @@ class JournalWatcher(threading.Thread):
         stale = bool(self.state.navroute_stale)
         if mtime == self._navroute_mtime and not stale:
             return
-        self._navroute_mtime = mtime
         try:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
+            # mtime не трогаем: при частичной записи игры повторим на следующем poll
             return
+        self._navroute_mtime = mtime
         self.state.navroute_stale = False
         if self.state.route.locked:
             return
