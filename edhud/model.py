@@ -141,6 +141,31 @@ class SamplePlan:
     guides: tuple[SampleGuide, ...]
 
 
+@dataclass(frozen=True)
+class RadarBlip:
+    """Точка на био-радаре относительно курса командира."""
+
+    kind: str  # sample | spot | other | away
+    label: str
+    distance_m: float
+    bearing: float
+    turn: float | None
+    ready: bool
+    index: int = 0
+
+
+@dataclass(frozen=True)
+class RadarView:
+    """Круговой радар под панелью биосигналов."""
+
+    title: str
+    range_m: float
+    need_m: int
+    heading: float | None
+    ready: bool
+    blips: tuple[RadarBlip, ...]
+
+
 @dataclass
 class Organic:
     key: str
@@ -1316,3 +1341,133 @@ class GameState:
         last_lat, last_lon = organic.sample_pos[-1]
         dist = surface_distance(float(lat), float(lon), last_lat, last_lon, radius)
         return dist, codex.sample_range(organic.genus)
+
+    def near_surface(self) -> bool:
+        """Пешком, в SRV или кораблём над поверхностью — есть широта/долгота."""
+        return (
+            self.status.lat is not None
+            and self.status.lon is not None
+            and not self.status.supercruise
+            and not self.status.docked
+        )
+
+    def radar_view(self) -> RadarView | None:
+        """Радар ближайших биоточек: свой род после первой пробы, иначе любые."""
+        if not self.near_surface():
+            return None
+        body = self.body_for_status()
+        if body is None or (body.bio_signals or 0) <= 0:
+            return None
+        lat, lon = float(self.status.lat), float(self.status.lon)
+        radius = self.status.planet_radius or body.radius or 0.0
+        heading = self.status.heading
+        organic = self.active_organic()
+        blips: list[RadarBlip] = []
+
+        if organic is not None and organic.sample_pos:
+            need = codex.sample_range(organic.genus)
+            closest_gap: tuple[float, float] | None = None
+            for index, (slat, slon) in enumerate(organic.sample_pos, start=1):
+                dist = surface_distance(lat, lon, slat, slon, radius)
+                bearing = surface_bearing(lat, lon, slat, slon)
+                blips.append(
+                    RadarBlip(
+                        kind="sample",
+                        label=f"проба {index}",
+                        distance_m=dist,
+                        bearing=bearing,
+                        turn=turn_deg(bearing, heading),
+                        ready=dist >= need,
+                        index=index,
+                    )
+                )
+                if dist < need and (closest_gap is None or dist < closest_gap[0]):
+                    closest_gap = (dist, bearing)
+            if closest_gap is not None:
+                away = (closest_gap[1] + 180.0) % 360.0
+                blips.append(
+                    RadarBlip(
+                        kind="away",
+                        label="дальше",
+                        distance_m=max(0.0, need - closest_gap[0]),
+                        bearing=away,
+                        turn=turn_deg(away, heading),
+                        ready=False,
+                    )
+                )
+            for spot, dist, bearing in self._valid_spots(body, organic, radius, need, lat, lon)[:6]:
+                blips.append(
+                    RadarBlip(
+                        kind="spot",
+                        label=str(spot.get("name") or "образец"),
+                        distance_m=dist,
+                        bearing=bearing,
+                        turn=turn_deg(bearing, heading),
+                        ready=True,
+                    )
+                )
+            # те же роды внутри колонии — видно, но «мало»
+            for spot in body.bio_spots:
+                spot_genus = spot.get("genus")
+                if organic.genus and spot_genus and spot_genus != organic.genus:
+                    continue
+                slat, slon = float(spot["lat"]), float(spot["lon"])
+                if any(surface_distance(slat, slon, plat, plon, radius) < 30 for plat, plon in organic.sample_pos):
+                    continue
+                if all(surface_distance(slat, slon, plat, plon, radius) >= need for plat, plon in organic.sample_pos):
+                    continue
+                dist = surface_distance(lat, lon, slat, slon, radius)
+                bearing = surface_bearing(lat, lon, slat, slon)
+                if any(abs(b.distance_m - dist) < 15 and b.kind == "spot" for b in blips):
+                    continue
+                blips.append(
+                    RadarBlip(
+                        kind="other",
+                        label=str(spot.get("name") or "близко"),
+                        distance_m=dist,
+                        bearing=bearing,
+                        turn=turn_deg(bearing, heading),
+                        ready=False,
+                    )
+                )
+            ready = all(b.ready for b in blips if b.kind == "sample")
+            span = max((b.distance_m for b in blips if b.kind != "away"), default=float(need))
+            range_m = min(5000.0, max(float(need) * 1.35, span * 1.15, 250.0))
+            return RadarView(
+                title=f"{organic.genus_en} · интервал {need} м",
+                range_m=range_m,
+                need_m=need,
+                heading=heading,
+                ready=ready,
+                blips=tuple(blips),
+            )
+
+        # ещё нет пробы — любые ближайшие отмеченные точки
+        for spot in body.bio_spots:
+            slat, slon = float(spot["lat"]), float(spot["lon"])
+            dist = surface_distance(lat, lon, slat, slon, radius)
+            bearing = surface_bearing(lat, lon, slat, slon)
+            blips.append(
+                RadarBlip(
+                    kind="spot",
+                    label=str(spot.get("name") or "био"),
+                    distance_m=dist,
+                    bearing=bearing,
+                    turn=turn_deg(bearing, heading),
+                    ready=True,
+                )
+            )
+        blips.sort(key=lambda item: item.distance_m)
+        blips = blips[:8]
+        if not blips:
+            return None
+        span = blips[-1].distance_m if blips else 300.0
+        range_m = min(5000.0, max(span * 1.2, 300.0))
+        return RadarView(
+            title="ближайшие био",
+            range_m=range_m,
+            need_m=0,
+            heading=heading,
+            ready=True,
+            blips=tuple(blips),
+        )

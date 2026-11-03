@@ -693,12 +693,13 @@ class RouteMarkTests(unittest.TestCase):
             window.win.update_idletasks()
             columns = {key: index for index, (key, *_rest) in enumerate(ROUTE_COLUMNS)}
             rows = {}
-            for cell in window._route_inner.winfo_children():
-                info = cell.grid_info()
-                rows.setdefault(int(info["row"]), {})[int(info["column"])] = cell
-            self.assertEqual(rows[0][columns["system"]].cget("fg"), COLORS["muted"])
-            self.assertTrue(str(rows[1][columns["system"]].cget("text")).startswith("▶ "))
-            self.assertEqual(int(rows[0][columns["system"]].cget("highlightthickness")), 1)
+            for box in window._route_inner.winfo_children():
+                info = box.grid_info()
+                label = box.winfo_children()[0] if box.winfo_children() else box
+                rows.setdefault(int(info["row"]), {})[int(info["column"])] = (box, label)
+            self.assertEqual(rows[0][columns["system"]][1].cget("fg"), COLORS["muted"])
+            self.assertTrue(str(rows[1][columns["system"]][1].cget("text")).startswith("▶ "))
+            self.assertEqual(int(rows[0][columns["system"]][0].cget("highlightthickness")), 1)
             self.assertEqual(len(BODY_COLUMNS), len(window._header_labels))
             window.destroy()
         finally:
@@ -781,20 +782,31 @@ class BodyColorTests(unittest.TestCase):
             window.update_state(state)
             window.win.update_idletasks()
             columns = {key: index for index, (key, *_rest) in enumerate(BODY_COLUMNS)}
-            painted = {}
-            for cell in window._bodies_inner.grid_slaves(row=0):
-                info = cell.grid_info()
-                painted[int(info["column"])] = (cell.cget("text"), cell.cget("fg"))
+
+            def _label(row: int, col: int):
+                box = window._bodies_inner.grid_slaves(row=row, column=col)[0]
+                kids = box.winfo_children()
+                return kids[0] if kids else box
+
+            painted = {
+                col: (_label(0, col).cget("text"), _label(0, col).cget("fg"))
+                for col in (columns["bio"], columns["geo"], columns["pml"])
+            }
             self.assertEqual(painted[columns["bio"]][1], "#7ddb6a")
             self.assertEqual(painted[columns["geo"]][1], "#ff5f56")
             self.assertEqual(painted[columns["pml"]][1], "#000000")
-            zeros = {}
-            for cell in window._bodies_inner.grid_slaves(row=1):
-                info = cell.grid_info()
-                zeros[int(info["column"])] = cell.cget("fg")
+            zeros = {
+                col: _label(1, col).cget("fg")
+                for col in (columns["bio"], columns["geo"], columns["pml"])
+            }
             self.assertEqual(zeros[columns["bio"]], "#e8e8e8")
             self.assertEqual(zeros[columns["geo"]], "#e8e8e8")
             self.assertEqual(zeros[columns["pml"]], "#e8e8e8")
+            # хедер и строка одной ширины — колонки не разъезжаются
+            for col in range(len(BODY_COLUMNS)):
+                head = window._bodies_header.grid_slaves(row=0, column=col)[0]
+                body = window._bodies_inner.grid_slaves(row=0, column=col)[0]
+                self.assertEqual(int(head.cget("width")), int(body.cget("width")))
             window.destroy()
         finally:
             root.destroy()
@@ -834,15 +846,11 @@ class BodyColorTests(unittest.TestCase):
             window.update_state(state)
             window.win.update_idletasks()
             columns = {key: index for index, (key, *_rest) in enumerate(BODY_COLUMNS)}
-            painted = {}
-            bio_cell = None
-            for cell in window._bodies_inner.grid_slaves(row=1):
-                info = cell.grid_info()
-                col = int(info["column"])
-                painted[col] = (cell.cget("text"), cell.cget("fg"))
-                if col == columns["bio"]:
-                    bio_cell = cell
-            text, fg = painted[columns["guess"]]
+            guess_box = window._bodies_inner.grid_slaves(row=1, column=columns["guess"])[0]
+            guess = guess_box.winfo_children()[0]
+            bio_box = window._bodies_inner.grid_slaves(row=1, column=columns["bio"])[0]
+            bio_cell = bio_box.winfo_children()[0]
+            text, fg = guess.cget("text"), guess.cget("fg")
             self.assertTrue(text.startswith("≈ "))
             self.assertIn("Bacterium", text)
             self.assertEqual(fg, COLORS["accent"])
@@ -850,7 +858,6 @@ class BodyColorTests(unittest.TestCase):
             self.assertIsNotNone(tip)
             self.assertTrue(tip.startswith("Предположительно:"))
             self.assertIn("Bacterium", tip)
-            self.assertIsNotNone(bio_cell)
             self.assertTrue(hasattr(bio_cell, "tip"))
             self.assertEqual(bio_cell.tip.text, tip)
             window.destroy()
@@ -1093,6 +1100,68 @@ class SampleGuideTests(unittest.TestCase):
     def test_without_coordinates_there_is_no_plan(self):
         state = self._state()
         self.assertIsNone(state.sample_plan())
+
+    def test_radar_shows_colony_ring_and_same_genus_spots(self):
+        state = self._state()
+        state.system.bodies[4].bio_signals = 2
+        state.system.bodies[4].signals_local = True
+        state.apply(
+            {
+                "event": "CodexEntry",
+                "Name": "$Codex_Ent_Fonticulus_01_M_Name;",
+                "Name_Localised": "Fonticulua Segmentatus - Amethyst",
+                "Category": "$Codex_Category_Biology;",
+                "SubCategory": "$Codex_SubCategory_Organic_Structures;",
+                "SystemAddress": 1,
+                "BodyID": 4,
+                "Latitude": 0.02,
+                "Longitude": 0.01,
+            }
+        )
+        self._status(state, 0.0, 0.001, heading=0.0)
+        radar = state.radar_view()
+        self.assertIsNotNone(radar)
+        assert radar is not None
+        self.assertEqual(radar.need_m, 500)
+        self.assertFalse(radar.ready)
+        self.assertTrue(any(blip.kind == "sample" for blip in radar.blips))
+        self.assertTrue(any(blip.kind == "away" for blip in radar.blips))
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertIsNotNone(board.radar)
+        self.assertTrue(any(line.startswith("radar:") for line in board.plain()))
+
+    def test_radar_lists_any_spots_before_first_sample(self):
+        state = GameState()
+        state.system.address = 1
+        state.system.name = "Test"
+        body = Body(
+            body_id=4,
+            name="Test 1 a",
+            radius=6_000_000.0,
+            landable=True,
+            bio_signals=1,
+            signals_local=True,
+            bio_spots=[{"lat": 0.01, "lon": 0.0, "genus": "$Codex_Ent_Bacterial_Genus_Name;", "name": "Bacterium"}],
+        )
+        state.system.bodies[4] = body
+        state.apply_status(
+            {
+                "Latitude": 0.0,
+                "Longitude": 0.0,
+                "Heading": 0.0,
+                "PlanetRadius": 6_000_000.0,
+                "BodyID": 4,
+                "Flags": 1 << 19,
+            }
+        )
+        radar = state.radar_view()
+        self.assertIsNotNone(radar)
+        assert radar is not None
+        self.assertEqual(radar.need_m, 0)
+        self.assertEqual(radar.blips[0].kind, "spot")
+        self.assertIn("Bacterium", radar.blips[0].label)
 
 
 class AppearanceTests(unittest.TestCase):

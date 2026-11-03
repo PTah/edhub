@@ -2,15 +2,21 @@
 
 Окно без рамки, поверх игры и сквозное для мыши вместе с основным дашбордом.
 Появляется, только когда командир сам снял биосигналы в этой системе.
+Под списком — круговой радар ближайших биоточек (пешком / SRV / над планетой).
 """
 from __future__ import annotations
 
+import math
+
 from . import winapi
 from .hudmodel import BioBoard, BioLine
+from .model import RadarBlip, RadarView
 
 PAD = 10
 BAR_W = 8
 BAR_H = 3
+RADAR_SIZE = 168
+RADAR_PAD = 8
 
 
 class BioPanel:
@@ -136,8 +142,10 @@ class BioPanel:
         canvas.delete("all")
         title_font = self._font(0, bold=True)
         font = self._font(-1)
+        small = self._font(-2)
         title_h = title_font.metrics("linespace")
         line_h = font.metrics("linespace")
+        radar = board.radar
 
         content = title_font.measure(board.title)
         for line in board.lines:
@@ -145,6 +153,8 @@ class BioPanel:
             content = max(content, extra + self._text_width(line.segments + line.tail, font))
         for text, _style in board.footers:
             content = max(content, font.measure(text))
+        if radar is not None:
+            content = max(content, RADAR_SIZE + RADAR_PAD * 2, font.measure(radar.title))
         screen_w = self.win.winfo_screenwidth()
         width = min(screen_w - 24, max(280, content + PAD * 2 + 8))
 
@@ -155,6 +165,8 @@ class BioPanel:
             height += line_h + 2
         if board.footers:
             height += 8 + line_h * len(board.footers)
+        if radar is not None:
+            height += 10 + line_h + RADAR_SIZE + RADAR_PAD + line_h
         height += PAD
 
         screen_h = self.win.winfo_screenheight()
@@ -189,6 +201,11 @@ class BioPanel:
             for text, style in board.footers:
                 canvas.create_text(PAD, y, anchor="nw", text=text, fill=cfg.color(style), font=font)
                 y += line_h
+        if radar is not None:
+            y += 6
+            canvas.create_line(PAD, y, width - PAD, y, fill=cfg.color("dim"))
+            y += 4
+            self._draw_radar(radar, y, width, font, small)
 
     def _draw_line(self, line: BioLine, y: int, font, width: int, line_h: int) -> int:
         x = PAD
@@ -244,6 +261,117 @@ class BioPanel:
                 cursor, y, anchor="nw", text=text, fill=cfg.color(segment.style), font=font
             )
             cursor += font.measure(text)
+
+    def _draw_radar(self, radar: RadarView, top: int, width: int, font, small) -> None:
+        canvas = self.canvas
+        cfg = self.cfg
+        title_style = "ok" if radar.ready else "warn"
+        canvas.create_text(PAD, top, anchor="nw", text=radar.title, fill=cfg.color(title_style), font=font)
+        title_h = font.metrics("linespace")
+        size = min(RADAR_SIZE, width - PAD * 2)
+        cx = width // 2
+        cy = top + title_h + RADAR_PAD + size // 2
+        r = size // 2 - 4
+
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=cfg.color("dim"), width=1)
+        canvas.create_line(cx, cy - r, cx, cy + r, fill=cfg.color("dim"))
+        canvas.create_line(cx - r, cy, cx + r, cy, fill=cfg.color("dim"))
+        # кольцо интервала колонии: вне него можно брать 2-ю/3-ю пробу
+        if radar.need_m > 0 and radar.range_m > 0:
+            need_r = max(8, int(r * min(1.0, radar.need_m / radar.range_m)))
+            ring = cfg.color("ok") if radar.ready else cfg.color("warn")
+            canvas.create_oval(
+                cx - need_r, cy - need_r, cx + need_r, cy + need_r, outline=ring, width=2, dash=(4, 3)
+            )
+            canvas.create_text(
+                cx + need_r + 2,
+                cy - need_r,
+                anchor="sw",
+                text=f"{radar.need_m} м",
+                fill=ring,
+                font=small,
+            )
+
+        # треугольник «курс вперёд» в центре
+        nose = 7
+        canvas.create_polygon(
+            cx,
+            cy - nose,
+            cx - 5,
+            cy + 5,
+            cx + 5,
+            cy + 5,
+            fill=cfg.color("fg"),
+            outline="",
+        )
+
+        scale = r / max(radar.range_m, 1.0)
+        for blip in radar.blips:
+            self._draw_blip(blip, cx, cy, r, scale, small)
+
+        canvas.create_text(
+            cx,
+            cy + r + 2,
+            anchor="n",
+            text=f"шкала {radar.range_m:,.0f} м".replace(",", " "),
+            fill=cfg.color("muted"),
+            font=small,
+        )
+
+    def _draw_blip(self, blip: RadarBlip, cx: int, cy: int, r: int, scale: float, font) -> None:
+        canvas = self.canvas
+        cfg = self.cfg
+        turn = blip.turn if blip.turn is not None else (blip.bearing if blip.bearing is not None else 0.0)
+        # 0° — вверх (курс), вправо положительный turn
+        rad = math.radians(turn)
+        dist = blip.distance_m
+        on_rim = False
+        if blip.kind == "away":
+            # стрелка «отойти» на ободе
+            px = cx + int(math.sin(rad) * (r - 2))
+            py = cy - int(math.cos(rad) * (r - 2))
+            self._draw_away_arrow(px, py, turn, cfg.color("warn"))
+            return
+        if dist * scale > r - 6:
+            dist = (r - 6) / scale
+            on_rim = True
+        px = cx + int(math.sin(rad) * dist * scale)
+        py = cy - int(math.cos(rad) * dist * scale)
+        if blip.kind == "sample":
+            color = cfg.color("ok") if blip.ready else cfg.color("bad")
+            s = 5
+            canvas.create_rectangle(px - s, py - s, px + s, py + s, fill=color, outline="")
+            mark = str(blip.index or "")
+            if mark:
+                canvas.create_text(px, py, text=mark, fill=cfg.color("bg"), font=font)
+        elif blip.kind == "spot":
+            color = cfg.color("accent")
+            s = 5
+            canvas.create_polygon(px, py - s, px + s, py + s, px - s, py + s, fill=color, outline="")
+        else:
+            color = cfg.color("muted")
+            s = 3
+            canvas.create_oval(px - s, py - s, px + s, py + s, fill=color, outline="")
+        if on_rim:
+            canvas.create_oval(px - 7, py - 7, px + 7, py + 7, outline=color)
+
+    def _draw_away_arrow(self, x: int, y: int, turn: float, color: str) -> None:
+        rad = math.radians(turn)
+        dx, dy = math.sin(rad), -math.cos(rad)
+        tip_x = x + int(dx * 8)
+        tip_y = y + int(dy * 8)
+        left = math.radians(turn + 140)
+        right = math.radians(turn - 140)
+        self.canvas.create_polygon(
+            tip_x,
+            tip_y,
+            tip_x + int(math.sin(left) * 7),
+            tip_y - int(math.cos(left) * 7),
+            tip_x + int(math.sin(right) * 7),
+            tip_y - int(math.cos(right) * 7),
+            fill=color,
+            outline="",
+        )
 
     def _drag_start(self, event) -> None:
         if self.cfg.click_through:

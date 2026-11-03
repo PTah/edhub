@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import bio, codex, values
-from .model import FIRST_LOGGED_MULTIPLIER, Body, GameState
+from .model import FIRST_LOGGED_MULTIPLIER, Body, GameState, RadarView
 
 
 @dataclass
@@ -500,10 +500,21 @@ class BioBoard:
     title: str
     lines: list[BioLine] = field(default_factory=list)
     footers: list[tuple[str, str]] = field(default_factory=list)
+    radar: RadarView | None = None
 
     def plain(self) -> list[str]:
         lines = [self.title] + [line.text for line in self.lines]
         lines.extend(text for text, _style in self.footers)
+        if self.radar is not None:
+            lines.append(
+                f"radar:{self.radar.range_m:.0f}:{self.radar.need_m}:{self.radar.ready}:"
+                f"{self.radar.heading if self.radar.heading is not None else '-'}"
+            )
+            for blip in self.radar.blips:
+                lines.append(
+                    f"{blip.kind}:{blip.distance_m:.0f}:{blip.bearing:.0f}:"
+                    f"{blip.ready}:{blip.index}:{blip.label}"
+                )
         return lines
 
 
@@ -747,6 +758,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
     bodies = _own_bio_bodies(state)
     if not bodies:
         return None
+    radar = state.radar_view()
     focus = _focus_bio_body(state)
     if focus is not None:
         lines, (low, high) = _body_lines(focus, state)
@@ -765,6 +777,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
             title=title,
             lines=lines,
             footers=_footers(low, high, ff_low, ff_high, bonus),
+            radar=radar,
         )
     lines, (low, high), (ff_low, ff_high) = _system_lines(state)
     total = sum(body.bio_signals or 0 for body in bodies)
@@ -773,4 +786,5 @@ def build_bio_board(state: GameState) -> BioBoard | None:
         title=f"биосигналы ×{total}",
         lines=lines,
         footers=_footers(low, high, ff_low, ff_high, bonus),
+        radar=radar,
     )
