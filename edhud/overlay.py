@@ -61,24 +61,41 @@ class Overlay:
         self.fullscreen: bool | None = None
         self._keeper: winapi.TopmostKeeper | None = None
         self._menu = None
+        self._planet_dim = False
 
         self.root = tk.Tk()
         self.root.title("EDHUD")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.protocol("WM_DELETE_WINDOW", self._request_quit)
-        try:
-            self.root.attributes("-alpha", max(0.25, min(1.0, float(cfg.opacity))))
-        except tk.TclError:
-            pass
         self.canvas = tk.Canvas(self.root, highlightthickness=0, bd=0, bg=cfg.color("panel"))
         self.canvas.pack(fill="both", expand=True)
+        self.apply_opacity()
         self._place_window()
         self._bind_keys()
         self._build_menu()
         self.bio = BioPanel(self.root, cfg)
         self._apply_click_through()
         self._start_keeper()
+
+    def apply_opacity(self) -> None:
+        """Обычная прозрачность из настроек; в атмосфере — сильно приглушаем верхний HUD."""
+        try:
+            base = max(0.25, min(1.0, float(self.cfg.opacity)))
+            if self._planet_dim:
+                alpha = max(0.12, min(0.28, base * 0.28))
+            else:
+                alpha = base
+            self.root.attributes("-alpha", alpha)
+        except Exception:
+            pass
+
+    def set_planet_dim(self, dim: bool) -> None:
+        want = bool(dim)
+        if want == self._planet_dim:
+            return
+        self._planet_dim = want
+        self.apply_opacity()
 
     def _start_keeper(self) -> None:
         """Z-order только из потока окна. Фоновый SetWindowPos будил ядро на каждом кадре."""

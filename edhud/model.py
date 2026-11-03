@@ -24,11 +24,16 @@ FLAG_SUPERCRUISE = 1 << 4
 FLAG_SCOOPING = 1 << 11
 # Бит 17 — FsdCharging в Status.json (журнал Frontier). Бит 12 — ручник ТРП.
 FLAG_FSD_CHARGING = 1 << 17
+FLAG_HAS_LAT_LONG = 1 << 21
 FLAG_FSD_JUMP = 1 << 30
 FLAG_LOW_FUEL = 1 << 14
 FLAG_IN_MAINSHIP = 1 << 19
 FLAG_IN_FIGHTER = 1 << 20
 FLAG_IN_SRV = 1 << 21
+# Flags2: планирование / атмосфера
+FLAG2_GLIDE = 1 << 12
+# ниже этого (м) считаем, что ещё в атмосфере / у поверхности
+ATMOSPHERE_ALT_M = 100_000.0
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
 _MINEABLE_RING = {
@@ -466,6 +471,7 @@ class System:
 class Status:
     raw: dict = field(default_factory=dict)
     flags: int = 0
+    flags2: int = 0
     fuel_main: float = 0.0
     fuel_reserve: float = 0.0
     cargo: float = 0.0
@@ -490,6 +496,7 @@ class Status:
     def update(self, data: dict) -> None:
         self.raw = data
         self.flags = int(data.get("Flags") or 0)
+        self.flags2 = int(data.get("Flags2") or 0)
         fuel = data.get("Fuel") or {}
         if isinstance(fuel, dict):
             self.fuel_main = float(fuel.get("FuelMain") or 0.0)
@@ -524,6 +531,9 @@ class Status:
     def flag(self, bit: int) -> bool:
         return bool(self.flags & bit)
 
+    def flag2(self, bit: int) -> bool:
+        return bool(self.flags2 & bit)
+
     @property
     def docked(self) -> bool:
         return self.flag(FLAG_DOCKED)
@@ -555,6 +565,14 @@ class Status:
     @property
     def scooping(self) -> bool:
         return self.flag(FLAG_SCOOPING)
+
+    @property
+    def has_lat_long(self) -> bool:
+        return self.flag(FLAG_HAS_LAT_LONG) or self.lat is not None
+
+    @property
+    def glide(self) -> bool:
+        return self.flag2(FLAG2_GLIDE)
 
     @property
     def on_foot(self) -> bool:
@@ -658,6 +676,8 @@ class GameState:
     view_tab: str = "bodies"
     # носитель сменил систему, а координат в журнале нет — их доберёт сеть
     carrier_pos_pending: bool = False
+    # корабль в атмосфере / у поверхности — верхний HUD приглушаем
+    in_atmosphere: bool = False
     _jump_tab_latched: bool = False
     _was_in_supercruise: bool = False
     fsd_target: str | None = None
@@ -1221,9 +1241,11 @@ class GameState:
     def _on_leavebody(self, _e: dict) -> None:
         self.current_body_id = None
         self.current_body_name = None
+        self.in_atmosphere = False
 
     def _on_touchdown(self, e: dict) -> None:
         self.mode = "Ship" if not e.get("OnFoot") else "OnFoot"
+        self.in_atmosphere = True
         self._on_approachbody(e)
 
     def _on_liftoff(self, _e: dict) -> None:
@@ -1247,11 +1269,31 @@ class GameState:
                 self.current_body_name = self.status.body_name or self.current_body_name
         if self.status.body_name and not self.current_body_name:
             self.current_body_name = self.status.body_name
+        self._sync_atmosphere()
         self._sync_travel_tab()
         if self.status.supercruise:
             self._was_in_supercruise = True
         elif not self.status.fsd_charging:
             self._was_in_supercruise = False
+
+    def _sync_atmosphere(self) -> None:
+        """Glide/посадка → в атмосфере; выход в SC / LeaveBody / высотный орбитальный круиз → нет."""
+        st = self.status
+        if st.supercruise or st.docked:
+            self.in_atmosphere = False
+            return
+        if st.glide or st.landed:
+            self.in_atmosphere = True
+            return
+        if st.has_lat_long and st.altitude is not None and st.altitude < ATMOSPHERE_ALT_M:
+            self.in_atmosphere = True
+            return
+        if self.in_atmosphere and st.has_lat_long and st.altitude is not None:
+            if st.altitude >= ATMOSPHERE_ALT_M:
+                self.in_atmosphere = False
+            return
+        if self.in_atmosphere and not st.has_lat_long:
+            self.in_atmosphere = False
 
     def _sync_travel_tab(self) -> None:
         """Route — в момент разгона к другой системе, не при входе в суперкруиз."""

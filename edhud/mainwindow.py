@@ -156,7 +156,7 @@ class _CellTip:
 
 
 def route_tag(hop_index: int, current_index: int | None) -> str:
-    """Пройденные системы — серые, текущая — крупнее."""
+    """Пройденные — серые, текущая (▶) — зелёная и чуть крупнее."""
     if current_index is None:
         return ""
     if hop_index < current_index:
@@ -903,7 +903,12 @@ class MainWindow:
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
             tag = route_tag(row, here)
             mark = "▶ " if tag == "here" else ""
-            fg = COLORS["muted"] if tag == "done" else COLORS["text"]
+            if tag == "done":
+                fg = COLORS["muted"]
+            elif tag == "here":
+                fg = COLORS["ok"]
+            else:
+                fg = COLORS["text"]
             font = (self._ui_family, self._ui_size + (1 if tag == "here" else 0))
             cells = {
                 "idx": str(row + 1),

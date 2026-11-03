@@ -190,6 +190,7 @@ class App:
                     self._voice_alert = None
                 self.overlay.set_view(view)
                 self.overlay.set_bio(hudmodel.build_bio_board(self.state))
+                self.overlay.set_planet_dim(self.state.in_atmosphere)
             if self.mainwindow is not None:
                 self.mainwindow.update_state(self.state)
         except Exception:
@@ -510,9 +511,8 @@ class App:
         if self.overlay is not None:
             self.overlay.cfg = self.cfg
             try:
-                alpha = max(0.25, min(1.0, float(self.cfg.opacity)))
-                self.overlay.root.attributes("-alpha", alpha)
-                self.overlay.bio.set_alpha(alpha)
+                self.overlay.apply_opacity()
+                self.overlay.bio.set_alpha(max(0.25, min(1.0, float(self.cfg.opacity))))
             except Exception:
                 pass
             self.overlay._apply_click_through()

@@ -518,6 +518,71 @@ class JumpTabTests(unittest.TestCase):
         self.assertEqual(state.system.bodies[2].materials.get("iron"), 11.5)
 
 
+class AtmosphereDimTests(unittest.TestCase):
+    def test_glide_dims_until_leave_or_high_altitude(self):
+        state = GameState()
+        # орбитальный круиз высоко — ещё не атмосфера
+        state.apply_status(
+            {
+                "Flags": 1 << 21,
+                "Flags2": 0,
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 250_000,
+            }
+        )
+        self.assertFalse(state.in_atmosphere)
+        # вход в атмосферу (Glide)
+        state.apply_status(
+            {
+                "Flags": 1 << 21,
+                "Flags2": 1 << 12,
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 40_000,
+            }
+        )
+        self.assertTrue(state.in_atmosphere)
+        # после глида всё ещё низко
+        state.apply_status(
+            {
+                "Flags": 1 << 21,
+                "Flags2": 0,
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 2_000,
+            }
+        )
+        self.assertTrue(state.in_atmosphere)
+        state.apply({"event": "Touchdown", "Body": "World 1", "BodyID": 1})
+        self.assertTrue(state.in_atmosphere)
+        state.apply({"event": "Liftoff"})
+        self.assertTrue(state.in_atmosphere)
+        # набор высоты / LeaveBody — снова обычный HUD
+        state.apply_status(
+            {
+                "Flags": 1 << 21,
+                "Flags2": 0,
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 150_000,
+            }
+        )
+        self.assertFalse(state.in_atmosphere)
+        state.apply_status(
+            {
+                "Flags": 1 << 21,
+                "Flags2": 1 << 12,
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 30_000,
+            }
+        )
+        self.assertTrue(state.in_atmosphere)
+        state.apply({"event": "LeaveBody", "Body": "World 1", "BodyID": 1})
+        self.assertFalse(state.in_atmosphere)
+
+
 class CarrierDistanceTests(unittest.TestCase):
     def test_distance_from_carrier_system(self):
         state = GameState()
