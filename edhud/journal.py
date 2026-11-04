@@ -178,6 +178,7 @@ class JournalWatcher(threading.Thread):
         route = Route.from_navroute(data)
         if route.hops:
             self.state.route = route
+            self.state.sync_route_discoverers()
         elif self.state.route.source == "game" and not self.state.route.locked:
             self.state.route = Route()
 

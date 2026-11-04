@@ -47,9 +47,10 @@ BODY_COLUMNS = (
 
 ROUTE_COLUMNS = (
     ("idx", "#", 48, "center"),
-    ("system", "Система", 320, "w"),
+    ("system", "Система", 280, "w"),
     ("star", "Класс", 80, "center"),
-    ("ly", "До след., ly", 120, "e"),
+    ("ly", "До след., ly", 110, "e"),
+    ("opened", "Открыта", 140, "w"),
 )
 
 MIN_COL_WIDTH = 28
@@ -60,6 +61,7 @@ MIN_COL_WIDTHS = {
     "atmos": 70,
     "guess": 100,
     "system": 140,
+    "opened": 90,
 }
 RESIZE_EDGE = 6
 
@@ -969,7 +971,9 @@ class MainWindow:
             )
             for b in sorted(sys.bodies.values(), key=lambda x: x.body_id)
         )
-        route = tuple((h.system, h.star_class) for h in state.route.hops)
+        route = tuple(
+            (h.system, h.star_class, h.discovered_by, h.discovered_by_me) for h in state.route.hops
+        )
         dist = state.carrier_distance_ly()
         names = tuple(
             (b.body_id, b.name)
@@ -1056,20 +1060,23 @@ class MainWindow:
             else:
                 fg = COLORS["text"]
             font = (self._ui_family, self._ui_size + (1 if tag == "here" else 0))
+            opened = hop.opened_label()
             cells = {
                 "idx": str(row + 1),
                 "system": f"{mark}{hop.system}",
                 "star": hop.star_class or "—",
                 "ly": ly_text,
+                "opened": opened,
             }
             for col, (key, _title, _width, anchor) in enumerate(ROUTE_COLUMNS):
+                cell_fg = COLORS["ok"] if key == "opened" and hop.discovered_by_me else fg
                 self._put_cell(
                     "route",
                     row,
                     col,
                     widths[col],
                     text=cells[key],
-                    fg=fg,
+                    fg=cell_fg,
                     anchor=anchor,
                     font=font,
                 )

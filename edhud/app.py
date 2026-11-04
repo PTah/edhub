@@ -27,6 +27,22 @@ FULLSCREEN_HINT = "полноэкранный режим: если оверле�
 LEGACY_HINT = "Legacy 3.8: Odyssey-бонусы, EDSM/EDDN и био-прогноз отключены"
 
 
+def _system_discoverer_from_remote(result) -> str | None:
+    """Первооткрыватель системы: сначала главная звезда, иначе любое тело с discovery."""
+    bodies = getattr(result, "bodies", None) or {}
+    rows = list(bodies.values()) if isinstance(bodies, dict) else list(bodies)
+    for body in rows:
+        if (getattr(body, "star_type", None) or getattr(body, "is_star", False)) and getattr(
+            body, "discovered_by", None
+        ):
+            return str(body.discovered_by)
+    for body in rows:
+        who = getattr(body, "discovered_by", None)
+        if who:
+            return str(who)
+    return None
+
+
 class App:
     def __init__(
         self,
@@ -65,6 +81,8 @@ class App:
         self._voice_alert: str | None = None
         self._carrier_lookup: str | None = None
         self._carrier_lookup_at = 0.0
+        self._route_disc_busy = False
+        self._route_disc_key: tuple | None = None
 
     def _make_remote_client(self) -> remote.RemoteClient | None:
         if not self.cfg.remote_enabled:
@@ -98,6 +116,7 @@ class App:
         try:
             self.state.route = Route.load(route_path)
             self.state.route.locked = True
+            self.state.sync_route_discoverers()
         except (OSError, ValueError, KeyError):
             pass
 
@@ -180,6 +199,7 @@ class App:
             self.collect_remote()
             self.collect_eddn()
             self._lookup_carrier_pos()
+            self._lookup_route_discoverers()
             self.autosave()
             if self.overlay is not None:
                 view = hudmodel.build_view(
@@ -211,6 +231,51 @@ class App:
                 handle.write(traceback.format_exc() + "\n")
         except OSError:
             pass
+
+    def _lookup_route_discoverers(self) -> None:
+        """Для хопов маршрута без первооткрывателя — спросить EDSM (пакетами)."""
+        if not self.cfg.allow_network or not self.cfg.remote_enabled:
+            return
+        if self._route_disc_busy:
+            return
+        pending: list[str] = []
+        for hop in self.state.route.hops:
+            key = hop.system.lower()
+            if key in self.state._systems_by_me or key in self.state._discoverers:
+                continue
+            pending.append(hop.system)
+        route_key = tuple(h.system.lower() for h in self.state.route.hops)
+        if not pending:
+            self._route_disc_key = route_key
+            return
+        if route_key == self._route_disc_key and not pending:
+            return
+        batch = pending[:5]
+        self._route_disc_busy = True
+
+        def work() -> None:
+            results: list[tuple[str, str | None | bool]] = []
+            for name in batch:
+                try:
+                    results.append((name, remote.system_discoverer(name)))
+                except Exception:
+                    results.append((name, None))
+
+            def apply() -> None:
+                self._route_disc_busy = False
+                me = self.cfg.edsm_commander or self.state.cmdr
+                for name, who in results:
+                    if who is False:
+                        self.state.note_system_discoverer(name, None, cmdr=me)
+                    elif isinstance(who, str):
+                        self.state.note_system_discoverer(name, who, cmdr=me)
+                self.state.sync_route_discoverers()
+                if len(pending) <= len(batch):
+                    self._route_disc_key = route_key
+
+            self._ui(apply)
+
+        threading.Thread(target=work, name="edhud-route-disc", daemon=True).start()
 
     def _lookup_carrier_pos(self) -> None:
         """CarrierLocation/прыжок носителя без StarPos — координаты с EDSM/Spansh."""
@@ -317,6 +382,13 @@ class App:
             if current and result.address and result.address != current:
                 continue  # система уже сменилась
             added = remote.merge_into_system(self.state.system, result)
+            who = _system_discoverer_from_remote(result)
+            if who and self.state.system.name:
+                self.state.note_system_discoverer(
+                    self.state.system.name,
+                    who,
+                    cmdr=self.cfg.edsm_commander or self.state.cmdr,
+                )
             if added:
                 self.store.save(self.state.system)
 

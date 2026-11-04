@@ -97,6 +97,34 @@ def _composition(raw) -> dict[str, float]:
     return found
 
 
+def system_discoverer(name: str, timeout: float = 8.0) -> str | None | bool:
+    """Первооткрыватель системы по EDSM bodies.
+
+    str — имя командира; False — системы нет в EDSM; None — сеть/пусто.
+    """
+    if not name:
+        return None
+    url = EDSM_BODIES.format(name=urllib.parse.quote(name))
+    data = _http_json(url, timeout=timeout)
+    if not isinstance(data, dict):
+        return None
+    bodies = data.get("bodies")
+    if not isinstance(bodies, list) or not bodies:
+        # пустой ответ при известном имени часто = нет в базе
+        if data.get("name") or data.get("id64"):
+            return False
+        return False if data == {} else None
+    for body in bodies:
+        if not isinstance(body, dict):
+            continue
+        discovery = body.get("discovery")
+        if isinstance(discovery, dict):
+            commander = discovery.get("commander")
+            if commander:
+                return str(commander)
+    return False
+
+
 def system_coordinates(
     name: str | None = None,
     address: int | None = None,

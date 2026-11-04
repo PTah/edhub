@@ -24,6 +24,9 @@ class RouteHop:
     distance: float = 0.0  # расстояние до предыдущей точки маршрута, св. лет
     jumps: int = 0  # сколько обычных прыжков до этой точки (маршрут плоттера)
     neutron: bool = False
+    # кто открыл систему (EDSM); discovered_by_me — открыли мы
+    discovered_by: str | None = None
+    discovered_by_me: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -33,7 +36,16 @@ class RouteHop:
             "star_class": self.star_class,
             "jumps": self.jumps,
             "neutron": self.neutron,
+            "discovered_by": self.discovered_by,
+            "discovered_by_me": self.discovered_by_me,
         }
+
+    def opened_label(self) -> str:
+        if self.discovered_by_me:
+            return "Ваше открытие"
+        if self.discovered_by:
+            return self.discovered_by
+        return "—"
 
     @property
     def scoopable(self) -> bool:
@@ -98,6 +110,8 @@ class Route:
                 star_class=h.get("star_class"),
                 jumps=int(h.get("jumps") or 0),
                 neutron=bool(h.get("neutron")),
+                discovered_by=h.get("discovered_by"),
+                discovered_by_me=bool(h.get("discovered_by_me")),
             )
             for h in data.get("hops") or []
             if h.get("system")

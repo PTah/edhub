@@ -711,6 +711,9 @@ class GameState:
     _new_systems: set[int] = field(default_factory=set)
     _star_pos: dict[int, tuple[float, float, float]] = field(default_factory=dict)
     _star_names: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    # кто открыл систему (имя lower → командир; None = в базе нет имени)
+    _discoverers: dict[str, str | None] = field(default_factory=dict)
+    _systems_by_me: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------- события
     def apply(self, event: dict) -> None:
@@ -966,6 +969,7 @@ class GameState:
         if e.get("Route"):
             self.route = Route.from_navroute(e)
             self.navroute_stale = False
+            self.sync_route_discoverers()
         else:
             self.navroute_stale = True
 
@@ -1058,6 +1062,42 @@ class GameState:
         if address not in self._new_systems:
             self._new_systems.add(address)
             self.session_new_systems = len(self._new_systems)
+        name = e.get("StarSystem") or self.system.name
+        if name:
+            self.note_system_discoverer(str(name), None, by_me=True)
+
+    def note_system_discoverer(
+        self,
+        system: str,
+        commander: str | None,
+        *,
+        by_me: bool = False,
+        cmdr: str | None = None,
+    ) -> None:
+        """Запомнить первооткрывателя системы и проставить на хопы маршрута."""
+        key = system.strip().lower()
+        if not key:
+            return
+        who = (commander or "").strip() or None
+        me = (cmdr or self.cmdr or "").strip().lower()
+        if by_me or (who and me and who.lower() == me):
+            self._systems_by_me.add(key)
+            self._discoverers[key] = who or self.cmdr
+        elif key not in self._systems_by_me:
+            self._discoverers[key] = who
+        self.sync_route_discoverers()
+
+    def sync_route_discoverers(self) -> None:
+        for hop in self.route.hops:
+            key = hop.system.lower()
+            if key in self._systems_by_me:
+                hop.discovered_by_me = True
+                if not hop.discovered_by and self.cmdr:
+                    hop.discovered_by = self.cmdr
+                continue
+            if key in self._discoverers:
+                hop.discovered_by_me = False
+                hop.discovered_by = self._discoverers[key]
 
     def _account_scan(self, body_id: int | None = None, mapped: bool = False) -> None:
         """Считает стоимость тела: скан сразу, картографию — по факту DSS."""

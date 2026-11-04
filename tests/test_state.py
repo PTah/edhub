@@ -432,6 +432,45 @@ class FirstDiscoveryTests(unittest.TestCase):
         self.assertIn("новых систем: 2", detail)
 
 
+class RouteOpenedColumnTests(unittest.TestCase):
+    def test_route_hop_shows_discoverer_or_ours(self):
+        from edhud.mainwindow import ROUTE_COLUMNS, MainWindow
+        from edhud.route import Route, RouteHop
+
+        state = GameState()
+        state.cmdr = "PapaTramp"
+        state.route = Route(
+            hops=[
+                RouteHop(system="Home", star_class="K", discovered_by_me=True),
+                RouteHop(system="Sol", star_class="G", discovered_by="Redfoxxx"),
+                RouteHop(system="Unknown", star_class="M"),
+            ]
+        )
+        state.note_system_discoverer("Home", None, by_me=True)
+        self.assertEqual(state.route.hops[0].opened_label(), "Ваше открытие")
+        self.assertEqual(state.route.hops[1].opened_label(), "Redfoxxx")
+        self.assertEqual(state.route.hops[2].opened_label(), "—")
+
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            window.update_state(state)
+            window.win.update_idletasks()
+            columns = {key: index for index, (key, *_rest) in enumerate(ROUTE_COLUMNS)}
+            self.assertIn("opened", columns)
+            box = window._route_inner.grid_slaves(row=0, column=columns["opened"])[0]
+            label = box.winfo_children()[0]
+            self.assertEqual(label.cget("text"), "Ваше открытие")
+            box2 = window._route_inner.grid_slaves(row=1, column=columns["opened"])[0]
+            self.assertEqual(box2.winfo_children()[0].cget("text"), "Redfoxxx")
+            window.destroy()
+        finally:
+            root.destroy()
+
+
 class JumpTabTests(unittest.TestCase):
     def test_hyperspace_opens_route_and_arrival_opens_bodies(self):
         state = GameState()
