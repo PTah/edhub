@@ -376,7 +376,10 @@ def nebulae_distance(pos: tuple[float, float, float] | None, cache_dir=None) -> 
 
 def build_props(body, system, nebulae: float | None = None, guardian: bool = False) -> dict | None:
     """Словарь свойств тела для движка критериев (или None, если не посчитать)."""
-    if body is None or not body.landable:
+    if body is None:
+        return None
+    # биосигналы только на посадочных; FSSBodySignals иногда раньше флага Landable
+    if not body.landable and not (body.bio_signals or 0) and not body.genuses:
         return None
     star = _brightest_star_type(body, system)
     if not star:

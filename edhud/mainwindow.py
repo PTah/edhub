@@ -92,38 +92,89 @@ def _forecast(body: Body, state: GameState) -> tuple[str, str | None]:
 
 
 def _forecast_tip(body: Body, state: GameState) -> str | None:
-    """Полный список био для подсказки по цифре «Био» (до/после DSS)."""
+    """Список био при наведении на «Био» / «Возможно» (как в SrvSurvey)."""
     if body.genuses:
         names = bio.forecast_names(body, state.system, limit=24)
-        if not names:
-            return None
-        return "DSS:\n" + "\n".join(f"• {name}" for name in names)
+        if names:
+            return "DSS:\n" + "\n".join(f"• {name}" for name in names)
+        return "DSS: роды ещё не разобраны"
     if (body.bio_signals or 0) <= 0:
         return None
     names = bio.forecast_names(body, state.system, limit=24)
-    if not names:
-        return None
-    return "Предположительно:\n" + "\n".join(f"• {name}" for name in names)
+    if names:
+        return "Предположительно:\n" + "\n".join(f"• {name}" for name in names)
+    missing: list[str] = []
+    if not body.planet_class:
+        missing.append("класс")
+    if not body.atmosphere and not body.atmosphere_composition:
+        missing.append("атмосфера")
+    if body.surface_temp is None:
+        missing.append("температура")
+    if not body.materials:
+        missing.append("материалы")
+    if missing:
+        return "Нет прогноза — нужен детальный скан\n(нет: " + ", ".join(missing) + ")"
+    return "Нет совпадений в критериях био"
 
 
 class _CellTip:
     """Всплывающая подсказка у ячейки таблицы Bodies."""
 
-    def __init__(self, widget: tk.Misc, text: str) -> None:
-        self.widget = widget
+    def __init__(self, *widgets: tk.Misc, text: str) -> None:
+        self.widgets = [w for w in widgets if w is not None]
+        self.widget = self.widgets[0]
         self.text = text
         self._tip: tk.Toplevel | None = None
-        widget.bind("<Enter>", self._show, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-        widget.bind("<Destroy>", self._hide, add="+")
+        self._after: str | None = None
+        for widget in self.widgets:
+            widget.bind("<Enter>", self._schedule, add="+")
+            widget.bind("<Leave>", self._on_leave, add="+")
+            widget.bind("<Destroy>", self._hide, add="+")
 
-    def _show(self, _event=None) -> None:
+    def _schedule(self, _event=None) -> None:
+        if self._tip is not None or not self.text:
+            return
+        self._cancel_after()
+        try:
+            self._after = self.widget.after(280, self._show)
+        except tk.TclError:
+            self._show()
+
+    def _on_leave(self, event=None) -> None:
+        # уход на дочерний виджет той же ячейки — не прячем
+        if event is not None:
+            try:
+                going = event.widget.winfo_containing(event.x_root, event.y_root)
+            except tk.TclError:
+                going = None
+            if going is not None:
+                for widget in self.widgets:
+                    if going == widget or str(going).startswith(str(widget)):
+                        return
+                    try:
+                        if going.master == widget or widget.master == going:
+                            return
+                    except tk.TclError:
+                        pass
+        self._hide()
+
+    def _cancel_after(self) -> None:
+        if self._after is None:
+            return
+        try:
+            self.widget.after_cancel(self._after)
+        except tk.TclError:
+            pass
+        self._after = None
+
+    def _show(self) -> None:
+        self._after = None
         if self._tip is not None or not self.text:
             return
         tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)
         try:
-            tip.attributes("-topmost", True)
+            tip.wm_attributes("-topmost", True)
         except tk.TclError:
             pass
         label = tk.Label(
@@ -146,6 +197,7 @@ class _CellTip:
         self._tip = tip
 
     def _hide(self, _event=None) -> None:
+        self._cancel_after()
         tip = self._tip
         self._tip = None
         if tip is not None:
@@ -390,20 +442,38 @@ class MainWindow:
             return BODY_COLUMNS, self._body_widths, "name"
         return ROUTE_COLUMNS, self._route_widths, "system"
 
+    def _canvas_avail(self, table: str) -> int | None:
+        canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
+        try:
+            avail = int(canvas.winfo_width())
+        except tk.TclError:
+            return None
+        return avail if avail > 1 else None
+
     def _effective_widths(self, table: str, avail: int | None = None) -> list[int]:
         columns, widths_map, stretch_key = self._table_spec(table)
         widths = [
             max(self._min_col_width(key), int(widths_map[key]))
             for key, _title, _default, _anchor in columns
         ]
+        # во время ресайза не растягиваем — иначе «До след., ly» растёт за счёт Sistema
+        if self._col_drag is not None:
+            return widths
         if avail is not None and avail > sum(widths):
             stretch_i = next(i for i, (key, *_rest) in enumerate(columns) if key == stretch_key)
             widths[stretch_i] += avail - sum(widths)
         return widths
 
+    def _bake_effective_widths(self, table: str) -> None:
+        """Записать видимые ширины (с stretch) в карту — ресайз не будет их «съедать»."""
+        columns, widths_map, _stretch = self._table_spec(table)
+        # bake до установки _col_drag, иначе effective без stretch
+        widths = self._effective_widths(table, self._canvas_avail(table))
+        for (key, *_rest), width in zip(columns, widths):
+            widths_map[key] = max(self._min_col_width(key), int(width))
+
     def _apply_column_geometry(self, table: str, avail: int | None = None) -> list[int]:
         """Одинаковые пиксельные ширины у хедера и строк — иначе колонки разъезжаются."""
-        columns, _widths_map, _stretch = self._table_spec(table)
         widths = self._effective_widths(table, avail)
         if table == "bodies":
             header, inner = self._bodies_header, self._bodies_inner
@@ -433,16 +503,15 @@ class MainWindow:
         key = columns[index][0]
         widths_map[key] = max(self._min_col_width(key), int(width))
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
-        try:
-            avail = int(canvas.winfo_width())
-        except tk.TclError:
-            avail = None
-        widths = self._apply_column_geometry(table, avail if avail and avail > 1 else None)
+        # без stretch: меняется только эта колонка (иначе последняя ворует у Sistema)
+        stretch_avail = None if self._col_drag is not None else self._canvas_avail(table)
+        widths = self._apply_column_geometry(table, stretch_avail)
         total = sum(widths)
         window = getattr(self, f"_{table}_window", None)
         if window is not None:
-            canvas.itemconfigure(window, width=total)
+            canvas.itemconfigure(window, width=max(total, self._canvas_avail(table) or total))
         canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, total, 0))
+        self._sync_header_x(table)
 
     def _bind_col_resize(self, widget: tk.Misc, table: str, index: int) -> None:
         columns, _widths_map, _stretch = self._table_spec(table)
@@ -460,6 +529,7 @@ class MainWindow:
         def on_press(event) -> None:
             if event.widget.winfo_width() - event.x > RESIZE_EDGE:
                 return
+            self._bake_effective_widths(table)
             key = columns[index][0]
             start_w = self._col_width(table, key, columns[index][2])
             self._col_drag = (table, index, event.x_root, start_w)
@@ -483,6 +553,8 @@ class MainWindow:
             except tk.TclError:
                 pass
             widget.configure(cursor="")
+            # если суммарно уже уже окна — снова дотянуть stretch-колонку
+            self._set_col_width(table, index, self._col_width(table, columns[index][0], columns[index][2]))
             self._schedule_save()
 
         widget.bind("<Motion>", on_motion, add="+")
@@ -683,7 +755,9 @@ class MainWindow:
             label.image = image
         label.pack(fill="both", expand=True)
         if tip:
-            label.tip = _CellTip(label, tip)
+            cell_tip = _CellTip(box, label, text=tip)
+            label.tip = cell_tip
+            box.tip = cell_tip
         box.grid(row=row, column=col, sticky="nsew")
         return label
 
@@ -897,7 +971,7 @@ class MainWindow:
         self.route_info.configure(text=f"Источник: {src}{lock}{extra}")
         here = route.index_of(current)
         here_row = None
-        widths = self._apply_column_geometry("route")
+        widths = self._apply_column_geometry("route", self._canvas_avail("route"))
         for row, hop in enumerate(route.hops):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
@@ -1003,7 +1077,7 @@ class MainWindow:
                     fg=fg,
                     bg=bg,
                     anchor=anchor,
-                    tip=tip if key == "bio" else None,
+                    tip=tip if key in ("bio", "guess") else None,
                 )
         self._bodies_address = state.system.address
         self._bodies_inner.update_idletasks()

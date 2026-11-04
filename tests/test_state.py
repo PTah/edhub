@@ -1040,6 +1040,15 @@ class BodyColorTests(unittest.TestCase):
         self.assertTrue(tip.startswith("DSS:"))
         self.assertIn("Bacterium", tip)
 
+    def test_forecast_tip_explains_missing_scan(self):
+        from edhud.mainwindow import _forecast_tip
+
+        state = GameState()
+        body = Body(body_id=1, name="Test 1", bio_signals=2, signals_known=True)
+        tip = _forecast_tip(body, state)
+        self.assertIsNotNone(tip)
+        self.assertIn("детальный скан", tip)
+
 
 class BioBoardTests(unittest.TestCase):
     def _icy(self, state: GameState, body_id: int = 1, signals: int = 2) -> Body:
