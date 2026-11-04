@@ -34,6 +34,8 @@ class Overlay:
         on_settings=None,
         system_name_provider=None,
         system_address_provider=None,
+        carrier_system_provider=None,
+        on_copy_carrier=None,
     ) -> None:
         import tkinter as tk
         from tkinter import font as tkfont
@@ -47,6 +49,8 @@ class Overlay:
         self.on_settings = on_settings
         self.system_name_provider = system_name_provider
         self.system_address_provider = system_address_provider
+        self.carrier_system_provider = carrier_system_provider
+        self.on_copy_carrier = on_copy_carrier
         self._fonts: dict[tuple[int, bool], tkfont.Font] = {}
         self._view: HudView | None = None
         self._queue: queue.Queue = queue.Queue(maxsize=2)
@@ -62,6 +66,7 @@ class Overlay:
         self._keeper: winapi.TopmostKeeper | None = None
         self._menu = None
         self._planet_dim = False
+        self._carrier_hit: tuple[int, int, int, int] | None = None
 
         self.root = tk.Tk()
         self.root.title("EDHUD")
@@ -202,6 +207,7 @@ class Overlay:
         self.root.bind("<F10>", lambda _e: self._toggle_visible())
         self.root.bind("<F12>", lambda _e: self._request_quit())
         self.canvas.bind("<ButtonPress-1>", self._on_left_press)
+        self.canvas.bind("<Double-Button-1>", self._on_double_click)
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
         self.canvas.bind("<Button-3>", self._show_menu)
@@ -273,6 +279,33 @@ class Overlay:
             self._request_quit()
             return
         self._drag_start(event)
+
+    def _carrier_hit_test(self, x: int, y: int) -> bool:
+        box = self._carrier_hit
+        if box is None:
+            return False
+        x0, y0, x1, y1 = box
+        return x0 <= x <= x1 and y0 <= y <= y1
+
+    def _on_double_click(self, event) -> None:
+        """Двойной клик по карриеру в верхней полоске — имя системы в буфер."""
+        if self.cfg.click_through:
+            return
+        self._drag = None
+        if not self._carrier_hit_test(event.x, event.y):
+            return
+        name = None
+        if self.carrier_system_provider:
+            try:
+                name = self.carrier_system_provider()
+            except Exception:
+                name = None
+        if not name:
+            return
+        if self.on_copy_carrier:
+            self.on_copy_carrier(str(name))
+        else:
+            self.copy_to_clipboard(str(name))
 
     def _drag_start(self, event) -> None:
         if self.cfg.click_through:
@@ -367,6 +400,7 @@ class Overlay:
                 0, 0, int(width * view.fraction), BAR_H, fill=cfg.color(view.accent), outline=""
             )
         canvas.create_line(0, height - 1, width, height - 1, fill=cfg.color("dim"))
+        self._carrier_hit = None
 
         text_limit = width - PAD * 2
         if not cfg.click_through:
@@ -499,6 +533,9 @@ class Overlay:
         self._draw_segments(row.segments, x, y, font, main_limit)
         if tail_x is not None:
             self._draw_segments(tail, tail_x, y, font, limit)
+            # зона «карриер …» для двойного клика (копировать систему носителя)
+            metrics = font.metrics("linespace")
+            self._carrier_hit = (tail_x, y, min(limit, tail_x + tail_width), y + metrics)
         metrics = font.metrics("linespace")
         return y + (line_height or metrics)
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import demo, eddn, galaxy, hudmodel, remote, tray
+from . import demo, eddn, galaxy, hudmodel, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -435,6 +435,8 @@ class App:
             on_settings=self.open_settings,
             system_name_provider=lambda: self.state.system.name,
             system_address_provider=lambda: self.state.system.address,
+            carrier_system_provider=lambda: self.state.carrier.system,
+            on_copy_carrier=self.copy_system_name,
         )
         bindings = {
             0x77: lambda: self._ui(self.toggle_expanded),  # F8
@@ -446,7 +448,13 @@ class App:
         self.hotkeys.start()
         from .mainwindow import MainWindow
 
-        self.mainwindow = MainWindow(self.overlay.root, cfg=self.cfg)
+        self.mainwindow = MainWindow(
+            self.overlay.root,
+            cfg=self.cfg,
+            on_copy_system=self.copy_system_name,
+            on_copy_carrier=self.copy_system_name,
+            on_plot_to_carrier=self.plot_route_to_carrier,
+        )
         self.mainwindow.apply_look(self.cfg)
         self.mainwindow.show()
         self._start_tray()
@@ -532,6 +540,56 @@ class App:
 
     def open_spansh_map(self) -> None:
         webbrowser.open("https://spansh.co.uk/plotter")
+
+    def copy_system_name(self, name: str | None = None) -> None:
+        """Скопировать имя системы в буфер (двойной клик по заголовку / карриеру)."""
+        text = (name or "").strip()
+        if not text:
+            return
+        if self.overlay is not None:
+            self.overlay.copy_to_clipboard(text)
+        elif self.mainwindow is not None:
+            self.mainwindow._copy_text(text)
+
+    def plot_route_to_carrier(self) -> None:
+        """Тройной клик по карриеру: маршрут Spansh от текущей системы до носителя."""
+        start = self.state.system.name
+        target = self.state.carrier.system
+        if not start or not target:
+            return
+        if start.lower() == target.lower():
+            self._voice_alert = "карриер уже в этой системе"
+            return
+        if not self.cfg.allow_network:
+            self._voice_alert = "сеть отключена — маршрут не построить"
+            return
+        if getattr(self, "_plot_busy", False):
+            return
+        self._plot_busy = True
+        self._voice_alert = f"строим маршрут → {target}…"
+
+        def work() -> None:
+            error = None
+            route = None
+            try:
+                route = spansh.plot_route(start, target, range_ly=50.0, efficiency=60.0)
+            except Exception as exc:
+                error = str(exc)
+
+            def apply() -> None:
+                self._plot_busy = False
+                if route is not None and route.hops:
+                    self.state.route = route
+                    self.state.route.locked = True
+                    self.state.sync_route_discoverers()
+                    self.state.view_tab = "route"
+                    self._voice_alert = f"маршрут до карриера: {len(route.hops)} систем"
+                else:
+                    self._voice_alert = f"маршрут не построен: {error or 'пусто'}"
+
+            self._ui(apply)
+
+        threading.Thread(target=work, name="edhud-plot-carrier", daemon=True).start()
 
     def open_config_folder(self) -> None:
         path = config_mod.app_dir()

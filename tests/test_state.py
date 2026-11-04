@@ -432,6 +432,46 @@ class FirstDiscoveryTests(unittest.TestCase):
         self.assertIn("новых систем: 2", detail)
 
 
+class CarrierClickTests(unittest.TestCase):
+    def test_carrier_label_includes_system(self):
+        state = GameState()
+        state.carrier.carrier_id = 1
+        state.carrier.callsign = "GHY-7TZ"
+        state.carrier.system = "Home Base"
+        state.carrier.address = 1
+        state.carrier.star_pos = (0, 0, 0)
+        state.system.address = 2
+        state.system.name = "Away"
+        state.system.star_pos = (0, 0, 40)
+        label = hudmodel._carrier_label(state)
+        self.assertIsNotNone(label)
+        self.assertIn("Home Base", label)
+        self.assertIn("GHY-7TZ", label)
+
+    def test_mainwindow_copies_system_on_double_click(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        copied: list[str] = []
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root, on_copy_system=copied.append, on_copy_carrier=copied.append)
+            state = GameState()
+            state.system.name = "Alpha Centauri"
+            state.carrier.carrier_id = 7
+            state.carrier.system = "Carrier Home"
+            state.carrier.callsign = "ABC-123"
+            window.update_state(state)
+            window._on_system_double()
+            window._on_carrier_double()
+            self.assertEqual(copied, ["Alpha Centauri", "Carrier Home"])
+            window.destroy()
+        finally:
+            root.destroy()
+
+
 class RouteOpenedColumnTests(unittest.TestCase):
     def test_route_hop_shows_discoverer_or_ours(self):
         from edhud.mainwindow import ROUTE_COLUMNS, MainWindow

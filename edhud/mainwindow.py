@@ -316,9 +316,17 @@ class MainWindow:
         root: tk.Misc,
         on_close: Callable[[], None] | None = None,
         cfg=None,
+        on_copy_system: Callable[[str], None] | None = None,
+        on_copy_carrier: Callable[[str], None] | None = None,
+        on_plot_to_carrier: Callable[[], None] | None = None,
     ) -> None:
         self.on_close = on_close
         self.cfg = cfg
+        self.on_copy_system = on_copy_system
+        self.on_copy_carrier = on_copy_carrier
+        self.on_plot_to_carrier = on_plot_to_carrier
+        self._carrier_system: str | None = None
+        self._system_name: str | None = None
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD")
         geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
@@ -376,8 +384,13 @@ class MainWindow:
         top.pack(fill="x")
         self.lbl_system = ttk.Label(top, text="Система: —", style="ED.Header.TLabel")
         self.lbl_system.pack(side="left")
+        self.lbl_system.bind("<Double-Button-1>", self._on_system_double)
         self.lbl_status = ttk.Label(top, text="", style="ED.Muted.TLabel")
         self.lbl_status.pack(side="left", padx=(16, 0))
+        self.lbl_carrier = ttk.Label(top, text="", style="ED.Muted.TLabel")
+        self.lbl_carrier.pack(side="left", padx=(12, 0))
+        self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
+        self.lbl_carrier.bind("<Triple-Button-1>", self._on_carrier_triple)
 
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -1016,22 +1029,58 @@ class MainWindow:
 
     def _update_header(self, state: GameState) -> None:
         name = state.system.name or "—"
+        self._system_name = state.system.name
         known = len(state.system.bodies)
         total = state.system.body_count or known
         bio = sum(1 for b in state.system.bodies.values() if (b.bio_signals or 0) > 0)
         opened = " — открыта вами" if state.system.discovered_by_me else ""
         self.lbl_system.configure(text=f"Система: {name}{opened}")
-        carrier = ""
-        dist = state.carrier_distance_ly()
-        if state.carrier.known and dist is not None:
-            if dist < 0.05:
-                carrier = " · карриер здесь"
-            else:
-                carrier = f" · карриер {dist:,.0f} ly".replace(",", " ")
         self.lbl_status.configure(
-            text=f"тел {known}/{total} · био-тел {bio}{carrier}"
+            text=f"тел {known}/{total} · био-тел {bio}"
             + (" · маршрут залочен" if state.route.locked else "")
         )
+        self._carrier_system = state.carrier.system if state.carrier.known else None
+        if state.carrier.known and self._carrier_system:
+            dist = state.carrier_distance_ly()
+            who = state.carrier.callsign or state.carrier.name or "карриер"
+            if dist is None:
+                text = f"· {who}: {self._carrier_system}"
+            elif dist < 0.05:
+                text = f"· {who}: {self._carrier_system} · здесь"
+            else:
+                ly = f"{dist:,.0f}".replace(",", " ")
+                text = f"· {who}: {self._carrier_system} · {ly} ly"
+            self.lbl_carrier.configure(text=text, foreground=COLORS["accent"])
+        else:
+            self.lbl_carrier.configure(text="")
+
+    def _copy_text(self, text: str | None) -> None:
+        if not text:
+            return
+        try:
+            self.win.clipboard_clear()
+            self.win.clipboard_append(text)
+            self.win.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def _on_system_double(self, _event=None) -> None:
+        name = self._system_name
+        if self.on_copy_system and name:
+            self.on_copy_system(name)
+        else:
+            self._copy_text(name)
+
+    def _on_carrier_double(self, _event=None) -> None:
+        name = self._carrier_system
+        if self.on_copy_carrier and name:
+            self.on_copy_carrier(name)
+        else:
+            self._copy_text(name)
+
+    def _on_carrier_triple(self, _event=None) -> None:
+        if self.on_plot_to_carrier and self._carrier_system:
+            self.on_plot_to_carrier()
 
     def _update_route(self, route: Route, current: str | None) -> None:
         for child in self._route_inner.winfo_children():

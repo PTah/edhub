@@ -395,9 +395,9 @@ def _carrier_label(state: GameState) -> str | None:
             return f"{who} · {where} · ищем ly…"
         return f"{who} · {where}"
     if dist < 0.05:
-        return f"{who} · здесь"
+        return f"{who} · {where} · здесь"
     text = f"{dist:,.1f}".replace(",", " ")
-    return f"{who} · {text} ly"
+    return f"{who} · {where} · {text} ly"
 
 
 def _append_carrier(row: Row, state: GameState) -> None:
