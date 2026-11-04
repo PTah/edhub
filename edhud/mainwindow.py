@@ -382,15 +382,28 @@ class MainWindow:
     def _build(self) -> None:
         top = ttk.Frame(self.win, style="ED.TFrame", padding=(12, 10))
         top.pack(fill="x")
-        self.lbl_system = ttk.Label(top, text="Система: —", style="ED.Header.TLabel")
+        self.lbl_system = ttk.Label(top, text="Система: —", style="ED.Header.TLabel", cursor="hand2")
         self.lbl_system.pack(side="left")
         self.lbl_system.bind("<Double-Button-1>", self._on_system_double)
         self.lbl_status = ttk.Label(top, text="", style="ED.Muted.TLabel")
         self.lbl_status.pack(side="left", padx=(16, 0))
-        self.lbl_carrier = ttk.Label(top, text="", style="ED.Muted.TLabel")
+        # tk.Label: курсор-рука и подчёркивание — видно, что карриер кликабелен
+        self.lbl_carrier = tk.Label(
+            top,
+            text="",
+            bg=COLORS["bg"],
+            fg=COLORS["accent"],
+            font=(self._ui_family, self._ui_size, "underline"),
+            cursor="hand2",
+            padx=4,
+        )
         self.lbl_carrier.pack(side="left", padx=(12, 0))
         self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
         self.lbl_carrier.bind("<Triple-Button-1>", self._on_carrier_triple)
+        self.lbl_carrier_hint = ttk.Label(
+            top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
+        )
+        self.lbl_carrier_hint.pack(side="left", padx=(4, 0))
 
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -773,6 +786,7 @@ class MainWindow:
         anchor: str = "w",
         font=None,
         tip: str | None = None,
+        copy_text: str | None = None,
     ):
         parent = self._bodies_inner if table == "bodies" else self._route_inner
         bg = bg or COLORS["row"]
@@ -789,6 +803,7 @@ class MainWindow:
             font=font or (self._ui_family, self._ui_size),
             padx=4,
             pady=1,
+            cursor="hand2" if copy_text else "",
         )
         if image is not None:
             label.image = image
@@ -797,6 +812,22 @@ class MainWindow:
             cell_tip = _CellTip(box, label, text=tip)
             label.tip = cell_tip
             box.tip = cell_tip
+        if copy_text:
+            tip_text = tip or f"Двойной клик — копировать\n{copy_text}"
+            if not tip:
+                cell_tip = _CellTip(box, label, text=tip_text)
+                label.tip = cell_tip
+                box.tip = cell_tip
+
+            def _copy(_event=None, name=copy_text) -> None:
+                if self.on_copy_system:
+                    self.on_copy_system(name)
+                else:
+                    self._copy_text(name)
+
+            label.bind("<Double-Button-1>", _copy, add="+")
+            box.bind("<Double-Button-1>", _copy, add="+")
+            box.configure(cursor="hand2")
         box.grid(row=row, column=col, sticky="nsew")
         return label
 
@@ -947,6 +978,13 @@ class MainWindow:
                     parent.configure(bg=COLORS["panel"], height=_row_height(self._ui_size) + 8)
                     _paint_grid(parent, COLORS["panel"])
             self._apply_column_geometry(table)
+        if getattr(self, "lbl_carrier", None) is not None:
+            self.lbl_carrier.configure(
+                bg=COLORS["bg"],
+                font=(self._ui_family, self._ui_size, "underline"),
+            )
+        if getattr(self, "lbl_carrier_hint", None) is not None:
+            self.lbl_carrier_hint.configure(font=(self._ui_family, max(7, self._ui_size - 1)))
 
     def update_state(self, state: GameState) -> None:
         self._state = state
@@ -1048,22 +1086,25 @@ class MainWindow:
         if state.carrier.jump_pending and state.carrier.jump_dest_system:
             frm = self._carrier_system or "—"
             to = state.carrier.jump_dest_system
-            text = f"· Карриер готовится прыгать из {frm} в {to}"
-            self.lbl_carrier.configure(text=text, foreground=COLORS["warn"])
+            text = f"Карриер готовится прыгать из {frm} в {to}"
+            self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
+            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут")
             return
         if self._carrier_system:
             dist = state.carrier_distance_ly()
             who = state.carrier.callsign or state.carrier.name or "карриер"
             if dist is None:
-                text = f"· {who}: {self._carrier_system}"
+                text = f"Карриер {who}: {self._carrier_system}"
             elif dist < 0.05:
-                text = f"· {who}: {self._carrier_system} · здесь"
+                text = f"Карриер {who}: {self._carrier_system} · здесь"
             else:
                 ly = f"{dist:,.0f}".replace(",", " ")
-                text = f"· {who}: {self._carrier_system} · {ly} ly"
-            self.lbl_carrier.configure(text=text, foreground=COLORS["accent"])
+                text = f"Карриер {who}: {self._carrier_system} · {ly} ly"
+            self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
+            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут")
         else:
             self.lbl_carrier.configure(text="")
+            self.lbl_carrier_hint.configure(text="")
 
     def _copy_text(self, text: str | None) -> None:
         if not text:
@@ -1104,7 +1145,9 @@ class MainWindow:
         src = route.source or "game"
         lock = " · залочен" if route.locked else ""
         extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
-        self.route_info.configure(text=f"Источник: {src}{lock}{extra}")
+        self.route_info.configure(
+            text=f"Источник: {src}{lock}{extra} · двойной клик по системе — копировать"
+        )
         here = route.index_of(current)
         here_row = None
         widths = self._apply_column_geometry("route", self._canvas_avail("route"))
@@ -1139,6 +1182,7 @@ class MainWindow:
                     fg=cell_fg,
                     anchor=anchor,
                     font=font,
+                    copy_text=hop.system if key == "system" else None,
                 )
             if tag == "here":
                 here_row = row

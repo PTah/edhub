@@ -481,6 +481,7 @@ class CarrierClickTests(unittest.TestCase):
             self.assertIn("готовится прыгать", text)
             self.assertIn("FromSys", text)
             self.assertIn("ToSys", text)
+            self.assertIn("2× копия", window.lbl_carrier_hint.cget("text"))
             window.destroy()
         finally:
             root.destroy()
