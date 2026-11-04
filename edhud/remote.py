@@ -86,15 +86,9 @@ def _f(value) -> float | None:
 
 
 def _composition(raw) -> dict[str, float]:
-    if not isinstance(raw, dict):
-        return {}
-    found: dict[str, float] = {}
-    for key, value in raw.items():
-        try:
-            found[str(key)] = float(value)
-        except (TypeError, ValueError):
-            continue
-    return found
+    from .model import parse_atmosphere_composition
+
+    return parse_atmosphere_composition(raw)
 
 
 def system_discoverer(name: str, timeout: float = 8.0) -> str | None | bool:
@@ -621,6 +615,7 @@ def body_from_journal_scan(event: dict) -> Body | None:
         surface_gravity=_f(event.get("SurfaceGravity")),
         surface_pressure=_f(event.get("SurfacePressure")),
         atmosphere=event.get("Atmosphere") or None,
+        atmosphere_type_hint=str(event["AtmosphereType"]) if event.get("AtmosphereType") else None,
         atmosphere_composition=_composition(event.get("AtmosphereComposition")),
         volcanism=event.get("Volcanism") or None,
         materials=parse_materials(event.get("Materials")),

@@ -389,8 +389,15 @@ def build_props(body, system, nebulae: float | None = None, guardian: bool = Fal
     region = regions.region_id(pos[0], pos[2]) if pos else None
     atmosphere = (body.atmosphere or "").replace(" atmosphere", "")
     composition = dict(body.atmosphere_composition or {})
+    # как в SrvSurvey: один газ → 100%; иначе доминирующий газ = AtmosphereType → 100%
     if len(composition) == 1:
         composition[next(iter(composition))] = 100.0
+    else:
+        atmos_type = body.atmosphere_type
+        if atmos_type and composition:
+            dominant = max(composition.items(), key=lambda item: item[1])
+            if dominant[0].lower() == atmos_type.lower() and dominant[1] >= 50.0:
+                composition[dominant[0]] = 100.0
     return {
         "PlanetClass": body.planet_class or "",
         "SurfaceGravity": (body.surface_gravity or 0.0) / 10.0,

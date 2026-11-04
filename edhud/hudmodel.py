@@ -190,9 +190,13 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment("0", "muted"))
     else:
         row.segments.append(Segment(str(body.bio_signals), "ok"))
-        genuses = _genuses(body)
-        if genuses:
-            row.segments.append(Segment(f" ({genuses})", "muted"))
+        forecast = bio.forecast_names(body, state.system, limit=3)
+        if forecast:
+            row.segments.append(Segment(f" ({', '.join(forecast)})", "muted"))
+        else:
+            genuses = _genuses(body)
+            if genuses:
+                row.segments.append(Segment(f" ({genuses})", "muted"))
         if body.geo_signals:
             row.segments.append(Segment(f" · гео {body.geo_signals}", "muted"))
 
@@ -362,13 +366,14 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
         for candidate in sorted(system_bio, key=lambda b: b.distance_ls)[:6]:
             row = Row([Segment("• ", "muted"), Segment(candidate.name, "text")])
             row.segments.append(Segment(f"  {candidate.bio_signals} сигн.", "ok"))
-            genuses = _genuses(candidate, limit=3)
-            if genuses:
-                row.segments.append(Segment(f" ({genuses})", "muted"))
-            elif (candidate.bio_signals or 0) > 0 and candidate.landable:
-                forecast = bio.forecast_names(candidate, state.system, limit=3)
-                if forecast:
-                    row.segments.append(Segment(f"  ≈ {', '.join(forecast)}", "accent"))
+            forecast = bio.forecast_names(candidate, state.system, limit=3)
+            if forecast:
+                prefix = "  ≈ " if not candidate.genuses else "  "
+                row.segments.append(Segment(f"{prefix}{', '.join(forecast)}", "accent" if not candidate.genuses else "muted"))
+            else:
+                genuses = _genuses(candidate, limit=3)
+                if genuses:
+                    row.segments.append(Segment(f" ({genuses})", "muted"))
             if candidate.dss_scanned or candidate.genuses:
                 row.segments.append(Segment("  DSS ✔", "accent"))
             if candidate.remote:

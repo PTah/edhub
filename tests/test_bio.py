@@ -139,6 +139,75 @@ class PredictionTests(unittest.TestCase):
         self.assertTrue(predictions)
         self.assertGreater(predictions[0].reward, 0)
 
+    def test_journal_list_atmosphere_composition_predicts(self):
+        """Scan пишет AtmosphereComposition списком — без разбора видов не будет."""
+        from edhud.model import GameState
+
+        state = GameState()
+        state.system.star_pos = (0.0, 0.0, 0.0)
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyID": 0,
+                "BodyName": "Journal A",
+                "StarType": "K",
+                "StellarMass": 1.0,
+                "Radius": 5e8,
+                "SurfaceTemperature": 4500.0,
+            }
+        )
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyID": 2,
+                "BodyName": "Journal A 2",
+                "PlanetClass": "Icy body",
+                "Landable": True,
+                "SurfaceGravity": 5.6,
+                "SurfaceTemperature": 118.0,
+                "SurfacePressure": 540.0,
+                "Atmosphere": "thin neon atmosphere",
+                "AtmosphereType": "Neon",
+                "AtmosphereComposition": [
+                    {"Name": "Neon", "Percent": 97.8},
+                    {"Name": "Nitrogen", "Percent": 2.2},
+                ],
+                "Volcanism": "",
+                "Materials": [
+                    {"Name": "iron", "Percent": 19.1},
+                    {"Name": "sulphur", "Percent": 15.6},
+                    {"Name": "carbon", "Percent": 21.2},
+                    {"Name": "technetium", "Percent": 0.71},
+                ],
+                "DistanceFromArrivalLS": 1180.0,
+                "Parents": [{"Star": 0}],
+            }
+        )
+        state.apply(
+            {
+                "event": "SAASignalsFound",
+                "BodyID": 2,
+                "BodyName": "Journal A 2",
+                "Signals": [{"Type": "$SAA_SignalType_Biological;", "Count": 1}],
+                "Genuses": [
+                    {
+                        "Genus": "$Codex_Ent_Bacterial_Genus_Name;",
+                        "Genus_Localised": "Bacterium",
+                        "Count": 1,
+                    }
+                ],
+            }
+        )
+        body = state.system.bodies[2]
+        self.assertIn("Neon", body.atmosphere_composition)
+        self.assertAlmostEqual(body.atmosphere_composition["Neon"], 97.8)
+        self.assertEqual(body.atmosphere_type, "Neon")
+        names = bio.forecast_names(body, state.system, limit=8)
+        self.assertTrue(any("Bacterium Acies" in name for name in names), names)
+        preds = bio.predict_for_body(body, state.system)
+        self.assertTrue(preds)
+        self.assertGreater(preds[0].reward, 0)
+
     def test_non_landable_has_no_predictions(self):
         system = self._system()
         body = self._icy_body(system)

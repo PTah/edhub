@@ -290,6 +290,7 @@ class Body:
     surface_gravity: float | None = None
     surface_pressure: float | None = None
     atmosphere: str | None = None
+    atmosphere_type_hint: str | None = None  # AtmosphereType из Scan
     atmosphere_composition: dict[str, float] = field(default_factory=dict)
     volcanism: str | None = None
     materials: dict[str, float] = field(default_factory=dict)
@@ -339,6 +340,10 @@ class Body:
     @property
     def atmosphere_type(self) -> str | None:
         """Тип атмосферы в нотации критериев: "thin neon atmosphere" -> "Neon"."""
+        if self.atmosphere_type_hint:
+            hint = str(self.atmosphere_type_hint).strip()
+            if hint and hint.lower() not in {"none", "noatmosphere", "n/a"}:
+                return hint
         if not self.atmosphere:
             return None
         text = self.atmosphere.lower().replace("-", " ").replace(" atmosphere", "").strip()
@@ -642,6 +647,15 @@ def _journal_ts(value: Any) -> float | None:
 
 def parse_materials(raw: Any) -> dict[str, float]:
     """Журнал отдаёт материалы списком {Name, Percent}, старые события — словарём."""
+    return _parse_named_percents(raw)
+
+
+def parse_atmosphere_composition(raw: Any) -> dict[str, float]:
+    """Состав атмосферы: в Scan почти всегда список [{Name, Percent}, ...]."""
+    return _parse_named_percents(raw)
+
+
+def _parse_named_percents(raw: Any) -> dict[str, float]:
     rows: list = []
     if isinstance(raw, dict):
         rows = [{"Name": key, "Percent": value} for key, value in raw.items()]
@@ -658,7 +672,11 @@ def parse_materials(raw: Any) -> dict[str, float]:
         value = _f(percent)
         if value is None:
             continue
-        found[str(name)] = value
+        # критерии BioCriteria ждут Neon / Technetium, журнал часто пишет neon / technetium
+        key = str(name)
+        if key and key[0].islower():
+            key = key[0].upper() + key[1:]
+        found[key] = value
     return found
 
 
@@ -1021,9 +1039,12 @@ class GameState:
         body.surface_pressure = _f(e.get("SurfacePressure"))
         if e.get("Atmosphere") is not None:
             body.atmosphere = e.get("Atmosphere")
-        comp = e.get("AtmosphereComposition")
-        if isinstance(comp, dict):
-            body.atmosphere_composition = {k: float(v) for k, v in comp.items()}
+        # AtmosphereType из журнала точнее, чем разбор строки Atmosphere
+        if e.get("AtmosphereType"):
+            body.atmosphere_type_hint = str(e.get("AtmosphereType"))
+        comp = parse_atmosphere_composition(e.get("AtmosphereComposition"))
+        if comp:
+            body.atmosphere_composition = comp
         body.volcanism = e.get("Volcanism") or body.volcanism
         mats = parse_materials(e.get("Materials"))
         if mats:
