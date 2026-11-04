@@ -7,6 +7,7 @@ from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, file
 import tkinter as tk
 
 from . import config
+from .mainwindow import _geometry_xy
 
 # Подписи цветов в разделе «Оформление». Первые — текст, дальше заливки.
 COLOR_FIELDS = (
@@ -24,6 +25,8 @@ COLOR_FIELDS = (
     ("sel", "Выделение"),
 )
 
+NUDGE_STEP = 10
+
 
 def _parse_color(value: str) -> str | None:
     text = (value or "").strip()
@@ -36,12 +39,17 @@ def _parse_color(value: str) -> str | None:
     return None
 
 
+def _clamp_alpha(value: float) -> float:
+    return max(0.25, min(1.0, float(value)))
+
+
 class SettingsDialog:
     """Модальное окно настроек."""
 
-    def __init__(self, root: tk.Misc, cfg: config.Config, on_saved=None) -> None:
+    def __init__(self, root: tk.Misc, cfg: config.Config, on_saved=None, on_live=None) -> None:
         self.cfg = cfg
         self.on_saved = on_saved
+        self.on_live = on_live
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD — настройки")
         self.win.attributes("-topmost", True)
@@ -50,10 +58,15 @@ class SettingsDialog:
             self.win.transient(root)
         except tk.TclError:
             pass
+        self._live_ready = False
         self._build()
         self.win.grab_set()
         self.win.focus_force()
         self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
+        self.win.after(200, self._arm_live)
+
+    def _arm_live(self) -> None:
+        self._live_ready = True
 
     def _build(self) -> None:
         pad = {"padx": 10, "pady": 4}
@@ -62,10 +75,13 @@ class SettingsDialog:
         nb = ttk.Notebook(outer)
         nb.grid(row=0, column=0, sticky="nsew")
         general = ttk.Frame(nb, padding=8)
+        windows = ttk.Frame(nb, padding=8)
         look = ttk.Frame(nb, padding=8)
         nb.add(general, text="Общее")
+        nb.add(windows, text="Окна")
         nb.add(look, text="Оформление")
         self._build_general(general, pad)
+        self._build_windows(windows, pad)
         self._build_look(look)
         btns = ttk.Frame(outer)
         btns.grid(row=1, column=0, sticky="e", pady=(8, 4))
@@ -79,7 +95,6 @@ class SettingsDialog:
     def _build_general(self, frm: ttk.Frame, pad: dict) -> None:
 
         self.journal_dir = StringVar(value=self.cfg.journal_dir or "")
-        self.opacity = DoubleVar(value=float(self.cfg.opacity))
         self.width = IntVar(value=int(self.cfg.width))
         self.allow_network = BooleanVar(value=bool(self.cfg.allow_network))
         self.remote_enabled = BooleanVar(value=bool(self.cfg.remote_enabled))
@@ -195,16 +210,168 @@ class SettingsDialog:
             frm, text="Сквозной режим мыши по умолчанию", variable=self.click_through
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
-        orow = ttk.Frame(frm)
-        orow.grid(row=row, column=0, sticky="w", **pad)
-        ttk.Label(orow, text="Прозрачность").pack(side="left")
-        ttk.Spinbox(orow, from_=0.3, to=1.0, increment=0.05, textvariable=self.opacity, width=6).pack(
+        wrow = ttk.Frame(frm)
+        wrow.grid(row=row, column=0, sticky="w", **pad)
+        ttk.Label(wrow, text="Ширина верхнего HUD").pack(side="left")
+        ttk.Spinbox(wrow, from_=600, to=2400, increment=20, textvariable=self.width, width=6).pack(
             side="left", padx=8
         )
-        ttk.Label(orow, text="Ширина").pack(side="left", padx=(12, 0))
-        ttk.Spinbox(orow, from_=600, to=2400, increment=20, textvariable=self.width, width=6).pack(
-            side="left", padx=8
+
+    def _xy_defaults(self) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+        ox = self.cfg.overlay_x if self.cfg.overlay_x is not None else 0
+        oy = self.cfg.overlay_y if self.cfg.overlay_y is not None else int(self.cfg.top_offset or 6)
+        bx = self.cfg.bio_x if self.cfg.bio_x is not None else 16
+        by = self.cfg.bio_y if self.cfg.bio_y is not None else 96
+        if self.cfg.main_x is not None and self.cfg.main_y is not None:
+            mx, my = int(self.cfg.main_x), int(self.cfg.main_y)
+        else:
+            mx, my = _geometry_xy(self.cfg.main_geometry or "980x520+80+80")
+        return (int(ox), int(oy)), (int(mx), int(my)), (int(bx), int(by))
+
+    def _build_windows(self, frm: ttk.Frame, pad: dict) -> None:
+        (ox, oy), (mx, my), (bx, by) = self._xy_defaults()
+        self.opacity = DoubleVar(value=_clamp_alpha(self.cfg.opacity))
+        self.main_opacity = DoubleVar(value=_clamp_alpha(getattr(self.cfg, "main_opacity", 1.0)))
+        self.bio_opacity = DoubleVar(
+            value=_clamp_alpha(getattr(self.cfg, "bio_opacity", self.cfg.opacity))
         )
+        self.overlay_x = IntVar(value=ox)
+        self.overlay_y = IntVar(value=oy)
+        self.main_x = IntVar(value=mx)
+        self.main_y = IntVar(value=my)
+        self.bio_x = IntVar(value=bx)
+        self.bio_y = IntVar(value=by)
+
+        ttk.Label(
+            frm,
+            text="Координаты и прозрачность. Стрелки сдвигают окно сразу; Сохранить — записать в конфиг.",
+            foreground="#666",
+            wraplength=520,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w", **pad)
+
+        self._window_block(
+            frm,
+            1,
+            "Верхний оверлей (HUD)",
+            self.overlay_x,
+            self.overlay_y,
+            self.opacity,
+            "overlay",
+            pad,
+        )
+        self._window_block(
+            frm,
+            2,
+            "Центральный дашборд (Route / Bodies)",
+            self.main_x,
+            self.main_y,
+            self.main_opacity,
+            "main",
+            pad,
+        )
+        self._window_block(
+            frm,
+            3,
+            "Био и локатор (боковая панель)",
+            self.bio_x,
+            self.bio_y,
+            self.bio_opacity,
+            "bio",
+            pad,
+        )
+
+        for var in (
+            self.opacity,
+            self.main_opacity,
+            self.bio_opacity,
+            self.overlay_x,
+            self.overlay_y,
+            self.main_x,
+            self.main_y,
+            self.bio_x,
+            self.bio_y,
+        ):
+            var.trace_add("write", lambda *_a: self._live_from_fields())
+
+    def _window_block(
+        self,
+        frm: ttk.Frame,
+        row: int,
+        title: str,
+        x_var: IntVar,
+        y_var: IntVar,
+        alpha_var: DoubleVar,
+        kind: str,
+        pad: dict,
+    ) -> None:
+        box = ttk.LabelFrame(frm, text=title, padding=8)
+        box.grid(row=row, column=0, sticky="ew", padx=8, pady=6)
+        line = ttk.Frame(box)
+        line.pack(fill="x")
+        ttk.Label(line, text="X").pack(side="left")
+        ttk.Spinbox(line, from_=-200, to=8000, textvariable=x_var, width=7).pack(side="left", padx=(4, 10))
+        ttk.Label(line, text="Y").pack(side="left")
+        ttk.Spinbox(line, from_=-200, to=8000, textvariable=y_var, width=7).pack(side="left", padx=(4, 10))
+        ttk.Label(line, text="Прозрачность").pack(side="left", padx=(8, 0))
+        ttk.Spinbox(
+            line, from_=0.25, to=1.0, increment=0.05, textvariable=alpha_var, width=6
+        ).pack(side="left", padx=4)
+
+        pad_fr = ttk.Frame(box)
+        pad_fr.pack(pady=(8, 0))
+        ttk.Button(pad_fr, text="↑", width=3, command=lambda: self._nudge(kind, 0, -NUDGE_STEP)).grid(
+            row=0, column=1, padx=2, pady=2
+        )
+        ttk.Button(pad_fr, text="←", width=3, command=lambda: self._nudge(kind, -NUDGE_STEP, 0)).grid(
+            row=1, column=0, padx=2, pady=2
+        )
+        ttk.Button(pad_fr, text="↓", width=3, command=lambda: self._nudge(kind, 0, NUDGE_STEP)).grid(
+            row=1, column=1, padx=2, pady=2
+        )
+        ttk.Button(pad_fr, text="→", width=3, command=lambda: self._nudge(kind, NUDGE_STEP, 0)).grid(
+            row=1, column=2, padx=2, pady=2
+        )
+
+    def _nudge(self, kind: str, dx: int, dy: int) -> None:
+        if kind == "overlay":
+            self.overlay_x.set(int(self.overlay_x.get()) + dx)
+            self.overlay_y.set(int(self.overlay_y.get()) + dy)
+        elif kind == "main":
+            self.main_x.set(int(self.main_x.get()) + dx)
+            self.main_y.set(int(self.main_y.get()) + dy)
+        else:
+            self.bio_x.set(int(self.bio_x.get()) + dx)
+            self.bio_y.set(int(self.bio_y.get()) + dy)
+        self._write_window_fields()
+        self._emit_live()
+
+    def _live_from_fields(self) -> None:
+        if not self._live_ready:
+            return
+        try:
+            self._write_window_fields()
+        except (tk.TclError, ValueError, TypeError):
+            return
+        self._emit_live()
+
+    def _write_window_fields(self) -> None:
+        self.cfg.opacity = _clamp_alpha(self.opacity.get())
+        self.cfg.main_opacity = _clamp_alpha(self.main_opacity.get())
+        self.cfg.bio_opacity = _clamp_alpha(self.bio_opacity.get())
+        self.cfg.overlay_x = int(self.overlay_x.get())
+        self.cfg.overlay_y = int(self.overlay_y.get())
+        self.cfg.main_x = int(self.main_x.get())
+        self.cfg.main_y = int(self.main_y.get())
+        self.cfg.bio_x = int(self.bio_x.get())
+        self.cfg.bio_y = int(self.bio_y.get())
+
+    def _emit_live(self) -> None:
+        if self.on_live:
+            try:
+                self.on_live(self.cfg)
+            except Exception:
+                pass
 
     def _font_names(self) -> list[str]:
         from tkinter import font as tkfont
@@ -341,8 +508,12 @@ class SettingsDialog:
             if not p.is_dir():
                 messagebox.showerror("EDHUD", f"Каталог не найден:\n{p}", parent=self.win)
                 return
-        self.cfg.opacity = max(0.25, min(1.0, float(self.opacity.get())))
-        self.cfg.width = max(400, min(3000, int(self.width.get())))
+        try:
+            self._write_window_fields()
+            self.cfg.width = max(400, min(3000, int(self.width.get())))
+        except (tk.TclError, ValueError, TypeError):
+            messagebox.showerror("EDHUD", "Проверьте числа: координаты, прозрачность, ширина.", parent=self.win)
+            return
         self.cfg.allow_network = bool(self.allow_network.get())
         self.cfg.remote_enabled = bool(self.remote_enabled.get())
         self.cfg.eddn_enabled = bool(self.eddn_enabled.get())

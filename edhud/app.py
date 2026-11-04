@@ -483,8 +483,35 @@ class App:
         def on_close() -> None:
             self._settings_open = False
 
-        dlg = SettingsDialog(self.overlay.root, self.cfg, on_saved=on_saved)
+        dlg = SettingsDialog(
+            self.overlay.root,
+            self.cfg,
+            on_saved=on_saved,
+            on_live=self._apply_window_layout,
+        )
         dlg.win.bind("<Destroy>", lambda e: on_close() if e.widget is dlg.win else None)
+
+    def _apply_window_layout(self, cfg: Config | None = None) -> None:
+        """Позиции и прозрачность окон — сразу из настроек / стрелок."""
+        if cfg is not None:
+            self.cfg = cfg
+        if self.overlay is not None:
+            self.overlay.cfg = self.cfg
+            try:
+                self.overlay.move_to(self.cfg.overlay_x, self.cfg.overlay_y)
+                self.overlay.apply_opacity()
+                self.overlay.bio.cfg = self.cfg
+                self.overlay.bio.move_to(self.cfg.bio_x, self.cfg.bio_y)
+                self.overlay.bio.apply_opacity()
+            except Exception:
+                pass
+        if self.mainwindow is not None:
+            self.mainwindow.cfg = self.cfg
+            try:
+                self.mainwindow.move_to(self.cfg.main_x, self.cfg.main_y)
+                self.mainwindow.apply_opacity()
+            except Exception:
+                pass
 
     def _apply_settings(self) -> None:
         """Применить сохранённые настройки на лету."""
@@ -512,14 +539,18 @@ class App:
             self.overlay.cfg = self.cfg
             try:
                 self.overlay.apply_opacity()
-                self.overlay.bio.set_alpha(max(0.25, min(1.0, float(self.cfg.opacity))))
+                self.overlay.bio.cfg = self.cfg
+                self.overlay.bio.apply_opacity()
             except Exception:
                 pass
             self.overlay._apply_click_through()
             self.overlay._place_window()
+            if self.cfg.bio_x is not None or self.cfg.bio_y is not None:
+                self.overlay.bio.move_to(self.cfg.bio_x, self.cfg.bio_y)
             self.overlay.refresh_look()
         if self.mainwindow is not None:
             self.mainwindow.apply_look(self.cfg)
+        self._apply_window_layout()
         # EDDN: перезапуск при смене флага
         want_eddn = bool(self.cfg.eddn_enabled and self.cfg.allow_network)
         if want_eddn and self.eddn is None:

@@ -1358,13 +1358,22 @@ class AppearanceTests(unittest.TestCase):
 
             walk(dialog.win)
             self.assertIn("Оформление", titles)
+            self.assertIn("Окна", titles)
             dialog.theme.set("light")
             dialog._apply_theme_to_fields()
             self.assertEqual(dialog.color_vars["bg"].get(), light["bg"])
             self.assertEqual(dialog.color_vars["text"].get(), light["text"])
+            self.assertTrue(hasattr(dialog, "main_x"))
+            self.assertTrue(hasattr(dialog, "bio_opacity"))
             dialog.win.destroy()
         finally:
             root.destroy()
+
+    def test_geometry_xy_parser(self):
+        from edhud.mainwindow import _geometry_xy
+
+        self.assertEqual(_geometry_xy("980x520+12+40"), (12, 40))
+        self.assertEqual(_geometry_xy("800x600-10+20"), (-10, 20))
 
 
 if __name__ == "__main__":

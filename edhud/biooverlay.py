@@ -41,15 +41,12 @@ class BioPanel:
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
         self.win.withdraw()
-        try:
-            self.win.attributes("-alpha", max(0.25, min(1.0, float(cfg.opacity))))
-        except tk.TclError:
-            pass
         self.canvas = tk.Canvas(self.win, highlightthickness=0, bd=0, bg=cfg.color("panel"))
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<ButtonPress-1>", self._drag_start)
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
+        self.apply_opacity()
         self._place_default()
 
     def hwnd(self) -> int:
@@ -58,11 +55,32 @@ class BioPanel:
     def wants_topmost(self) -> bool:
         return self._board is not None and self._parent_visible
 
+    def apply_opacity(self) -> None:
+        alpha = getattr(self.cfg, "bio_opacity", None)
+        if alpha is None:
+            alpha = self.cfg.opacity
+        self.set_alpha(max(0.25, min(1.0, float(alpha))))
+
     def set_alpha(self, alpha: float) -> None:
         try:
             self.win.attributes("-alpha", alpha)
         except Exception:
             pass
+
+    def move_to(self, x: int | None = None, y: int | None = None) -> None:
+        self.win.update_idletasks()
+        screen_w = self.win.winfo_screenwidth()
+        screen_h = self.win.winfo_screenheight()
+        if x is not None:
+            self._x = max(0, min(int(x), max(0, screen_w - self._width)))
+        if y is not None:
+            self._y = max(0, min(int(y), max(0, screen_h - self._height)))
+        self.cfg.bio_x = self._x
+        self.cfg.bio_y = self._y
+        self.win.geometry(f"{self._width}x{self._height}+{self._x}+{self._y}")
+
+    def nudge(self, dx: int = 0, dy: int = 0) -> None:
+        self.move_to(self._x + int(dx), self._y + int(dy))
 
     def apply_click_through(self, click_through: bool) -> None:
         if not self.wants_topmost():

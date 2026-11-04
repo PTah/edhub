@@ -128,7 +128,9 @@ class Config:
     journal_dir: str | None = None
     # оверлей
     click_through: bool = True
-    opacity: float = 0.90
+    opacity: float = 0.90  # верхний HUD
+    bio_opacity: float = 0.90  # био + локатор
+    main_opacity: float = 1.0  # окно Route/Bodies
     width: int = 1180
     top_offset: int = 6
     font_family: str = "Consolas"
@@ -144,6 +146,8 @@ class Config:
     overlay_y: int | None = None
     bio_x: int | None = None
     bio_y: int | None = None
+    main_x: int | None = None
+    main_y: int | None = None
     copy_next_system: bool = False
     # поведение
     journal_poll_sec: float = 0.25

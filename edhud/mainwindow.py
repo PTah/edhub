@@ -288,6 +288,24 @@ def _row_height(font_size: int) -> int:
     return max(22, int(font_size) + 14)
 
 
+def _geometry_xy(geometry: str) -> tuple[int, int]:
+    """Разобрать X/Y из строки geometry tk («980x520+12+40», «800x600-10+20»)."""
+    import re
+
+    text = (geometry or "").strip()
+    if not text:
+        return 0, 0
+    match = re.search(r"(?:^|\d)([+-]\d+)([+-]\d+)\s*$", text)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    nums = re.findall(r"[+-]\d+", text)
+    if len(nums) >= 2:
+        return int(nums[-2]), int(nums[-1])
+    if len(nums) == 1:
+        return int(nums[0]), 0
+    return 0, 0
+
+
 class MainWindow:
     """Окно программы: скрытие = withdraw, выход только через App.request_quit."""
 
@@ -306,6 +324,8 @@ class MainWindow:
         self.win.minsize(720, 360)
         self.win.configure(bg=COLORS["bg"])
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
+        self._apply_saved_position()
+        self.apply_opacity()
         self._visible = True
         self._shown_tab = "bodies"
         self._ring_icon: tk.PhotoImage | None = None
@@ -420,7 +440,11 @@ class MainWindow:
         self.cfg.bodies_columns = dict(self._body_widths)
         self.cfg.route_columns = dict(self._route_widths)
         try:
-            self.cfg.main_geometry = self.win.geometry()
+            geom = self.win.geometry()
+            self.cfg.main_geometry = geom
+            x, y = _geometry_xy(geom)
+            self.cfg.main_x = x
+            self.cfg.main_y = y
         except tk.TclError:
             pass
         if not write:
@@ -761,6 +785,52 @@ class MainWindow:
         box.grid(row=row, column=col, sticky="nsew")
         return label
 
+    def apply_opacity(self) -> None:
+        if self.cfg is None:
+            return
+        try:
+            alpha = max(0.25, min(1.0, float(getattr(self.cfg, "main_opacity", 1.0))))
+            self.win.attributes("-alpha", alpha)
+        except Exception:
+            pass
+
+    def _apply_saved_position(self) -> None:
+        if self.cfg is None:
+            return
+        x = getattr(self.cfg, "main_x", None)
+        y = getattr(self.cfg, "main_y", None)
+        if x is None and y is None:
+            return
+        self.win.update_idletasks()
+        geom = self.win.geometry()
+        size = geom.split("+", 1)[0].split("-", 1)[0]
+        cx, cy = _geometry_xy(geom)
+        nx = int(x) if x is not None else cx
+        ny = int(y) if y is not None else cy
+        self.win.geometry(f"{size}+{nx}+{ny}")
+
+    def move_to(self, x: int | None = None, y: int | None = None) -> None:
+        self.win.update_idletasks()
+        screen_w = self.win.winfo_screenwidth()
+        screen_h = self.win.winfo_screenheight()
+        w = max(1, self.win.winfo_width())
+        h = max(1, self.win.winfo_height())
+        cx, cy = _geometry_xy(self.win.geometry())
+        nx = cx if x is None else max(0, min(int(x), max(0, screen_w - 120)))
+        ny = cy if y is None else max(0, min(int(y), max(0, screen_h - 80)))
+        self.win.geometry(f"{w}x{h}+{nx}+{ny}")
+        if self.cfg is not None:
+            self.cfg.main_x = nx
+            self.cfg.main_y = ny
+            self.cfg.main_geometry = self.win.geometry()
+
+    def nudge(self, dx: int = 0, dy: int = 0) -> None:
+        cx, cy = _geometry_xy(self.win.geometry())
+        self.move_to(cx + int(dx), cy + int(dy))
+
+    def current_xy(self) -> tuple[int, int]:
+        return _geometry_xy(self.win.geometry())
+
     # ----------------------------------------------------------------- show
     def show(self) -> None:
         self._visible = True
@@ -815,6 +885,8 @@ class MainWindow:
             self._set_col_width("route", index, self._col_width("route", key, default_w))
         self._style()
         self._paint_chrome()
+        self.apply_opacity()
+        self._apply_saved_position()
         self._last_key = None
         if self._state is not None:
             self.update_state(self._state)

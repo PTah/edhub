@@ -97,6 +97,22 @@ class Overlay:
         self._planet_dim = want
         self.apply_opacity()
 
+    def move_to(self, x: int | None = None, y: int | None = None) -> None:
+        """Поставить верхний HUD в заданные координаты (из настроек)."""
+        self.root.update_idletasks()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        if x is not None:
+            self._x = max(0, min(int(x), screen_w - 200))
+        if y is not None:
+            self._y = max(0, min(int(y), screen_h - 80))
+        self.cfg.overlay_x = self._x
+        self.cfg.overlay_y = self._y
+        self.root.geometry(f"{self._width}x{self._height}+{self._x}+{self._y}")
+
+    def nudge(self, dx: int = 0, dy: int = 0) -> None:
+        self.move_to(self._x + int(dx), self._y + int(dy))
+
     def _start_keeper(self) -> None:
         """Z-order только из потока окна. Фоновый SetWindowPos будил ядро на каждом кадре."""
         if not winapi.IS_WINDOWS or not getattr(self.cfg, "keep_topmost", True):
