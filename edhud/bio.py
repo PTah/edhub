@@ -411,30 +411,46 @@ def build_props(body, system, nebulae: float | None = None, guardian: bool = Fal
 
 
 def forecast_names(body, system, limit: int = 4) -> list[str]:
-    """Короткий список того, что может расти на теле, ещё до DSS.
+    """Список организмов: до DSS — роды/виды по критериям; после DSS — виды и цвет.
 
-    Если у рода в прогнозе один вид — пишем «род вид», иначе только род.
-    После DSS список заменяется уже найденными родами.
+    Как в SrvSurvey: `SAASignalsFound` фиксирует роды, дальше BioCriteria
+    сужает до species/variant. Если прогноза нет — показываем хотя бы роды DSS.
     """
     if body is None:
         return []
-    if body.genuses:
-        names = [codex.display_name(key) for key in body.genuses]
-        return names[:limit]
-    predictions = predict_for_body(body, system, limit=24)
-    by_genus: dict[str, set[str]] = {}
+    predictions = predict_for_body(body, system, limit=max(64, limit * 8))
+    if not predictions:
+        if body.genuses:
+            return [codex.display_name(key) for key in body.genuses][:limit]
+        return []
+
+    by_genus: dict[str, dict[str, list[str]]] = {}
     order: list[str] = []
     for prediction in predictions:
         if prediction.genus not in by_genus:
-            by_genus[prediction.genus] = set()
+            by_genus[prediction.genus] = {}
             order.append(prediction.genus)
-        by_genus[prediction.genus].add(prediction.species)
+        variants = by_genus[prediction.genus].setdefault(prediction.species, [])
+        if prediction.variant and prediction.variant not in variants:
+            variants.append(prediction.variant)
+
     names: list[str] = []
+    after_dss = bool(body.genuses)
     for genus in order:
-        species = by_genus[genus]
-        names.append(f"{genus} {next(iter(species))}" if len(species) == 1 else genus)
-        if len(names) >= limit:
-            break
+        species_map = by_genus[genus]
+        # после DSS (или один вид у рода) — пишем вид и цвет, не голый род
+        if after_dss or len(species_map) == 1:
+            for species, variants in species_map.items():
+                if len(variants) == 1:
+                    names.append(f"{genus} {species} - {variants[0]}")
+                else:
+                    names.append(f"{genus} {species}")
+                if len(names) >= limit:
+                    return names
+        else:
+            names.append(genus)
+            if len(names) >= limit:
+                return names
     return names
 
 

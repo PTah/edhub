@@ -1211,7 +1211,8 @@ class BodyColorTests(unittest.TestCase):
         state.system.bodies[1] = body
         tip = _forecast_tip(body, state)
         self.assertIsNotNone(tip)
-        self.assertTrue(tip.startswith("DSS:"))
+        assert tip is not None
+        self.assertTrue(tip.startswith("DSS"))
         self.assertIn("Bacterium", tip)
 
     def test_forecast_tip_explains_missing_scan(self):
@@ -1295,6 +1296,30 @@ class BioBoardTests(unittest.TestCase):
         self.assertIn("Bacterium", text)
         self.assertIn("итого", text)
         self.assertIn("футфол", text)
+
+    def test_dss_bio_board_shows_species_and_price(self):
+        state = GameState()
+        body = self._icy(state)
+        body.genuses = {"$Codex_Ent_Bacterial_Genus_Name;": 1}
+        body.dss_scanned = True
+        state.last_fss_body_id = body.body_id
+        state.status.gui_focus = 9
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        text = "\n".join(board.plain())
+        self.assertIn("Bacterium Acies", text)
+        self.assertRegex(text, r"1[\s]?000[\s]?000|1\.0")
+        from edhud.mainwindow import _forecast, _forecast_tip
+
+        guess, color = _forecast(body, state)
+        self.assertIn("Bacterium Acies", guess)
+        self.assertEqual(color, "ok")
+        tip = _forecast_tip(body, state)
+        self.assertIsNotNone(tip)
+        assert tip is not None
+        self.assertIn("Bacterium Acies", tip)
+        self.assertIn("DSS:", tip)
 
     def test_outside_fss_the_board_lists_every_scanned_body(self):
         state = GameState()

@@ -677,27 +677,34 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
         if genus.lower() in sampled:
             continue
         low, high = _genus_span(species_rows)
-        for index, (species, variants, _reward) in enumerate(species_rows):
-            colors = ", ".join(variants)
-            text = f"{species}: {colors}" if colors else species
+        for index, (species, variants, reward) in enumerate(species_rows):
+            if len(variants) == 1:
+                text = f"{genus} {species} - {variants[0]}"
+            elif variants:
+                text = f"{genus} {species}: {', '.join(variants)}"
+            else:
+                text = f"{genus} {species}"
             lines.append(
                 BioLine(
                     segments=[
                         Segment("? ", "accent"),
                         Segment(text, "accent"),
-                        Segment(" ?", "accent"),
                     ],
+                    tail=[Segment(values.credits(reward) if reward else "—", "muted")],
+                    bars=_reward_bars(reward),
                     rule=block > 0 and index == 0,
                 )
             )
-        lines.append(
-            BioLine(
-                segments=[Segment(genus, "fg")],
-                tail=[Segment(_credit_span(low, high), "muted")],
-                bars=_reward_bars(low),
-                bars_max=_reward_bars(high),
+        # несколько видов одного рода — строка-итог с вилкой цены (как PlotBioSystem)
+        if len(species_rows) > 1:
+            lines.append(
+                BioLine(
+                    segments=[Segment(genus, "fg")],
+                    tail=[Segment(_credit_span(low, high), "muted")],
+                    bars=_reward_bars(low),
+                    bars_max=_reward_bars(high),
+                )
             )
-        )
         block += 1
     if not lines and body.genuses:
         for key in body.genuses:
@@ -716,13 +723,14 @@ def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tup
     ff_low = 0
     ff_high = 0
     for body in _own_bio_bodies(state):
-        names = _genuses(body, limit=4)
+        forecast = bio.forecast_names(body, state.system, limit=4)
         predicted = False
-        if not names and body.landable:
-            forecast = bio.forecast_names(body, state.system, limit=4)
-            if forecast:
-                names = ", ".join(forecast)
-                predicted = True
+        if forecast:
+            names = ", ".join(forecast)
+            # ≈ только до DSS: после DSS виды уже подтверждены родами
+            predicted = not bool(body.genuses)
+        else:
+            names = _genuses(body, limit=4)
         low, high = _body_reward_span(body, state)
         total_low += low
         total_high += high

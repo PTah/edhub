@@ -127,6 +127,18 @@ class PredictionTests(unittest.TestCase):
         predictions = bio.predict_for_body(body, system)
         self.assertTrue(all(p.genus == "Fungoida" for p in predictions))
 
+    def test_dss_forecast_shows_species_and_reward(self):
+        system = self._system()
+        body = self._icy_body(system)
+        body.bio_signals = 1
+        body.genuses = {"$Codex_Ent_Bacterial_Genus_Name;": 1}
+        names = bio.forecast_names(body, system, limit=8)
+        self.assertTrue(any("Bacterium Acies" in name for name in names))
+        self.assertNotEqual(names, ["Bacterium"])
+        predictions = bio.predict_for_body(body, system)
+        self.assertTrue(predictions)
+        self.assertGreater(predictions[0].reward, 0)
+
     def test_non_landable_has_no_predictions(self):
         system = self._system()
         body = self._icy_body(system)

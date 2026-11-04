@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from . import bio, values, winapi
+from . import bio, codex, values, winapi
 from .model import Body, GameState
 from .route import Route
 
@@ -81,30 +81,36 @@ def _temp(value: float | None) -> str:
 
 
 def _forecast(body: Body, state: GameState) -> tuple[str, str | None]:
-    """Текст колонки «Возможно»: подтверждённые роды или прогноз до DSS."""
-    if body.genuses:
-        names = bio.forecast_names(body, state.system)
-        return ", ".join(names), "ok"
-    if (body.bio_signals or 0) <= 0:
+    """Текст колонки «Возможно»: виды после DSS или прогноз до него."""
+    if (body.bio_signals or 0) <= 0 and not body.genuses:
         return "—", None
     names = bio.forecast_names(body, state.system)
     if not names:
         return "—", None
+    if body.genuses:
+        return ", ".join(names), "ok"
     return "≈ " + ", ".join(names), "accent"
 
 
 def _forecast_tip(body: Body, state: GameState) -> str | None:
-    """Список био при наведении на «Био» / «Возможно» (как в SrvSurvey)."""
+    """Список био + цена при наведении на «Био» / «Возможно» (как в SrvSurvey)."""
+    predictions = bio.predict_for_body(body, state.system, limit=64)
+    if predictions:
+        seen: set[str] = set()
+        rows: list[str] = []
+        for prediction in predictions:
+            if prediction.label in seen:
+                continue
+            seen.add(prediction.label)
+            price = values.credits(prediction.reward) if prediction.reward else ""
+            rows.append(f"• {prediction.label}" + (f"  {price}" if price else ""))
+        header = "DSS:" if body.genuses else "Предположительно:"
+        return header + "\n" + "\n".join(rows)
     if body.genuses:
-        names = bio.forecast_names(body, state.system, limit=24)
-        if names:
-            return "DSS:\n" + "\n".join(f"• {name}" for name in names)
-        return "DSS: роды ещё не разобраны"
+        names = [codex.display_name(key) for key in body.genuses]
+        return "DSS (роды):\n" + "\n".join(f"• {name}" for name in names)
     if (body.bio_signals or 0) <= 0:
         return None
-    names = bio.forecast_names(body, state.system, limit=24)
-    if names:
-        return "Предположительно:\n" + "\n".join(f"• {name}" for name in names)
     missing: list[str] = []
     if not body.planet_class:
         missing.append("класс")
