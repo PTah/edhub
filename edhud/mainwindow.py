@@ -1040,8 +1040,10 @@ class MainWindow:
             route,
             state.route.locked,
             state.carrier.callsign,
+            state.carrier.name,
             state.carrier.system,
             state.carrier.address,
+            state.carrier.jump_from_system,
             state.carrier.jump_dest_system,
             state.carrier.jump_departure,
             None if dist is None else round(dist, 1),
@@ -1082,9 +1084,13 @@ class MainWindow:
         self._carrier_system = state.carrier.system if state.carrier.known else None
         if not state.carrier.known:
             self.lbl_carrier.configure(text="")
+            self.lbl_carrier_hint.configure(text="")
             return
+        from .hudmodel import _carrier_who
+
+        who = _carrier_who(state.carrier)
         if state.carrier.jump_pending and state.carrier.jump_dest_system:
-            frm = self._carrier_system or "—"
+            frm = state.carrier.jump_from_system or self._carrier_system or "—"
             to = state.carrier.jump_dest_system
             text = f"Карриер готовится прыгать из {frm} в {to}"
             self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
@@ -1092,14 +1098,13 @@ class MainWindow:
             return
         if self._carrier_system:
             dist = state.carrier_distance_ly()
-            who = state.carrier.callsign or state.carrier.name or "карриер"
             if dist is None:
-                text = f"Карриер {who}: {self._carrier_system}"
+                text = f"{who}: {self._carrier_system}"
             elif dist < 0.05:
-                text = f"Карриер {who}: {self._carrier_system} · здесь"
+                text = f"{who}: {self._carrier_system} · здесь"
             else:
                 ly = f"{dist:,.0f}".replace(",", " ")
-                text = f"Карриер {who}: {self._carrier_system} · {ly} ly"
+                text = f"{who}: {self._carrier_system} · {ly} ly"
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
             self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут")
         else:

@@ -381,14 +381,22 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     return rows
 
 
+def _carrier_who(carrier) -> str:
+    who = (carrier.callsign or carrier.name or "").strip()
+    if not who or who.lower() in {"карриер", "carrier", "fleet carrier"}:
+        return "Карриер"
+    return who
+
+
 def _carrier_label(state: GameState) -> str | None:
     carrier = state.carrier
     if not carrier.known:
         return None
-    who = carrier.callsign or carrier.name or "карриер"
+    who = _carrier_who(carrier)
     where = carrier.system or "—"
     if carrier.jump_pending and carrier.jump_dest_system:
-        return f"{who} · готовится: {where} → {carrier.jump_dest_system}"
+        frm = carrier.jump_from_system or where
+        return f"{who} · готовится: {frm} → {carrier.jump_dest_system}"
     dist = state.carrier_distance_ly()
     if dist is None:
         if state.carrier_pos_pending:
@@ -404,7 +412,8 @@ def _append_carrier(row: Row, state: GameState) -> None:
     label = _carrier_label(state)
     if not label:
         return
-    row.tail.append(Segment("   карриер ", "dim"))
+    # who уже в label — не дублировать «карриер карриер»
+    row.tail.append(Segment("   ", "dim"))
     row.tail.append(Segment(label, "accent"))
 
 

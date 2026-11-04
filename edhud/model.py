@@ -381,6 +381,7 @@ class Carrier:
     body_id: int | None = None
     star_pos: tuple[float, float, float] | None = None
     # отложенный прыжок: после DepartureTime локация обновится сама
+    jump_from_system: str | None = None
     jump_dest_system: str | None = None
     jump_dest_address: int | None = None
     jump_dest_body_id: int | None = None
@@ -393,7 +394,7 @@ class Carrier:
     @property
     def jump_pending(self) -> bool:
         """Заложен прыжок (CarrierJumpRequest), ещё не ушёл."""
-        return bool(self.jump_dest_system and self.jump_departure is not None)
+        return bool(self.jump_dest_system)
 
 
 @dataclass
@@ -843,12 +844,18 @@ class GameState:
         """Носитель заложил прыжок. После DepartureTime локация обновится сама (без CarrierLocation)."""
         if not self._is_own_carrier(e):
             return
-        self.carrier.jump_dest_system = e.get("SystemName") or e.get("StarSystem")
+        dest = e.get("SystemName") or e.get("StarSystem") or e.get("Body")
+        if isinstance(dest, (int, float)):
+            dest = None
+        self.carrier.jump_from_system = self.carrier.system
+        self.carrier.jump_dest_system = str(dest) if dest else None
         address = e.get("SystemAddress")
         self.carrier.jump_dest_address = int(address) if address is not None else None
         body = e.get("BodyID")
         self.carrier.jump_dest_body_id = int(body) if body is not None else None
-        self.carrier.jump_departure = _journal_ts(e.get("DepartureTime")) or time.time()
+        dep = _journal_ts(e.get("DepartureTime"))
+        # без времени в журнале не двигаем сразу — иначе «прыжок» пропадает из UI
+        self.carrier.jump_departure = dep if dep is not None else time.time() + 15 * 60
         self.apply_due_carrier_jump()
 
     def _on_carrierjumpcancelled(self, e: dict) -> None:
@@ -867,6 +874,7 @@ class GameState:
         return bool(own) or cid is not None
 
     def _clear_carrier_jump(self) -> None:
+        self.carrier.jump_from_system = None
         self.carrier.jump_dest_system = None
         self.carrier.jump_dest_address = None
         self.carrier.jump_dest_body_id = None
@@ -875,9 +883,10 @@ class GameState:
     def apply_due_carrier_jump(self) -> bool:
         """Если время отбытия прошло — переносим носитель в целевую систему."""
         dep = self.carrier.jump_departure
-        if dep is None:
+        if dep is None or not self.carrier.jump_dest_system:
             return False
-        if time.time() + 1.0 < dep:
+        # небольшой запас: не сбрасывать «готовится» из‑за рассинхрона часов
+        if time.time() < dep + 30.0:
             return False
         system = self.carrier.jump_dest_system
         address = self.carrier.jump_dest_address

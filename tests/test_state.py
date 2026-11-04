@@ -468,9 +468,11 @@ class CarrierClickTests(unittest.TestCase):
             }
         )
         self.assertTrue(state.carrier.jump_pending)
+        self.assertEqual(state.carrier.jump_from_system, "FromSys")
         label = hudmodel._carrier_label(state)
         self.assertIn("FromSys", label or "")
         self.assertIn("ToSys", label or "")
+        self.assertNotIn("карриер карриер", (label or "").lower())
 
         root = tk.Tk()
         root.withdraw()
@@ -481,7 +483,31 @@ class CarrierClickTests(unittest.TestCase):
             self.assertIn("готовится прыгать", text)
             self.assertIn("FromSys", text)
             self.assertIn("ToSys", text)
+            self.assertNotIn("Карриер карриер", text)
             self.assertIn("2× копия", window.lbl_carrier_hint.cget("text"))
+            window.destroy()
+        finally:
+            root.destroy()
+
+    def test_carrier_header_not_duplicated(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.carrier.carrier_id = 1
+            state.carrier.system = "Somewhere"
+            state.carrier.star_pos = (0, 0, 0)
+            state.system.star_pos = (0, 0, 40)
+            state.system.address = 2
+            window.update_state(state)
+            text = window.lbl_carrier.cget("text")
+            self.assertTrue(text.startswith("Карриер:"))
+            self.assertNotIn("Карриер карриер", text)
             window.destroy()
         finally:
             root.destroy()
@@ -505,6 +531,7 @@ class CarrierClickTests(unittest.TestCase):
             window._on_system_double()
             window._on_carrier_double()
             self.assertEqual(copied, ["Alpha Centauri", "Carrier Home"])
+            self.assertNotIn("карриер карриер", window.lbl_carrier.cget("text").lower())
             window.destroy()
         finally:
             root.destroy()
