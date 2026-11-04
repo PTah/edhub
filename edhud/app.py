@@ -552,10 +552,11 @@ class App:
             self.mainwindow._copy_text(text)
 
     def plot_route_to_carrier(self) -> None:
-        """Тройной клик по карриеру: маршрут Spansh от текущей системы до носителя."""
+        """3× по карриеру в шапке: маршрут Spansh в EDHUD (не прокладка в игре)."""
         start = self.state.system.name
         target = self.state.carrier.system
         if not start or not target:
+            self._voice_alert = "нет системы или карриера для маршрута"
             return
         if start.lower() == target.lower():
             self._voice_alert = "карриер уже в этой системе"
@@ -566,12 +567,19 @@ class App:
         if getattr(self, "_plot_busy", False):
             return
         self._plot_busy = True
-        self._voice_alert = f"строим маршрут → {target}…"
+        self._voice_alert = f"строим маршрут Spansh → {target}…"
+        if self.mainwindow is not None:
+            try:
+                self.mainwindow.route_info.configure(text=f"Spansh: строим маршрут → {target}…")
+                self.mainwindow.nb.select(self.mainwindow.tab_route)
+            except Exception:
+                pass
 
         def work() -> None:
             error = None
             route = None
             try:
+                # 50 ly — типичный исследовательский прыжок; длинные «ноги» = нейтронки Spansh
                 route = spansh.plot_route(start, target, range_ly=50.0, efficiency=60.0)
             except Exception as exc:
                 error = str(exc)
@@ -583,9 +591,19 @@ class App:
                     self.state.route.locked = True
                     self.state.sync_route_discoverers()
                     self.state.view_tab = "route"
-                    self._voice_alert = f"маршрут до карриера: {len(route.hops)} систем"
+                    jumps = route.total_jumps
+                    self._voice_alert = (
+                        f"маршрут до карриера: {len(route.hops)} систем, ~{jumps} прыжков"
+                    )
                 else:
                     self._voice_alert = f"маршрут не построен: {error or 'пусто'}"
+                    if self.mainwindow is not None:
+                        try:
+                            self.mainwindow.route_info.configure(
+                                text=f"Spansh: не построен — {error or 'пусто'}"
+                            )
+                        except Exception:
+                            pass
 
             self._ui(apply)
 

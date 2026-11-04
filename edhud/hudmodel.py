@@ -383,7 +383,11 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
 
 def _carrier_who(carrier) -> str:
     who = (carrier.callsign or carrier.name or "").strip()
-    if not who or who.lower() in {"карриер", "carrier", "fleet carrier"}:
+    low = who.lower().replace("ё", "е")
+    if not who or low in {"карриер", "carrier", "fleet carrier"} or low.replace(" ", "") in {
+        "карриеркарриер",
+        "carriercarrier",
+    }:
         return "Карриер"
     return who
 

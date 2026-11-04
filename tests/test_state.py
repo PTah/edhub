@@ -532,6 +532,11 @@ class CarrierClickTests(unittest.TestCase):
             window._on_carrier_double()
             self.assertEqual(copied, ["Alpha Centauri", "Carrier Home"])
             self.assertNotIn("карриер карриер", window.lbl_carrier.cget("text").lower())
+            plotted: list[int] = []
+            window.on_plot_to_carrier = lambda: plotted.append(1)
+            window._carrier_clicks = 3
+            window._on_carrier_triple()
+            self.assertEqual(plotted, [1])
             window.destroy()
         finally:
             root.destroy()
@@ -1038,6 +1043,31 @@ class RouteMarkTests(unittest.TestCase):
                 window.destroy()
             finally:
                 root.destroy()
+
+    def test_route_columns_do_not_autostretch_system(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow, ROUTE_COLUMNS
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            window._route_widths["system"] = 200
+            window._route_widths["ly"] = 160
+            widths = window._effective_widths("route")
+            keys = [key for key, *_rest in ROUTE_COLUMNS]
+            self.assertEqual(widths[keys.index("system")], 200)
+            self.assertEqual(widths[keys.index("ly")], 160)
+            # сужение Sistema и расширение ly сохраняются — без отката stretch
+            window._set_col_width("route", keys.index("system"), 160)
+            window._set_col_width("route", keys.index("ly"), 200)
+            again = window._effective_widths("route")
+            self.assertEqual(again[keys.index("system")], 160)
+            self.assertEqual(again[keys.index("ly")], 200)
+            window.destroy()
+        finally:
+            root.destroy()
 
 
 class BodyColorTests(unittest.TestCase):

@@ -327,6 +327,8 @@ class MainWindow:
         self.on_plot_to_carrier = on_plot_to_carrier
         self._carrier_system: str | None = None
         self._system_name: str | None = None
+        self._carrier_clicks = 0
+        self._carrier_click_job: str | None = None
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD")
         geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
@@ -398,12 +400,13 @@ class MainWindow:
             padx=4,
         )
         self.lbl_carrier.pack(side="left", padx=(12, 0))
-        self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
-        self.lbl_carrier.bind("<Triple-Button-1>", self._on_carrier_triple)
+        # Double/Triple на Label в Windows часто срываются — считаем клики сами
+        self.lbl_carrier.bind("<Button-1>", self._on_carrier_click)
         self.lbl_carrier_hint = ttk.Label(
             top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
         )
         self.lbl_carrier_hint.pack(side="left", padx=(4, 0))
+        self.lbl_carrier_hint.bind("<Button-1>", self._on_carrier_click)
 
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -489,10 +492,10 @@ class MainWindow:
         widths = self._body_widths if table == "bodies" else self._route_widths
         return max(self._min_col_width(key), int(widths.get(key, default)))
 
-    def _table_spec(self, table: str) -> tuple[tuple, dict[str, int], str]:
+    def _table_spec(self, table: str) -> tuple[tuple, dict[str, int]]:
         if table == "bodies":
-            return BODY_COLUMNS, self._body_widths, "name"
-        return ROUTE_COLUMNS, self._route_widths, "system"
+            return BODY_COLUMNS, self._body_widths
+        return ROUTE_COLUMNS, self._route_widths
 
     def _canvas_avail(self, table: str) -> int | None:
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
@@ -502,31 +505,18 @@ class MainWindow:
             return None
         return avail if avail > 1 else None
 
-    def _effective_widths(self, table: str, avail: int | None = None) -> list[int]:
-        columns, widths_map, stretch_key = self._table_spec(table)
-        widths = [
+    def _effective_widths(self, table: str) -> list[int]:
+        """Ширины строго из настроек — без автодотяжки «Система» на всю ширину окна."""
+        columns, widths_map = self._table_spec(table)
+        return [
             max(self._min_col_width(key), int(widths_map[key]))
             for key, _title, _default, _anchor in columns
         ]
-        # во время ресайза не растягиваем — иначе «До след., ly» растёт за счёт Sistema
-        if self._col_drag is not None:
-            return widths
-        if avail is not None and avail > sum(widths):
-            stretch_i = next(i for i, (key, *_rest) in enumerate(columns) if key == stretch_key)
-            widths[stretch_i] += avail - sum(widths)
-        return widths
-
-    def _bake_effective_widths(self, table: str) -> None:
-        """Записать видимые ширины (с stretch) в карту — ресайз не будет их «съедать»."""
-        columns, widths_map, _stretch = self._table_spec(table)
-        # bake до установки _col_drag, иначе effective без stretch
-        widths = self._effective_widths(table, self._canvas_avail(table))
-        for (key, *_rest), width in zip(columns, widths):
-            widths_map[key] = max(self._min_col_width(key), int(width))
 
     def _apply_column_geometry(self, table: str, avail: int | None = None) -> list[int]:
         """Одинаковые пиксельные ширины у хедера и строк — иначе колонки разъезжаются."""
-        widths = self._effective_widths(table, avail)
+        del avail  # раньше сюда отдавали stretch; больше не раздуваем колонки
+        widths = self._effective_widths(table)
         if table == "bodies":
             header, inner = self._bodies_header, self._bodies_inner
             clip = getattr(self, "_bodies_header_clip", None)
@@ -551,13 +541,11 @@ class MainWindow:
         return widths
 
     def _set_col_width(self, table: str, index: int, width: int) -> None:
-        columns, widths_map, _stretch = self._table_spec(table)
+        columns, widths_map = self._table_spec(table)
         key = columns[index][0]
         widths_map[key] = max(self._min_col_width(key), int(width))
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
-        # без stretch: меняется только эта колонка (иначе последняя ворует у Sistema)
-        stretch_avail = None if self._col_drag is not None else self._canvas_avail(table)
-        widths = self._apply_column_geometry(table, stretch_avail)
+        widths = self._apply_column_geometry(table)
         total = sum(widths)
         window = getattr(self, f"_{table}_window", None)
         if window is not None:
@@ -566,7 +554,7 @@ class MainWindow:
         self._sync_header_x(table)
 
     def _bind_col_resize(self, widget: tk.Misc, table: str, index: int) -> None:
-        columns, _widths_map, _stretch = self._table_spec(table)
+        columns, _widths_map = self._table_spec(table)
 
         def on_motion(event) -> None:
             if self._col_drag is not None:
@@ -581,7 +569,6 @@ class MainWindow:
         def on_press(event) -> None:
             if event.widget.winfo_width() - event.x > RESIZE_EDGE:
                 return
-            self._bake_effective_widths(table)
             key = columns[index][0]
             start_w = self._col_width(table, key, columns[index][2])
             self._col_drag = (table, index, event.x_root, start_w)
@@ -605,8 +592,6 @@ class MainWindow:
             except tk.TclError:
                 pass
             widget.configure(cursor="")
-            # если суммарно уже уже окна — снова дотянуть stretch-колонку
-            self._set_col_width(table, index, self._col_width(table, columns[index][0], columns[index][2]))
             self._schedule_save()
 
         widget.bind("<Motion>", on_motion, add="+")
@@ -638,7 +623,6 @@ class MainWindow:
         parent: tk.Misc,
         columns: tuple,
         widths: dict[str, int],
-        stretch_key: str,
         header_attr: str,
         labels_attr: str,
         canvas_attr: str,
@@ -708,9 +692,10 @@ class MainWindow:
             inner.grid_columnconfigure(index, minsize=width, weight=0)
 
         def _fit(event) -> None:
-            widths_now = self._apply_column_geometry(table, event.width)
+            widths_now = self._apply_column_geometry(table)
             total = sum(widths_now)
-            canvas.itemconfigure(window, width=total)
+            # шире окна — пустое место справа, колонки не раздуваем
+            canvas.itemconfigure(window, width=max(total, int(event.width) or total))
             header.configure(width=total)
             self._sync_header_x(table)
 
@@ -747,7 +732,6 @@ class MainWindow:
             self.tab_bodies,
             BODY_COLUMNS,
             self._body_widths,
-            "name",
             "_bodies_header",
             "_header_labels",
             "_bodies_canvas",
@@ -762,7 +746,6 @@ class MainWindow:
             self.tab_route,
             ROUTE_COLUMNS,
             self._route_widths,
-            "system",
             "_route_header",
             "_route_header_labels",
             "_route_canvas",
@@ -1094,7 +1077,7 @@ class MainWindow:
             to = state.carrier.jump_dest_system
             text = f"Карриер готовится прыгать из {frm} в {to}"
             self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
-            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут")
+            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут Spansh")
             return
         if self._carrier_system:
             dist = state.carrier_distance_ly()
@@ -1106,7 +1089,7 @@ class MainWindow:
                 ly = f"{dist:,.0f}".replace(",", " ")
                 text = f"{who}: {self._carrier_system} · {ly} ly"
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
-            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут")
+            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут Spansh")
         else:
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
@@ -1127,6 +1110,26 @@ class MainWindow:
             self.on_copy_system(name)
         else:
             self._copy_text(name)
+
+    def _on_carrier_click(self, _event=None) -> None:
+        """2 клика — копия системы карриера, 3 — маршрут Spansh до него (не в игру)."""
+        self._carrier_clicks += 1
+        if self._carrier_click_job is not None:
+            try:
+                self.win.after_cancel(self._carrier_click_job)
+            except (tk.TclError, ValueError):
+                pass
+
+        def flush() -> None:
+            n = self._carrier_clicks
+            self._carrier_clicks = 0
+            self._carrier_click_job = None
+            if n >= 3:
+                self._on_carrier_triple()
+            elif n == 2:
+                self._on_carrier_double()
+
+        self._carrier_click_job = self.win.after(320, flush)
 
     def _on_carrier_double(self, _event=None) -> None:
         name = self._carrier_system
@@ -1150,12 +1153,17 @@ class MainWindow:
         src = route.source or "game"
         lock = " · залочен" if route.locked else ""
         extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
+        jumps = route.total_jumps
+        jump_txt = f" · ~{jumps} прыж." if jumps else ""
         self.route_info.configure(
-            text=f"Источник: {src}{lock}{extra} · двойной клик по системе — копировать"
+            text=(
+                f"Источник: {src}{lock}{extra}{jump_txt}"
+                " · 2× система — копия · маршрут до карриера — 3× по карриеру в шапке"
+            )
         )
         here = route.index_of(current)
         here_row = None
-        widths = self._apply_column_geometry("route", self._canvas_avail("route"))
+        widths = self._apply_column_geometry("route")
         for row, hop in enumerate(route.hops):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
