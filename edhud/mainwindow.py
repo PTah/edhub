@@ -1004,6 +1004,8 @@ class MainWindow:
             state.carrier.callsign,
             state.carrier.system,
             state.carrier.address,
+            state.carrier.jump_dest_system,
+            state.carrier.jump_departure,
             None if dist is None else round(dist, 1),
             state.view_tab,
         )
@@ -1040,7 +1042,16 @@ class MainWindow:
             + (" · маршрут залочен" if state.route.locked else "")
         )
         self._carrier_system = state.carrier.system if state.carrier.known else None
-        if state.carrier.known and self._carrier_system:
+        if not state.carrier.known:
+            self.lbl_carrier.configure(text="")
+            return
+        if state.carrier.jump_pending and state.carrier.jump_dest_system:
+            frm = self._carrier_system or "—"
+            to = state.carrier.jump_dest_system
+            text = f"· Карриер готовится прыгать из {frm} в {to}"
+            self.lbl_carrier.configure(text=text, foreground=COLORS["warn"])
+            return
+        if self._carrier_system:
             dist = state.carrier_distance_ly()
             who = state.carrier.callsign or state.carrier.name or "карриер"
             if dist is None:

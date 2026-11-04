@@ -390,6 +390,11 @@ class Carrier:
     def known(self) -> bool:
         return bool(self.carrier_id or self.callsign or self.system)
 
+    @property
+    def jump_pending(self) -> bool:
+        """Заложен прыжок (CarrierJumpRequest), ещё не ушёл."""
+        return bool(self.jump_dest_system and self.jump_departure is not None)
+
 
 @dataclass
 class System:

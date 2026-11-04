@@ -448,6 +448,43 @@ class CarrierClickTests(unittest.TestCase):
         self.assertIn("Home Base", label)
         self.assertIn("GHY-7TZ", label)
 
+    def test_carrier_jump_pending_shown_in_header(self):
+        import time
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        state = GameState()
+        state.carrier.carrier_id = 7
+        state.carrier.callsign = "GHY-7TZ"
+        state.carrier.system = "FromSys"
+        state.apply(
+            {
+                "event": "CarrierJumpRequest",
+                "CarrierID": 7,
+                "SystemName": "ToSys",
+                "SystemAddress": 99,
+                "DepartureTime": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600)),
+            }
+        )
+        self.assertTrue(state.carrier.jump_pending)
+        label = hudmodel._carrier_label(state)
+        self.assertIn("FromSys", label or "")
+        self.assertIn("ToSys", label or "")
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            window.update_state(state)
+            text = window.lbl_carrier.cget("text")
+            self.assertIn("готовится прыгать", text)
+            self.assertIn("FromSys", text)
+            self.assertIn("ToSys", text)
+            window.destroy()
+        finally:
+            root.destroy()
+
     def test_mainwindow_copies_system_on_double_click(self):
         import tkinter as tk
 
