@@ -21,6 +21,7 @@ from .values import body_values
 FLAG_DOCKED = 1 << 0
 FLAG_LANDED = 1 << 1
 FLAG_SUPERCRUISE = 1 << 4
+FLAG_HARDPOINTS = 1 << 6
 FLAG_SCOOPING = 1 << 11
 # Бит 17 — FsdCharging в Status.json (журнал Frontier). Бит 12 — ручник ТРП.
 FLAG_FSD_CHARGING = 1 << 17
@@ -43,7 +44,7 @@ LS_M = 299_792_458.0
 _DSS_ALT_FACTOR = 15.5
 _DSS_ALT_MIN_M = 25_000.0
 # GuiFocus 10 = SAA (интерфейс DSS). В SC при «Too Fast» Altitude в Status.json
-# часто ещё нет — без этого сигнала голос «Тормози» никогда не срабатывал.
+# часто ещё нет — без DSS-прицела голос «Тормози» в полёте не сработает.
 GUI_FOCUS_SAA = 10
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
@@ -1796,32 +1797,34 @@ class GameState:
             return self._body_by_destination_name(parent_name)
         return None
 
-    def dss_in_probe_range(self) -> bool:
-        """Достаточно близко к телу, чтобы запускать пробы (оценка по высоте/радиусу).
+    def _dss_sight_engaged(self) -> bool:
+        """Прицел DSS в полёте: панель SAA или анализ + выпущенные пилоны."""
+        if self.status.gui_focus == GUI_FOCUS_SAA:
+            return True
+        return self.status.flag(FLAG_HUD_ANALYSIS) and self.status.flag(FLAG_HARDPOINTS)
 
-        Важно: типичный DSS в суперкруизе (как у Smojai NP-A c8 A 1) проходит
-        целиком без HasLatLong/Altitude в Status.json — к моменту Too Fast на
-        прицеле высота в API ещё не появляется. Тогда ориентир — открытый
-        интерфейс DSS (GuiFocus=SAA) на неразмеченном теле. У газовых гигантов
-        с кольцами Destination часто указывает на кольцо до Scan кольца.
+    def dss_in_probe_range(self) -> bool:
+        """Зона «можно тормозить под DSS» — пока ещё летим в SC, не после сброса.
+
+        1) Если Status отдал Altitude — только она: Too Fast ≈ высота ≤ лимита.
+           Выше лимита = Out of Range, даже при открытом SAA.
+        2) Без высоты и без HasLatLong (типичный подлёт на полной SC) — DSS-прицел
+           (SAA или анализ+пилоны): на HUD уже Too Fast, а lat/alt ещё нет.
+        3) HasLatLong без высоты = уже орбита/сброс скорости — для «Тормози» поздно.
         """
         body = self.dss_target_body()
         if body is None or body.is_star or body.dss_scanned:
             return False
         if not self.status.supercruise:
             return False
-        # Открыт DSS (SAA): надёжнее высоты. Altitude иногда есть, но ещё
-        # выше формулы, хотя на HUD уже Too Fast — не глушим голос.
-        if self.status.gui_focus == GUI_FOCUS_SAA:
-            return True
         radius = self.status.planet_radius or body.radius or 0.0
         limit = dss_probe_altitude_m(radius)
         alt = self.status.altitude
         if alt is not None:
             return float(alt) <= limit
         if self.status.has_lat_long:
-            return True
-        return False
+            return False
+        return self._dss_sight_engaged()
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:

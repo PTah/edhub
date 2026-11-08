@@ -2023,7 +2023,7 @@ class SampleGuideTests(unittest.TestCase):
             }
         )
         self.assertTrue(state.dss_in_probe_range())
-        # без SAA и без высоты — ещё не зона
+        # анализ без пилонов и без SAA — ещё не зона
         state.apply_status(
             {
                 "Flags": (1 << 4) | (1 << 24) | (1 << 27),
@@ -2033,6 +2033,40 @@ class SampleGuideTests(unittest.TestCase):
                     "Body": 3,
                     "Name": "Smojai NP-A c8 A 1",
                 },
+            }
+        )
+        self.assertFalse(state.dss_in_probe_range())
+        # в полёте: анализ + пилоны DSS, без Altitude/HasLatLong
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 6) | (1 << 24) | (1 << 27),
+                "GuiFocus": 0,
+                "Destination": {
+                    "System": 2284083844354,
+                    "Body": 3,
+                    "Name": "Smojai NP-A c8 A 1",
+                },
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
+
+    def test_dss_in_probe_range_skips_after_speed_drop(self):
+        """HasLatLong без высоты = уже сбросили скорость — «Тормози» не орём."""
+        state = GameState()
+        state.system.address = 1
+        state.system.bodies[2] = Body(
+            body_id=2,
+            name="Here 2",
+            planet_class="Icy body",
+            radius=2_000_000.0,
+        )
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 21) | (1 << 27),
+                "GuiFocus": 10,
+                "Latitude": 1.0,
+                "Longitude": 2.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
         self.assertFalse(state.dss_in_probe_range())
@@ -2074,8 +2108,8 @@ class SampleGuideTests(unittest.TestCase):
         self.assertIn("Тормози", alerts[0].text)
         self.assertIn("4", alerts[0].overlay or "")
 
-    def test_dss_in_probe_range_saa_beats_high_altitude(self):
-        """SAA открыт и Altitude ещё выше формулы — всё равно зона (Too Fast на HUD)."""
+    def test_dss_in_probe_range_saa_does_not_override_out_of_range(self):
+        """SAA открыт, но Altitude выше лимита — Out of Range, не «Тормози»."""
         state = GameState()
         state.system.address = 1
         state.system.bodies[51] = Body(
@@ -2096,7 +2130,7 @@ class SampleGuideTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(state.dss_in_probe_range())
+        self.assertFalse(state.dss_in_probe_range())
 
 
 class AppearanceTests(unittest.TestCase):
