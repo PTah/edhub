@@ -17,6 +17,8 @@ BAR_W = 8
 BAR_H = 3
 RADAR_SIZE = 168
 RADAR_PAD = 8
+# зазор между названием био и ценой справа
+TAIL_GAP = 16
 
 
 class BioPanel:
@@ -168,7 +170,8 @@ class BioPanel:
         content = title_font.measure(board.title)
         for line in board.lines:
             extra = 18 if line.bars or line.bars_max else 0
-            content = max(content, extra + self._text_width(line.segments + line.tail, font))
+            gap = TAIL_GAP if line.tail else 0
+            content = max(content, extra + gap + self._text_width(line.segments + line.tail, font))
         for text, _style in board.footers:
             content = max(content, font.measure(text))
         if radar is not None:
@@ -233,12 +236,14 @@ class BioPanel:
         limit = width - PAD
         tail_w = self._text_width(line.tail, font)
         main_w = self._text_width(line.segments, font)
-        if line.tail and x + main_w + tail_w <= limit:
-            tail_x = x + main_w
-            main_limit = tail_x
-        elif line.tail and tail_w < limit - x:
+        if line.tail and tail_w + TAIL_GAP < limit - x:
+            # цена колонкой справа; имя не залезает вплотную
             tail_x = limit - tail_w
-            main_limit = tail_x
+            main_limit = min(x + main_w, tail_x - TAIL_GAP)
+            if main_limit < x + 24:
+                # длинное имя — чуть отодвигаем цену после текста
+                tail_x = min(limit - tail_w, x + main_w + TAIL_GAP)
+                main_limit = max(x, tail_x - TAIL_GAP)
         else:
             tail_x = None
             main_limit = limit
