@@ -106,6 +106,7 @@ class SettingsDialog:
         self.voice_enabled = BooleanVar(value=bool(self.cfg.voice_enabled))
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
+        self.voice_dss_range = BooleanVar(value=bool(getattr(self.cfg, "voice_dss_range", True)))
         self.voice_rate = IntVar(value=int(self.cfg.voice_rate or 0))
 
         row = 0
@@ -192,6 +193,10 @@ class SettingsDialog:
         row += 1
         ttk.Checkbutton(
             frm, text="Система открыта вами", variable=self.voice_first_discovery
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm, text="Тормози — зона DSS", variable=self.voice_dss_range
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
         vrow = ttk.Frame(frm)
@@ -524,6 +529,7 @@ class SettingsDialog:
         self.cfg.voice_enabled = bool(self.voice_enabled.get())
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
+        self.cfg.voice_dss_range = bool(self.voice_dss_range.get())
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))
         look_error = self._read_look()
         if look_error:

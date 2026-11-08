@@ -6,7 +6,7 @@ from tkinter import ttk
 from typing import Callable
 
 from . import bio, codex, values, winapi
-from .model import Body, GameState
+from .model import Body, GameState, format_dss_range
 from .route import Route
 
 
@@ -1040,20 +1040,32 @@ class MainWindow:
         )
 
     def _on_tab_changed(self, _event=None) -> None:
-        """Показ Bodies заново рисует таблицу: скрытая вкладка могла остаться от прошлой системы."""
-        if self._state is None:
-            return
+        """Ручной клик синхронизирует state — иначе автопереключение «залипает» на старой вкладке."""
         try:
             current = self.nb.select()
         except tk.TclError:
             return
+        if current == str(self.tab_route):
+            self._shown_tab = "route"
+            if self._state is not None:
+                self._state.view_tab = "route"
+            return
         if current == str(self.tab_bodies):
-            self._update_header(self._state)
-            self._update_bodies(self._state)
+            self._shown_tab = "bodies"
+            if self._state is not None:
+                self._state.view_tab = "bodies"
+                self._update_header(self._state)
+                self._update_bodies(self._state)
 
     def _apply_tab(self, state: GameState) -> None:
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
-        if tab == self._shown_tab:
+        try:
+            current = self.nb.select()
+            shown = "route" if current == str(self.tab_route) else "bodies"
+        except tk.TclError:
+            shown = self._shown_tab
+        if tab == shown:
+            self._shown_tab = tab
             return
         self._shown_tab = tab
         self.nb.select(self.tab_route if tab == "route" else self.tab_bodies)
@@ -1260,6 +1272,9 @@ class MainWindow:
                 "pml": body.mining_locations,
             }
             tip = _forecast_tip(body, state)
+            dss_tip = None
+            if not body.is_star and (body.radius or 0) > 0 and not body.dss_scanned:
+                dss_tip = f"DSS пробы примерно с высоты {format_dss_range(body.radius)}"
             for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
                 if key == "belt":
                     icon = self._ring_icon if body.has_rings and self._ring_icon is not None else None
@@ -1270,6 +1285,7 @@ class MainWindow:
                     fg, bg = COLORS[guess_color], COLORS["row"]
                 else:
                     fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
+                cell_tip = tip if key in ("bio", "guess") else (dss_tip if key == "dss" else None)
                 self._put_cell(
                     "bodies",
                     row,
@@ -1279,7 +1295,7 @@ class MainWindow:
                     fg=fg,
                     bg=bg,
                     anchor=anchor,
-                    tip=tip if key in ("bio", "guess") else None,
+                    tip=cell_tip,
                 )
         self._bodies_address = state.system.address
         self._bodies_inner.update_idletasks()

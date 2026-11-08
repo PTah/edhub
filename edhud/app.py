@@ -132,6 +132,7 @@ class App:
             poll_journal=self.cfg.journal_poll_sec,
             poll_status=self.cfg.status_poll_sec,
             on_event=self._on_event,
+            on_status=self._on_status,
             on_catchup_done=self._on_journal_catchup,
         )
         self.watcher.start()
@@ -191,6 +192,9 @@ class App:
         hop = self.state.route.next_hop(self.state.system.name)
         if hop is not None:
             self.overlay.copy_to_clipboard(hop.system)
+
+    def _on_status(self) -> None:
+        self.alerts.handle_status(self.state)
 
     # ------------------------------------------------------------------- loop
     def tick(self) -> None:

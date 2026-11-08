@@ -25,15 +25,20 @@ FLAG_SCOOPING = 1 << 11
 # Бит 17 — FsdCharging в Status.json (журнал Frontier). Бит 12 — ручник ТРП.
 FLAG_FSD_CHARGING = 1 << 17
 FLAG_HAS_LAT_LONG = 1 << 21
+FLAG_IN_SRV = 1 << 26
 FLAG_FSD_JUMP = 1 << 30
 FLAG_LOW_FUEL = 1 << 14
 FLAG_IN_MAINSHIP = 1 << 19
 FLAG_IN_FIGHTER = 1 << 20
-FLAG_IN_SRV = 1 << 21
 # Flags2: планирование / атмосфера
 FLAG2_GLIDE = 1 << 12
 # ниже этого (м) считаем, что ещё в атмосфере / у поверхности
 ATMOSPHERE_ALT_M = 100_000.0
+# свет.секунда в метрах — для оценки дальности DSS
+LS_M = 299_792_458.0
+# диск планеты ≈ 20° в прицеле DSS → высота ≈ R · (1/tan(10°) − 1)
+_DSS_ALT_FACTOR = 4.67
+_DSS_ALT_MIN_M = 25_000.0
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
 _MINEABLE_RING = {
@@ -123,6 +128,28 @@ def turn_deg(bearing: float, heading: float | None) -> float | None:
     if heading is None:
         return None
     return (bearing - float(heading) + 540.0) % 360.0 - 180.0
+
+
+def dss_probe_altitude_m(radius_m: float | None) -> float:
+    """Оценка макс. высоты над поверхностью (м), с которой ещё можно запустить пробы DSS.
+
+    Эмпирика: пробы доступны, когда диск тела заполняет прицел (~20°). Крупнее
+    тело — дальше можно стрелять; для мелких камней — минимум ~25 км.
+    """
+    radius = float(radius_m or 0.0)
+    if radius <= 0:
+        return _DSS_ALT_MIN_M
+    return max(_DSS_ALT_MIN_M, radius * _DSS_ALT_FACTOR)
+
+
+def format_dss_range(radius_m: float | None) -> str:
+    """Короткий текст дальности DSS: «≈0.12 ls» или «≈80 км»."""
+    alt = dss_probe_altitude_m(radius_m)
+    if alt >= 0.05 * LS_M:
+        return f"≈{alt / LS_M:.2f} ls"
+    if alt >= 1000:
+        return f"≈{alt / 1000:.0f} км"
+    return f"≈{alt:.0f} м"
 
 
 @dataclass(frozen=True)
@@ -1371,7 +1398,11 @@ class GameState:
             self.in_atmosphere = False
 
     def _sync_travel_tab(self) -> None:
-        """Route — в момент разгона к другой системе, не при входе в суперкруиз."""
+        """Route на разгоне к другой системе; Bodies в FSS/DSS. Ручной клик пишет view_tab сам."""
+        focus = self.status.gui_focus
+        if focus in (9, 10):  # FSS / SAA (DSS)
+            self.view_tab = "bodies"
+            return
         spool = self._hyperspace_spool()
         if spool and not self._jump_tab_latched:
             self.view_tab = "route"
@@ -1385,9 +1416,42 @@ class GameState:
             return False
         dest = self.status.destination_system
         here = self.system.address
-        if not isinstance(dest, int) or here is None:
+        if not isinstance(dest, int):
             return False
+        # до первого Location/FSDJump адрес системы ещё может быть пуст — всё равно Route
+        if here is None:
+            return True
         return int(dest) != int(here)
+
+    def dss_target_body(self) -> Body | None:
+        """Тело, к которому летим / у которого стоим — кандидат на DSS."""
+        st = self.status
+        body = self.system.body(st.destination_body) or self.system.body(st.body_id)
+        if body is not None:
+            return body
+        dest = (st.destination_name or "").strip().lower()
+        if not dest:
+            return None
+        for candidate in self.system.bodies.values():
+            name = (candidate.name or "").lower()
+            if dest == name or name.endswith(" " + dest) or name.endswith(dest):
+                return candidate
+        return None
+
+    def dss_in_probe_range(self) -> bool:
+        """Достаточно близко к телу, чтобы запускать пробы (оценка по высоте/радиусу)."""
+        body = self.dss_target_body()
+        if body is None or body.is_star or body.dss_scanned:
+            return False
+        if not self.status.supercruise:
+            return False
+        radius = self.status.planet_radius or body.radius or 0.0
+        limit = dss_probe_altitude_m(radius)
+        alt = self.status.altitude
+        if alt is not None and self.status.has_lat_long:
+            return float(alt) <= limit
+        # только вошли в орбитальный круиз — обычно уже в зоне DSS
+        return bool(self.status.has_lat_long)
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:
@@ -1681,7 +1745,17 @@ class GameState:
         blips.sort(key=lambda item: item.distance_m)
         blips = blips[:8]
         if not blips:
-            return None
+            # радар всё равно показываем: иначе кажется, что «пропал» после глида
+            names = [codex.display_name(key) for key in list(body.genuses)[:2]]
+            hint = ", ".join(names) if names else "био"
+            return RadarView(
+                title=f"{hint} · нет отметок — композит/кодекс",
+                range_m=500.0,
+                need_m=0,
+                heading=heading,
+                ready=False,
+                blips=(),
+            )
         span = blips[-1].distance_m if blips else 300.0
         range_m = min(5000.0, max(span * 1.2, 300.0))
         return RadarView(

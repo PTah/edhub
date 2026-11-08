@@ -1,16 +1,16 @@
-"""Детектор голосовых событий: био-сигнал и первое открытие системы."""
+"""Детектор голосовых событий: био-сигнал, первое открытие, зона DSS."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable
 
 from . import bio
-from .model import GameState
+from .model import GameState, format_dss_range
 
 
 @dataclass
 class Alert:
-    kind: str  # bio | first_discovery
+    kind: str  # bio | first_discovery | dss_range
     text: str
     overlay: str | None = None
 
@@ -23,14 +23,17 @@ class AlertEngine:
     voice_enabled: bool = True
     voice_bio: bool = True
     voice_first_discovery: bool = True
+    voice_dss_range: bool = True
     _bio_seen: set[tuple[int, int]] = field(default_factory=set)
     _system_seen: set[int] = field(default_factory=set)
+    _dss_ready_seen: set[tuple[int, int]] = field(default_factory=set)
     on_alert: Callable[[Alert], None] | None = None
 
     def configure(self, cfg) -> None:
         self.voice_enabled = bool(getattr(cfg, "voice_enabled", True))
         self.voice_bio = bool(getattr(cfg, "voice_bio", True))
         self.voice_first_discovery = bool(getattr(cfg, "voice_first_discovery", True))
+        self.voice_dss_range = bool(getattr(cfg, "voice_dss_range", True))
 
     def arm(self) -> None:
         self.armed = True
@@ -59,6 +62,18 @@ class AlertEngine:
                 except Exception:
                     pass
         return fired
+
+    def handle_status(self, state: GameState) -> list[Alert]:
+        """Проверка Status.json: зона запуска DSS-проб."""
+        alert = self._check_dss_range(state)
+        if not alert:
+            return []
+        if self.on_alert:
+            try:
+                self.on_alert(alert)
+            except Exception:
+                pass
+        return [alert]
 
     def _check_bio(self, event: dict, state: GameState) -> Alert | None:
         body_id = event.get("BodyID")
@@ -111,3 +126,22 @@ class AlertEngine:
         system = state.system.name or event.get("StarSystem") or "система"
         text = "Звёздная система открыта вами."
         return Alert(kind="first_discovery", text=text, overlay=f"первое открытие: {system}")
+
+    def _check_dss_range(self, state: GameState) -> Alert | None:
+        if not (self.armed and self.voice_enabled and self.voice_dss_range):
+            return None
+        if not state.dss_in_probe_range():
+            return None
+        body = state.dss_target_body()
+        address = state.system.address
+        if body is None or address is None or body.body_id is None:
+            return None
+        key = (int(address), int(body.body_id))
+        if key in self._dss_ready_seen:
+            return None
+        self._dss_ready_seen.add(key)
+        radius = state.status.planet_radius or body.radius
+        rng = format_dss_range(radius)
+        short = (body.name or "тело").split()[-1]
+        text = f"Тормози, расстояние достаточное для скана. Дальность DSS около {rng}."
+        return Alert(kind="dss_range", text=text, overlay=f"DSS готов · {short} · {rng}")

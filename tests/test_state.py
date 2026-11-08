@@ -648,7 +648,7 @@ class JumpTabTests(unittest.TestCase):
         )
         self.assertEqual(state.system.name, "There")
         self.assertIn(1, state.system.bodies)
-        self.assertEqual(state.system.bodies[1].materials.get("iron"), 20.0)
+        self.assertEqual(state.system.bodies[1].materials.get("Iron"), 20.0)
         from edhud.remote import apply_eddn
 
         self.assertTrue(
@@ -664,7 +664,64 @@ class JumpTabTests(unittest.TestCase):
                 },
             )
         )
-        self.assertEqual(state.system.bodies[2].materials.get("iron"), 11.5)
+        self.assertEqual(state.system.bodies[2].materials.get("Iron"), 11.5)
+
+    def test_fss_opens_bodies_even_if_route_was_open(self):
+        state = GameState()
+        state.system.address = 1
+        state.view_tab = "route"
+        state.apply_status({"Flags": 0, "GuiFocus": 9})
+        self.assertEqual(state.view_tab, "bodies")
+
+    def test_fsd_charging_opens_route_before_system_address_known(self):
+        state = GameState()
+        self.assertIsNone(state.system.address)
+        state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 42, "Body": 0, "Name": "Far"},
+            }
+        )
+        self.assertEqual(state.view_tab, "route")
+
+    def test_manual_tab_then_hyper_still_switches_ui(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.system.address = 1
+            state.system.name = "Here"
+            state.view_tab = "route"
+            window.update_state(state)
+            window.win.update()
+            self.assertEqual(window.nb.select(), str(window.tab_route))
+            # вручную на Bodies — как в игре при FSS без автопереключения
+            window.nb.select(window.tab_bodies)
+            window.win.update()
+            # на некоторых Tk событие вкладки не всегда доходит в тесте — дублируем смысл клика
+            if state.view_tab != "bodies":
+                window._on_tab_changed()
+            self.assertEqual(state.view_tab, "bodies")
+            self.assertEqual(window._shown_tab, "bodies")
+            # зарядка гиперпрыжка снова должна показать Route
+            state.apply_status(
+                {
+                    "Flags": 1 << 17,
+                    "Destination": {"System": 2, "Body": 0, "Name": "There"},
+                }
+            )
+            window.update_state(state)
+            window.win.update()
+            self.assertEqual(state.view_tab, "route")
+            self.assertEqual(window.nb.select(), str(window.tab_route))
+            window.destroy()
+        finally:
+            root.destroy()
 
 
 class AtmosphereDimTests(unittest.TestCase):
@@ -1527,6 +1584,69 @@ class SampleGuideTests(unittest.TestCase):
         self.assertEqual(radar.need_m, 0)
         self.assertEqual(radar.blips[0].kind, "spot")
         self.assertIn("Bacterium", radar.blips[0].label)
+
+    def test_radar_placeholder_without_spots_near_surface(self):
+        state = GameState()
+        state.system.address = 1
+        body = Body(
+            body_id=4,
+            name="Test 1 a",
+            radius=6_000_000.0,
+            landable=True,
+            bio_signals=2,
+            signals_local=True,
+            genuses={"$Codex_Ent_Stratum_Genus_Name;": 1},
+        )
+        state.system.bodies[4] = body
+        state.apply_status(
+            {
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Heading": 90.0,
+                "PlanetRadius": 6_000_000.0,
+                "BodyID": 4,
+                "Altitude": 2_000.0,
+                "Flags": 1 << 19,
+            }
+        )
+        radar = state.radar_view()
+        self.assertIsNotNone(radar)
+        assert radar is not None
+        self.assertEqual(radar.blips, ())
+        self.assertIn("нет отметок", radar.title)
+        self.assertIn("Stratum", radar.title)
+
+    def test_dss_probe_range_scales_with_radius(self):
+        from edhud.model import dss_probe_altitude_m, format_dss_range
+
+        small = dss_probe_altitude_m(500_000.0)
+        large = dss_probe_altitude_m(50_000_000.0)
+        self.assertGreater(large, small)
+        self.assertIn("км", format_dss_range(500_000.0))
+        self.assertIn("ls", format_dss_range(50_000_000.0))
+
+    def test_dss_in_probe_range_on_orbital_cruise(self):
+        state = GameState()
+        state.system.address = 1
+        state.system.bodies[2] = Body(
+            body_id=2,
+            name="Here 2",
+            planet_class="Icy body",
+            radius=2_000_000.0,
+            dss_scanned=False,
+        )
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 21),
+                "Latitude": 1.0,
+                "Longitude": 2.0,
+                "Altitude": 1_500_000.0,
+                "PlanetRadius": 2_000_000.0,
+                "BodyID": 2,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
 
 
 class AppearanceTests(unittest.TestCase):
