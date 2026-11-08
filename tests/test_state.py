@@ -1128,6 +1128,45 @@ class RouteMarkTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_bodies_table_updates_in_place_during_fss(self):
+        """Новый скан не должен destroy+rebuild всей таблицы — иначе мигание при FSS."""
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state = GameState()
+            state.system.address = 1
+            state.system.name = "FSS"
+            state.system.bodies[0] = Body(body_id=0, name="FSS", star_type="K", is_star=True)
+            state.system.bodies[1] = Body(
+                body_id=1, name="FSS 1", planet_class="Icy body", distance_ls=100.0
+            )
+            window.update_state(state)
+            window.win.update_idletasks()
+            first_boxes = {bid: entry["cells"]["name"][0] for bid, entry in window._body_rows.items()}
+            self.assertEqual(set(first_boxes), {0, 1})
+
+            state.system.bodies[2] = Body(
+                body_id=2, name="FSS 2", planet_class="Rocky body", distance_ls=200.0, bio_signals=1
+            )
+            state.system.bodies[1].bio_signals = 2
+            state.system.bodies[1].signals_known = True
+            window.update_state(state)
+            window.win.update_idletasks()
+
+            self.assertEqual(set(window._body_rows), {0, 1, 2})
+            # старые строки — те же виджеты (не пересозданы)
+            self.assertIs(window._body_rows[0]["cells"]["name"][0], first_boxes[0])
+            self.assertIs(window._body_rows[1]["cells"]["name"][0], first_boxes[1])
+            self.assertEqual(window._body_rows[1]["cells"]["bio"][1].cget("text"), "2")
+            window.destroy()
+        finally:
+            root.destroy()
+
     def test_column_widths_persist(self):
         import tempfile
         from pathlib import Path

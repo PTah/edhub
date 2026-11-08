@@ -361,6 +361,10 @@ class MainWindow:
         self._build()
         self._last_key: tuple | None = None
         self._layout_ready = False
+        # инкрементальная таблица Bodies: body_id → {cells, sig, row}
+        self._body_rows: dict[int, dict] = {}
+        self._bodies_order: list[int] = []
+        self._bodies_address = None
         self.win.after(80, self._enable_layout_persist)
         self.win.bind("<Configure>", self._on_window_configure, add="+")
 
@@ -923,6 +927,7 @@ class MainWindow:
         self.apply_opacity()
         self._apply_saved_position()
         self._last_key = None
+        self._clear_body_rows()
         if self._state is not None:
             self.update_state(self._state)
 
@@ -1230,73 +1235,189 @@ class MainWindow:
                 total = max(1, self._route_inner.winfo_height())
                 self._route_canvas.yview_moveto(max(0.0, y / total))
 
-    def _update_bodies(self, state: GameState) -> None:
+    def _body_row_data(self, body: Body, state: GameState) -> tuple[dict, dict, dict, tuple]:
+        """Тексты/цвета/тултипы строки Bodies и сигнатура для пропуска лишних configure."""
+        bio_text = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
+        geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
+        pml = "—" if body.mining_locations is None else str(body.mining_locations)
+        guess, guess_color = _forecast(body, state)
+        dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
+        first = "✔" if not body.was_discovered and not body.remote else "—"
+        src = body.source or ("своё" if not body.remote else "?")
+        values = {
+            "name": body.name or f"#{body.body_id}",
+            "type": _type_of(body),
+            "atmos": body.atmosphere_type or body.atmosphere or "—",
+            "temp": _temp(body.surface_temp),
+            "bio": bio_text,
+            "guess": guess,
+            "geo": geo,
+            "pml": pml,
+            "dss": dss,
+            "value": _value_of(body, state.odyssey),
+            "first": first,
+            "dist": _ls(body.distance_ls),
+            "src": src,
+            "belt": bool(body.has_rings),
+        }
+        counts = {
+            "bio": body.bio_signals,
+            "geo": body.geo_signals,
+            "pml": body.mining_locations,
+        }
+        tip = _forecast_tip(body, state)
+        dss_tip = None
+        if not body.is_star and (body.radius or 0) > 0 and not body.dss_scanned:
+            dss_tip = f"DSS пробы примерно с высоты {format_dss_range(body.radius)}"
+        styles: dict[str, tuple[str, str]] = {}
+        tips: dict[str, str | None] = {}
+        for key, _title, _width, _anchor in BODY_COLUMNS:
+            if key == "belt":
+                styles[key] = (COLORS["text"], COLORS["row"])
+                tips[key] = None
+                continue
+            paint = signal_colors(key, counts.get(key))
+            if key == "guess" and guess_color:
+                styles[key] = (COLORS[guess_color], COLORS["row"])
+            else:
+                styles[key] = paint if paint else (COLORS["text"], COLORS["row"])
+            if key in ("bio", "guess"):
+                tips[key] = tip
+            elif key == "dss":
+                tips[key] = dss_tip
+            else:
+                tips[key] = None
+        sig = (
+            values["name"],
+            values["type"],
+            values["atmos"],
+            values["temp"],
+            values["bio"],
+            values["guess"],
+            values["geo"],
+            values["pml"],
+            values["dss"],
+            values["value"],
+            values["first"],
+            values["dist"],
+            values["src"],
+            values["belt"],
+            tip,
+            dss_tip,
+            guess_color,
+        )
+        return values, styles, tips, sig
+
+    def _clear_body_rows(self) -> None:
         for child in self._bodies_inner.winfo_children():
             child.destroy()
+        self._body_rows.clear()
+        self._bodies_order = []
+
+    def _set_cell_tip(self, box, label, tip: str | None) -> None:
+        existing = getattr(label, "tip", None)
+        if tip:
+            if existing is None:
+                cell_tip = _CellTip(box, label, text=tip)
+                label.tip = cell_tip
+                box.tip = cell_tip
+            else:
+                existing.text = tip
+        elif existing is not None:
+            existing.text = ""
+
+    def _update_bodies(self, state: GameState) -> None:
         jumped = state.system.address != getattr(self, "_bodies_address", None)
+        if jumped:
+            try:
+                scroll = self._bodies_canvas.yview()
+            except tk.TclError:
+                scroll = (0.0, 1.0)
+            self._clear_body_rows()
+        else:
+            try:
+                scroll = self._bodies_canvas.yview()
+            except tk.TclError:
+                scroll = (0.0, 1.0)
+
         bodies = sorted(
             state.system.bodies.values(),
             key=lambda b: (0 if b.is_star or b.star_type else 1, b.distance_ls or 0, b.body_id),
         )
+        order = [b.body_id for b in bodies]
         try:
             avail = int(self._bodies_canvas.winfo_width())
         except tk.TclError:
             avail = None
         widths = self._apply_column_geometry("bodies", avail if avail and avail > 1 else None)
-        for row, body in enumerate(bodies):
-            bio_text = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
-            geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
-            pml = "—" if body.mining_locations is None else str(body.mining_locations)
-            guess, guess_color = _forecast(body, state)
-            dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
-            first = "✔" if not body.was_discovered and not body.remote else "—"
-            src = body.source or ("своё" if not body.remote else "?")
-            cell_values = {
-                "name": body.name or f"#{body.body_id}",
-                "type": _type_of(body),
-                "atmos": body.atmosphere_type or body.atmosphere or "—",
-                "temp": _temp(body.surface_temp),
-                "bio": bio_text,
-                "guess": guess,
-                "geo": geo,
-                "pml": pml,
-                "dss": dss,
-                "value": _value_of(body, state.odyssey),
-                "first": first,
-                "dist": _ls(body.distance_ls),
-                "src": src,
-            }
-            counts = {
-                "bio": body.bio_signals,
-                "geo": body.geo_signals,
-                "pml": body.mining_locations,
-            }
-            tip = _forecast_tip(body, state)
-            dss_tip = None
-            if not body.is_star and (body.radius or 0) > 0 and not body.dss_scanned:
-                dss_tip = f"DSS пробы примерно с высоты {format_dss_range(body.radius)}"
-            for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
-                if key == "belt":
-                    icon = self._ring_icon if body.has_rings and self._ring_icon is not None else None
-                    self._put_cell("bodies", row, col, widths[col], image=icon, anchor="center")
-                    continue
-                paint = signal_colors(key, counts.get(key))
-                if key == "guess" and guess_color:
-                    fg, bg = COLORS[guess_color], COLORS["row"]
-                else:
-                    fg, bg = paint if paint else (COLORS["text"], COLORS["row"])
-                cell_tip = tip if key in ("bio", "guess") else (dss_tip if key == "dss" else None)
-                self._put_cell(
-                    "bodies",
-                    row,
-                    col,
-                    widths[col],
-                    text=cell_values[key],
-                    fg=fg,
-                    bg=bg,
-                    anchor=anchor,
-                    tip=cell_tip,
-                )
+
+        # убрать тела, которых больше нет в системе
+        alive = set(order)
+        for body_id in list(self._body_rows):
+            if body_id not in alive:
+                row = self._body_rows.pop(body_id)
+                for box, _label in row["cells"].values():
+                    try:
+                        box.destroy()
+                    except tk.TclError:
+                        pass
+
+        for row_idx, body in enumerate(bodies):
+            values, styles, tips, sig = self._body_row_data(body, state)
+            entry = self._body_rows.get(body.body_id)
+            if entry is None:
+                cells: dict[str, tuple] = {}
+                for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
+                    if key == "belt":
+                        icon = self._ring_icon if values["belt"] and self._ring_icon is not None else None
+                        label = self._put_cell(
+                            "bodies", row_idx, col, widths[col], image=icon, anchor="center"
+                        )
+                    else:
+                        fg, bg = styles[key]
+                        label = self._put_cell(
+                            "bodies",
+                            row_idx,
+                            col,
+                            widths[col],
+                            text=values[key],
+                            fg=fg,
+                            bg=bg,
+                            anchor=anchor,
+                            tip=tips.get(key),
+                        )
+                    box = label.master
+                    cells[key] = (box, label)
+                self._body_rows[body.body_id] = {"cells": cells, "sig": sig, "row": row_idx}
+                continue
+
+            # уже есть — обновить текст/цвет без destroy (FSS не мигает)
+            if entry["sig"] != sig:
+                for col, (key, _title, _width, anchor) in enumerate(BODY_COLUMNS):
+                    box, label = entry["cells"][key]
+                    fg, bg = styles[key]
+                    if key == "belt":
+                        icon = self._ring_icon if values["belt"] and self._ring_icon is not None else None
+                        label.configure(image=icon or "", bg=bg)
+                        if icon is not None:
+                            label.image = icon
+                    else:
+                        label.configure(text=values[key], fg=fg, bg=bg, anchor=anchor)
+                        box.configure(bg=bg)
+                        self._set_cell_tip(box, label, tips.get(key))
+                entry["sig"] = sig
+
+            if entry["row"] != row_idx:
+                for col, (key, _title, _width, _anchor) in enumerate(BODY_COLUMNS):
+                    box, _label = entry["cells"][key]
+                    box.grid(row=row_idx, column=col, sticky="nsew")
+                    try:
+                        box.configure(width=widths[col])
+                    except tk.TclError:
+                        pass
+                entry["row"] = row_idx
+
+        self._bodies_order = order
         self._bodies_address = state.system.address
         self._bodies_inner.update_idletasks()
         total_w = sum(widths)
@@ -1305,3 +1426,8 @@ class MainWindow:
         self._sync_header_x("bodies")
         if jumped:
             self._bodies_canvas.yview_moveto(0)
+        else:
+            try:
+                self._bodies_canvas.yview_moveto(scroll[0])
+            except tk.TclError:
+                pass
