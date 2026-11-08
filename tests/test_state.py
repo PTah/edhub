@@ -1167,6 +1167,39 @@ class RouteMarkTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_belt_clusters_can_be_hidden(self):
+        import tkinter as tk
+
+        from edhud.config import Config
+        from edhud.mainwindow import BODY_COLUMNS, MainWindow
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            cfg = Config(show_belt_clusters=False)
+            window = MainWindow(root, cfg=cfg)
+            state = GameState()
+            state.system.address = 9
+            state.system.name = "Belts"
+            state.system.bodies[0] = Body(body_id=0, name="Belts", star_type="G", is_star=True)
+            state.system.bodies[1] = Body(
+                body_id=1, name="Belts 1", planet_class="Rocky body", distance_ls=50.0
+            )
+            state.system.bodies[2] = Body(
+                body_id=2,
+                name="Belts A Belt Cluster 1",
+                distance_ls=10.0,
+                has_rings=True,
+            )
+            window.update_state(state)
+            window.win.update_idletasks()
+            self.assertEqual(set(window._body_rows), {0, 1})
+            titles = {key: title for key, title, *_rest in BODY_COLUMNS}
+            self.assertEqual(titles["temp"], "Температура")
+            window.destroy()
+        finally:
+            root.destroy()
+
     def test_column_widths_persist(self):
         import tempfile
         from pathlib import Path

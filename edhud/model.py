@@ -68,13 +68,14 @@ def _apply_signal_counts(body: Body, signals: list, merge_bio: bool = False) -> 
             body.mining_locations = count
 
 
-def _is_belt_body(name: str | None) -> bool:
+def is_belt_body(name: str | None) -> bool:
+    """Belt Cluster / астероидное поле по имени тела."""
     return "belt cluster" in (name or "").lower()
 
 
 def _mineable_belt(rings: list, name: str | None = None) -> bool:
     """Кольцо или пояс астероидов, где есть добыча."""
-    if _is_belt_body(name):
+    if is_belt_body(name):
         return True
     for ring in rings:
         if not isinstance(ring, dict):
@@ -1232,7 +1233,7 @@ class GameState:
             body.has_rings = False
         elif isinstance(rings, list):
             body.has_rings = _mineable_belt(rings, body.name)
-        elif _is_belt_body(body.name):
+        elif is_belt_body(body.name):
             body.has_rings = True
         if e.get("WasDiscovered") is not None:
             body.was_discovered = bool(e.get("WasDiscovered"))

@@ -6,7 +6,7 @@ from tkinter import ttk
 from typing import Callable
 
 from . import bio, codex, values, winapi
-from .model import Body, GameState, format_dss_range
+from .model import Body, GameState, format_dss_range, is_belt_body
 from .route import Route
 
 
@@ -33,7 +33,7 @@ BODY_COLUMNS = (
     ("name", "Имя", 200, "w"),
     ("type", "Тип", 140, "w"),
     ("atmos", "Атмосфера", 110, "w"),
-    ("temp", "T", 70, "e"),
+    ("temp", "Температура", 100, "e"),
     ("bio", "Био", 50, "center"),
     ("guess", "Возможно", 220, "w"),
     ("geo", "Гео", 50, "center"),
@@ -59,6 +59,7 @@ MIN_COL_WIDTHS = {
     "name": 120,
     "type": 80,
     "atmos": 70,
+    "temp": 90,
     "guess": 100,
     "system": 140,
     "opened": 90,
@@ -1042,6 +1043,7 @@ class MainWindow:
             state.carrier.jump_departure,
             None if dist is None else round(dist, 1),
             state.view_tab,
+            bool(getattr(self.cfg, "show_belt_clusters", True)) if self.cfg is not None else True,
         )
 
     def _on_tab_changed(self, _event=None) -> None:
@@ -1340,8 +1342,14 @@ class MainWindow:
             except tk.TclError:
                 scroll = (0.0, 1.0)
 
+        show_belts = True if self.cfg is None else bool(getattr(self.cfg, "show_belt_clusters", True))
+        bodies = [
+            b
+            for b in state.system.bodies.values()
+            if show_belts or not is_belt_body(b.name)
+        ]
         bodies = sorted(
-            state.system.bodies.values(),
+            bodies,
             key=lambda b: (0 if b.is_star or b.star_type else 1, b.distance_ls or 0, b.body_id),
         )
         order = [b.body_id for b in bodies]

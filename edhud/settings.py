@@ -107,6 +107,7 @@ class SettingsDialog:
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
         self.voice_dss_range = BooleanVar(value=bool(getattr(self.cfg, "voice_dss_range", True)))
+        self.show_belt_clusters = BooleanVar(value=bool(getattr(self.cfg, "show_belt_clusters", True)))
         self.voice_rate = IntVar(value=int(self.cfg.voice_rate or 0))
 
         row = 0
@@ -213,6 +214,12 @@ class SettingsDialog:
         row += 1
         ttk.Checkbutton(
             frm, text="Сквозной режим мыши по умолчанию", variable=self.click_through
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm,
+            text="Показывать астероидные поля в списке планет",
+            variable=self.show_belt_clusters,
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
         wrow = ttk.Frame(frm)
@@ -530,6 +537,7 @@ class SettingsDialog:
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
         self.cfg.voice_dss_range = bool(self.voice_dss_range.get())
+        self.cfg.show_belt_clusters = bool(self.show_belt_clusters.get())
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))
         look_error = self._read_look()
         if look_error:
