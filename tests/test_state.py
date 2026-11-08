@@ -691,6 +691,52 @@ class RouteOpenedColumnTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_scan_clears_remote_so_route_bodies_count_rises(self):
+        """EDSM раньше Scan → remote=True; после своего Scan счётчик Route растёт."""
+        from edhud.mainwindow import _route_bodies_cell
+        from edhud.route import Route, RouteHop
+
+        state = GameState()
+        state.system.name = "Smojai CK-Y b2-0"
+        state.system.address = 555
+        state.system.body_count = 3
+        for body_id, label in ((1, "A"), (3, "B"), (4, "C")):
+            state.system.bodies[body_id] = Body(
+                body_id=body_id,
+                name=f"Smojai CK-Y b2-0 {label}",
+                is_star=True,
+                star_type="M",
+                remote=True,
+                source="EDSM",
+            )
+        state.route = Route(hops=[RouteHop(system="Smojai CK-Y b2-0", star_class="M")])
+        stuck = _route_bodies_cell(state.route.hops[0], here=True, system=state.system)
+        self.assertEqual(stuck, "0/3")
+
+        for body_id, label in ((1, "A"), (3, "B"), (4, "C")):
+            state.apply(
+                {
+                    "event": "Scan",
+                    "BodyID": body_id,
+                    "BodyName": f"Smojai CK-Y b2-0 {label}",
+                    "StarType": "M",
+                    "StellarMass": 0.3,
+                    "WasDiscovered": True,
+                }
+            )
+            self.assertFalse(state.system.bodies[body_id].remote)
+
+        state.apply(
+            {
+                "event": "FSSAllBodiesFound",
+                "SystemAddress": 555,
+                "Count": 3,
+            }
+        )
+        self.assertEqual(state.system.fss_progress, 1.0)
+        done = _route_bodies_cell(state.route.hops[0], here=True, system=state.system)
+        self.assertEqual(done, "3/3")
+
     def test_fss_discovery_scan_sets_counts(self):
         state = GameState()
         state.system.address = 99

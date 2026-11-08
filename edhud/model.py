@@ -1245,6 +1245,11 @@ class GameState:
             body = Body(body_id=body_id, name=e.get("BodyName") or "")
             self.system.bodies[body_id] = body
         body.name = e.get("BodyName") or body.name
+        # EDSM/EDDN могли подложить тело раньше с remote=True — свой Scan
+        # делает его локальным, иначе Route «Тела» залипает на 0/N.
+        body.remote = False
+        if body.source in (None, "EDSM", "Spansh", "EDDN"):
+            body.source = "journal"
         if e.get("StarType"):
             body.is_star = True
             body.star_type = e.get("StarType")
@@ -1401,6 +1406,18 @@ class GameState:
             except (TypeError, ValueError):
                 pass
         self.view_tab = "bodies"
+
+    def _on_fssallbodiesfound(self, e: dict) -> None:
+        """Все тела системы просканированы в FSS — прогресс 100%."""
+        if e.get("SystemAddress") is not None and self.system.address is not None:
+            if int(e["SystemAddress"]) != int(self.system.address):
+                return
+        if e.get("Count") is not None and self.system.body_count is None:
+            try:
+                self.system.body_count = int(e["Count"])
+            except (TypeError, ValueError):
+                pass
+        self.system.fss_progress = 1.0
 
     def _account_scan(self, body_id: int | None = None, mapped: bool = False) -> None:
         """Считает стоимость тела: скан сразу, картографию — по факту DSS."""
