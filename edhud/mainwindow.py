@@ -48,10 +48,11 @@ BODY_COLUMNS = (
 
 ROUTE_COLUMNS = (
     ("idx", "#", 48, "center"),
-    ("system", "Система", 280, "w"),
-    ("star", "Класс", 80, "center"),
-    ("ly", "До след., ly", 110, "e"),
-    ("opened", "Открыта", 140, "w"),
+    ("system", "Система", 240, "w"),
+    ("star", "Класс", 70, "center"),
+    ("ly", "До след., ly", 100, "e"),
+    ("bodies", "Тела", 160, "w"),
+    ("opened", "Открыта", 130, "w"),
 )
 
 MIN_COL_WIDTH = 28
@@ -64,6 +65,7 @@ MIN_COL_WIDTHS = {
     "guess": 100,
     "minerals": 120,
     "system": 140,
+    "bodies": 100,
     "opened": 90,
 }
 RESIZE_EDGE = 6
@@ -81,6 +83,20 @@ def _temp(value: float | None) -> str:
     if value is None:
         return "—"
     return f"{value:,.0f} K".replace(",", " ")
+
+
+def _route_bodies_cell(hop, *, here: bool, system) -> str:
+    """Текст колонки «Тела»: для текущей системы — FSS/сканы, иначе EDSM."""
+    if here and system is not None and system.body_count:
+        local = sum(1 for b in system.bodies.values() if not getattr(b, "remote", False))
+        text = f"{local}/{int(system.body_count)}"
+        if system.nonbody_count:
+            text += f" · сигн.{int(system.nonbody_count)}"
+        progress = system.fss_progress
+        if isinstance(progress, (int, float)) and progress < 0.999:
+            text += f" · FSS {progress * 100:.0f}%"
+        return text
+    return hop.bodies_label()
 
 
 def _forecast(body: Body, state: GameState) -> tuple[str, str | None]:
@@ -1002,7 +1018,7 @@ class MainWindow:
             return
         self._last_key = key
         self._update_header(state)
-        self._update_route(state.route, state.system.name)
+        self._update_route(state)
         self._update_bodies(state)
 
     def _snapshot_key(self, state: GameState) -> tuple:
@@ -1027,7 +1043,17 @@ class MainWindow:
             for b in sorted(sys.bodies.values(), key=lambda x: x.body_id)
         )
         route = tuple(
-            (h.system, h.star_class, h.discovered_by, h.discovered_by_me) for h in state.route.hops
+            (
+                h.system,
+                h.star_class,
+                h.discovered_by,
+                h.discovered_by_me,
+                h.edsm_stars,
+                h.edsm_planets,
+                h.edsm_bodies,
+                h.edsm_missing,
+            )
+            for h in state.route.hops
         )
         dist = state.carrier_distance_ly()
         names = tuple(
@@ -1038,6 +1064,8 @@ class MainWindow:
             sys.address,
             sys.name,
             sys.body_count,
+            sys.nonbody_count,
+            sys.fss_progress,
             sys.discovered_by_me,
             bodies,
             names,
@@ -1160,7 +1188,9 @@ class MainWindow:
         if self.on_plot_to_carrier and self._carrier_system:
             self.on_plot_to_carrier()
 
-    def _update_route(self, route: Route, current: str | None) -> None:
+    def _update_route(self, state: GameState) -> None:
+        route = state.route
+        current = state.system.name
         for child in self._route_inner.winfo_children():
             child.destroy()
         if not route.hops:
@@ -1176,7 +1206,8 @@ class MainWindow:
         self.route_info.configure(
             text=(
                 f"Источник: {src}{lock}{extra}{jump_txt}"
-                " · 2× система / карриер в шапке — копия имени"
+                " · тела: EDSM до визита; здесь — скан/FSS после хонка"
+                " · 2× система / карриер — копия"
             )
         )
         here = route.index_of(current)
@@ -1195,11 +1226,13 @@ class MainWindow:
                 fg = COLORS["text"]
             font = (self._ui_family, self._ui_size + (1 if tag == "here" else 0))
             opened = hop.opened_label()
+            bodies_txt = _route_bodies_cell(hop, here=(tag == "here"), system=state.system)
             cells = {
                 "idx": str(row + 1),
                 "system": f"{mark}{hop.system}",
                 "star": hop.star_class or "—",
                 "ly": ly_text,
+                "bodies": bodies_txt,
                 "opened": opened,
             }
             for col, (key, _title, _width, anchor) in enumerate(ROUTE_COLUMNS):

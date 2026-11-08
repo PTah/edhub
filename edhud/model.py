@@ -30,6 +30,7 @@ FLAG_FSD_JUMP = 1 << 30
 FLAG_LOW_FUEL = 1 << 14
 FLAG_IN_MAINSHIP = 1 << 19
 FLAG_IN_FIGHTER = 1 << 20
+FLAG_HUD_ANALYSIS = 1 << 27
 # Flags2: планирование / атмосфера
 FLAG2_GLIDE = 1 << 12
 # ниже этого (м) считаем, что ещё в атмосфере / у поверхности
@@ -41,6 +42,9 @@ LS_M = 299_792_458.0
 # Старый множитель 4.67 (диск 20°) срабатывал уже после «Too Fast» — голос опаздывал.
 _DSS_ALT_FACTOR = 15.5
 _DSS_ALT_MIN_M = 25_000.0
+# GuiFocus 10 = SAA (интерфейс DSS). В SC при «Too Fast» Altitude в Status.json
+# часто ещё нет — без этого сигнала голос «Тормози» никогда не срабатывал.
+GUI_FOCUS_SAA = 10
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
 _MINEABLE_RING = {
@@ -586,6 +590,8 @@ class System:
     name: str | None = None
     star_pos: tuple[float, float, float] | None = None
     body_count: int | None = None
+    nonbody_count: int | None = None  # сигналы FSS (USS и т.п.) после хонка
+    fss_progress: float | None = None  # 0..1 из FSSDiscoveryScan
     population: int | None = None
     bodies: dict[int, Body] = field(default_factory=dict)
     # суммарные оценки системы (EDSM/Spansh) и источники догрузки
@@ -630,6 +636,8 @@ class System:
             "name": self.name,
             "star_pos": list(self.star_pos) if self.star_pos else None,
             "body_count": self.body_count,
+            "nonbody_count": self.nonbody_count,
+            "fss_progress": self.fss_progress,
             "population": self.population,
             "remote_sources": list(self.remote_sources),
             "remote_scan_value": self.remote_scan_value,
@@ -645,6 +653,8 @@ class System:
             name=data.get("name"),
             star_pos=(float(pos[0]), float(pos[1]), float(pos[2])) if pos else None,
             body_count=data.get("body_count"),
+            nonbody_count=data.get("nonbody_count"),
+            fss_progress=data.get("fss_progress"),
             population=data.get("population"),
             remote_sources=list(data.get("remote_sources") or []),
             remote_scan_value=data.get("remote_scan_value"),
@@ -663,6 +673,10 @@ class System:
             self.star_pos = other.star_pos
         if self.body_count is None and other.body_count is not None:
             self.body_count = other.body_count
+        if self.nonbody_count is None and other.nonbody_count is not None:
+            self.nonbody_count = other.nonbody_count
+        if self.fss_progress is None and other.fss_progress is not None:
+            self.fss_progress = other.fss_progress
         if other.remote_sources:
             seen = set(self.remote_sources)
             for src in other.remote_sources:
@@ -941,6 +955,10 @@ class GameState:
     # кто открыл систему (имя lower → командир; None = в базе нет имени)
     _discoverers: dict[str, str | None] = field(default_factory=dict)
     _systems_by_me: set[str] = field(default_factory=set)
+    # имя системы → (stars, planets, bodies, missing) из EDSM для Route
+    _body_stats: dict[str, tuple[int | None, int | None, int | None, bool]] = field(
+        default_factory=dict
+    )
 
     # ------------------------------------------------------------- события
     def apply(self, event: dict) -> None:
@@ -1332,10 +1350,57 @@ class GameState:
                 hop.discovered_by_me = True
                 if not hop.discovered_by and self.cmdr:
                     hop.discovered_by = self.cmdr
-                continue
-            if key in self._discoverers:
+            elif key in self._discoverers:
                 hop.discovered_by_me = False
                 hop.discovered_by = self._discoverers[key]
+            stats = self._body_stats.get(key)
+            if stats is None:
+                continue
+            stars, planets, bodies, missing = stats
+            hop.edsm_stars = stars
+            hop.edsm_planets = planets
+            hop.edsm_bodies = bodies
+            hop.edsm_missing = bool(missing)
+
+    def note_system_body_stats(
+        self,
+        system: str,
+        *,
+        stars: int | None = None,
+        planets: int | None = None,
+        bodies: int | None = None,
+        missing: bool = False,
+    ) -> None:
+        """Состав системы с EDSM → хопы маршрута."""
+        key = system.strip().lower()
+        if not key:
+            return
+        self._body_stats[key] = (stars, planets, bodies, missing)
+        self.sync_route_discoverers()
+
+    def _on_fssdiscoveryscan(self, e: dict) -> None:
+        """Хонк FSS: точное число тел и сигналов в текущей системе."""
+        if e.get("SystemAddress") is not None and self.system.address is not None:
+            if int(e["SystemAddress"]) != int(self.system.address):
+                return
+        if e.get("SystemName") and not self.system.name:
+            self.system.name = e.get("SystemName")
+        if e.get("BodyCount") is not None:
+            try:
+                self.system.body_count = int(e["BodyCount"])
+            except (TypeError, ValueError):
+                pass
+        if e.get("NonBodyCount") is not None:
+            try:
+                self.system.nonbody_count = int(e["NonBodyCount"])
+            except (TypeError, ValueError):
+                pass
+        if e.get("Progress") is not None:
+            try:
+                self.system.fss_progress = float(e["Progress"])
+            except (TypeError, ValueError):
+                pass
+        self.view_tab = "bodies"
 
     def _account_scan(self, body_id: int | None = None, mapped: bool = False) -> None:
         """Считает стоимость тела: скан сразу, картографию — по факту DSS."""
@@ -1622,7 +1687,13 @@ class GameState:
         return None
 
     def dss_in_probe_range(self) -> bool:
-        """Достаточно близко к телу, чтобы запускать пробы (оценка по высоте/радиусу)."""
+        """Достаточно близко к телу, чтобы запускать пробы (оценка по высоте/радиусу).
+
+        Важно: типичный DSS в суперкруизе (как у Smojai NP-A c8 A 1) проходит
+        целиком без HasLatLong/Altitude в Status.json — к моменту Too Fast на
+        прицеле высота в API ещё не появляется. Тогда ориентир — открытый
+        интерфейс DSS (GuiFocus=SAA) на неразмеченном теле.
+        """
         body = self.dss_target_body()
         if body is None or body.is_star or body.dss_scanned:
             return False
@@ -1631,12 +1702,16 @@ class GameState:
         radius = self.status.planet_radius or body.radius or 0.0
         limit = dss_probe_altitude_m(radius)
         alt = self.status.altitude
-        # Высота из Status достаточна сама по себе (не ждём обязательно HasLatLong —
-        # «Too Fast» на DSS часто появляется раньше устойчивых lat/long).
+        # Высота из Status — если игра её уже отдала (часто уже после Too Fast).
         if alt is not None:
             return float(alt) <= limit
-        # орбитальный круиз / у тела без Altitude — уже в зоне
-        return bool(self.status.has_lat_long)
+        if self.status.has_lat_long:
+            return True
+        # SC + открыт DSS (SAA) на цель: ближайший доступный сигнал к Too Fast.
+        # Out of Range тоже открывает SAA — лучше раннее «Тормози», чем тишина.
+        if self.status.gui_focus == GUI_FOCUS_SAA:
+            return True
+        return False
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:

@@ -260,7 +260,9 @@ class App:
         pending: list[str] = []
         for hop in self.state.route.hops:
             key = hop.system.lower()
-            if key in self.state._systems_by_me or key in self.state._discoverers:
+            need_disc = key not in self.state._systems_by_me and key not in self.state._discoverers
+            need_stats = key not in self.state._body_stats
+            if not need_disc and not need_stats:
                 continue
             pending.append(hop.system)
         route_key = tuple(h.system.lower() for h in self.state.route.hops)
@@ -273,21 +275,30 @@ class App:
         self._route_disc_busy = True
 
         def work() -> None:
-            results: list[tuple[str, str | None | bool]] = []
+            results: list[tuple[str, str | None | bool, object | None]] = []
             for name in batch:
                 try:
-                    results.append((name, remote.system_discoverer(name)))
+                    who, stats = remote.system_route_info(name)
+                    results.append((name, who, stats))
                 except Exception:
-                    results.append((name, None))
+                    results.append((name, None, None))
 
             def apply() -> None:
                 self._route_disc_busy = False
                 me = self.cfg.edsm_commander or self.state.cmdr
-                for name, who in results:
+                for name, who, stats in results:
                     if who is False:
                         self.state.note_system_discoverer(name, None, cmdr=me)
                     elif isinstance(who, str):
                         self.state.note_system_discoverer(name, who, cmdr=me)
+                    if stats is not None:
+                        self.state.note_system_body_stats(
+                            name,
+                            stars=stats.stars if not stats.missing else None,
+                            planets=stats.planets if not stats.missing else None,
+                            bodies=stats.bodies if not stats.missing else None,
+                            missing=bool(stats.missing),
+                        )
                 self.state.sync_route_discoverers()
                 if len(pending) <= len(batch):
                     self._route_disc_key = route_key

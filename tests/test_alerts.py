@@ -180,6 +180,33 @@ class AlertEngineTests(unittest.TestCase):
         self.assertIn("Тормози", alerts[0].text)
         self.assertEqual(self.engine.handle_status(self.state), [])
 
+    def test_dss_range_voice_on_saa_without_altitude(self) -> None:
+        from edhud.model import Body
+
+        self.engine.arm()
+        self.state.system.bodies[3] = Body(
+            body_id=3,
+            name="Smojai NP-A c8 A 1",
+            planet_class="Water world",
+            radius=6_813_696.0,
+        )
+        self.state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
+                "GuiFocus": 10,
+                "Destination": {
+                    "System": 12345,
+                    "Body": 3,
+                    "Name": "Smojai NP-A c8 A 1",
+                },
+            }
+        )
+        alerts = self.engine.handle_status(self.state)
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].kind, "dss_range")
+        self.assertIn("Тормози", alerts[0].text)
+        self.assertIn("Too Fast", alerts[0].text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -91,23 +91,59 @@ def _composition(raw) -> dict[str, float]:
     return parse_atmosphere_composition(raw)
 
 
-def system_discoverer(name: str, timeout: float = 8.0) -> str | None | bool:
-    """Первооткрыватель системы по EDSM bodies.
+@dataclass(frozen=True)
+class SystemBodyStats:
+    """Состав системы по EDSM (звёзды / планеты / всего известных тел)."""
 
-    str — имя командира; False — системы нет в EDSM; None — сеть/пусто.
-    """
-    if not name:
-        return None
-    url = EDSM_BODIES.format(name=urllib.parse.quote(name))
-    data = _http_json(url, timeout=timeout)
+    stars: int = 0
+    planets: int = 0
+    bodies: int = 0
+    missing: bool = False  # системы нет в базе EDSM
+
+
+def _body_stats_from_edsm(data: dict | None) -> SystemBodyStats | None:
+    """None — сеть/битый ответ; missing=True — системы нет в EDSM."""
     if not isinstance(data, dict):
         return None
     bodies = data.get("bodies")
+    if not isinstance(bodies, list):
+        return None
+    if not bodies:
+        if data.get("name") or data.get("id64") or data == {}:
+            return SystemBodyStats(missing=True)
+        return None
+    stars = 0
+    planets = 0
+    for body in bodies:
+        if not isinstance(body, dict):
+            continue
+        kind = (body.get("type") or "").lower()
+        if kind == "star":
+            stars += 1
+        elif kind == "planet":
+            planets += 1
+    return SystemBodyStats(stars=stars, planets=planets, bodies=len(bodies), missing=False)
+
+
+def system_route_info(
+    name: str, timeout: float = 8.0
+) -> tuple[str | None | bool, SystemBodyStats | None]:
+    """Один запрос EDSM: первооткрыватель + состав тел для строки Route.
+
+    discoverer: str | False | None — как system_discoverer.
+    """
+    if not name:
+        return None, None
+    url = EDSM_BODIES.format(name=urllib.parse.quote(name))
+    data = _http_json(url, timeout=timeout)
+    stats = _body_stats_from_edsm(data)
+    if not isinstance(data, dict):
+        return None, stats
+    bodies = data.get("bodies")
     if not isinstance(bodies, list) or not bodies:
-        # пустой ответ при известном имени часто = нет в базе
-        if data.get("name") or data.get("id64"):
-            return False
-        return False if data == {} else None
+        if data.get("name") or data.get("id64") or data == {}:
+            return False, stats or SystemBodyStats(missing=True)
+        return None, stats
     for body in bodies:
         if not isinstance(body, dict):
             continue
@@ -115,8 +151,17 @@ def system_discoverer(name: str, timeout: float = 8.0) -> str | None | bool:
         if isinstance(discovery, dict):
             commander = discovery.get("commander")
             if commander:
-                return str(commander)
-    return False
+                return str(commander), stats
+    return False, stats
+
+
+def system_discoverer(name: str, timeout: float = 8.0) -> str | None | bool:
+    """Первооткрыватель системы по EDSM bodies.
+
+    str — имя командира; False — системы нет в EDSM; None — сеть/пусто.
+    """
+    who, _stats = system_route_info(name, timeout=timeout)
+    return who
 
 
 def system_coordinates(

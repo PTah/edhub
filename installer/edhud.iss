@@ -1,9 +1,9 @@
 ; Inno Setup 6 — установщик EDHUD
 ; Сборка: build_windows.bat (нужен ISCC) или вручную:
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.2 installer\edhud.iss
+;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.4 installer\edhud.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.2"
+  #define MyAppVersion "1.2.4"
 #endif
 
 #define MyAppName "EDHUD"

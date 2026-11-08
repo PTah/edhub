@@ -27,6 +27,11 @@ class RouteHop:
     # кто открыл систему (EDSM); discovered_by_me — открыли мы
     discovered_by: str | None = None
     discovered_by_me: bool = False
+    # состав по EDSM (до визита); None = ещё не спрашивали
+    edsm_stars: int | None = None
+    edsm_planets: int | None = None
+    edsm_bodies: int | None = None
+    edsm_missing: bool = False  # системы нет в EDSM
 
     def to_dict(self) -> dict:
         return {
@@ -38,6 +43,10 @@ class RouteHop:
             "neutron": self.neutron,
             "discovered_by": self.discovered_by,
             "discovered_by_me": self.discovered_by_me,
+            "edsm_stars": self.edsm_stars,
+            "edsm_planets": self.edsm_planets,
+            "edsm_bodies": self.edsm_bodies,
+            "edsm_missing": self.edsm_missing,
         }
 
     def opened_label(self) -> str:
@@ -46,6 +55,21 @@ class RouteHop:
         if self.discovered_by:
             return self.discovered_by
         return "—"
+
+    def bodies_label(self) -> str:
+        """Краткий состав системы для колонки Route (данные EDSM)."""
+        if self.edsm_missing:
+            return "нет в EDSM"
+        if self.edsm_stars is None and self.edsm_planets is None:
+            return "—"
+        parts: list[str] = []
+        if self.edsm_stars:
+            parts.append(f"★{self.edsm_stars}")
+        if self.edsm_planets:
+            parts.append(f"{self.edsm_planets}п")
+        if not parts and (self.edsm_bodies or 0) > 0:
+            parts.append(f"{self.edsm_bodies} тел")
+        return " · ".join(parts) if parts else "—"
 
     @property
     def scoopable(self) -> bool:
@@ -112,6 +136,10 @@ class Route:
                 neutron=bool(h.get("neutron")),
                 discovered_by=h.get("discovered_by"),
                 discovered_by_me=bool(h.get("discovered_by_me")),
+                edsm_stars=h.get("edsm_stars"),
+                edsm_planets=h.get("edsm_planets"),
+                edsm_bodies=h.get("edsm_bodies"),
+                edsm_missing=bool(h.get("edsm_missing")),
             )
             for h in data.get("hops") or []
             if h.get("system")

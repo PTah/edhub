@@ -639,6 +639,7 @@ class RouteOpenedColumnTests(unittest.TestCase):
             window.win.update_idletasks()
             columns = {key: index for index, (key, *_rest) in enumerate(ROUTE_COLUMNS)}
             self.assertIn("opened", columns)
+            self.assertIn("bodies", columns)
             box = window._route_inner.grid_slaves(row=0, column=columns["opened"])[0]
             label = box.winfo_children()[0]
             self.assertEqual(label.cget("text"), "Ваше открытие")
@@ -647,6 +648,67 @@ class RouteOpenedColumnTests(unittest.TestCase):
             window.destroy()
         finally:
             root.destroy()
+
+    def test_route_bodies_column_edsm_and_fss(self):
+        from edhud.mainwindow import ROUTE_COLUMNS, MainWindow, _route_bodies_cell
+        from edhud.route import Route, RouteHop
+
+        hop = RouteHop(system="Sol", edsm_stars=1, edsm_planets=8, edsm_bodies=9)
+        self.assertIn("★1", hop.bodies_label())
+        self.assertIn("8п", hop.bodies_label())
+
+        state = GameState()
+        state.system.name = "Here"
+        state.system.address = 1
+        state.system.body_count = 15
+        state.system.nonbody_count = 4
+        state.system.fss_progress = 0.4
+        state.system.bodies[1] = Body(body_id=1, name="Here A", star_type="M")
+        state.system.bodies[2] = Body(body_id=2, name="Here 1", planet_class="Icy body")
+        state.route = Route(
+            hops=[
+                RouteHop(system="Here", star_class="M"),
+                RouteHop(system="Next", star_class="K", edsm_stars=2, edsm_planets=3),
+            ]
+        )
+        here = _route_bodies_cell(state.route.hops[0], here=True, system=state.system)
+        self.assertIn("2/15", here)
+        self.assertIn("сигн.4", here)
+        self.assertIn("FSS 40%", here)
+
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            window.update_state(state)
+            window.win.update_idletasks()
+            columns = {key: index for index, (key, *_rest) in enumerate(ROUTE_COLUMNS)}
+            box = window._route_inner.grid_slaves(row=1, column=columns["bodies"])[0]
+            self.assertIn("★2", box.winfo_children()[0].cget("text"))
+            window.destroy()
+        finally:
+            root.destroy()
+
+    def test_fss_discovery_scan_sets_counts(self):
+        state = GameState()
+        state.system.address = 99
+        state.system.name = "Target"
+        state.apply(
+            {
+                "event": "FSSDiscoveryScan",
+                "SystemAddress": 99,
+                "SystemName": "Target",
+                "BodyCount": 12,
+                "NonBodyCount": 5,
+                "Progress": 0.25,
+            }
+        )
+        self.assertEqual(state.system.body_count, 12)
+        self.assertEqual(state.system.nonbody_count, 5)
+        self.assertAlmostEqual(state.system.fss_progress or 0, 0.25)
+        self.assertEqual(state.view_tab, "bodies")
 
 
 class JumpTabTests(unittest.TestCase):
@@ -1867,6 +1929,44 @@ class SampleGuideTests(unittest.TestCase):
                 "Altitude": 60_000_000.0,
                 "PlanetRadius": 3_000_000.0,
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertFalse(state.dss_in_probe_range())
+
+    def test_dss_in_probe_range_saa_without_altitude(self):
+        """Реальный DSS в SC: Too Fast на HUD, в Status нет Altitude — только GuiFocus=SAA."""
+        state = GameState()
+        state.system.address = 2284083844354
+        state.system.bodies[3] = Body(
+            body_id=3,
+            name="Smojai NP-A c8 A 1",
+            planet_class="Water world",
+            radius=6_813_696.0,
+            dss_scanned=False,
+        )
+        # Как после FSS до SAAScanComplete: SC + Analysis, Destination=A1, без lat/alt
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
+                "GuiFocus": 10,
+                "Destination": {
+                    "System": 2284083844354,
+                    "Body": 3,
+                    "Name": "Smojai NP-A c8 A 1",
+                },
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
+        # без SAA и без высоты — ещё не зона
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
+                "GuiFocus": 0,
+                "Destination": {
+                    "System": 2284083844354,
+                    "Body": 3,
+                    "Name": "Smojai NP-A c8 A 1",
+                },
             }
         )
         self.assertFalse(state.dss_in_probe_range())
