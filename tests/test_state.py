@@ -505,6 +505,7 @@ class CarrierClickTests(unittest.TestCase):
         state.system.star_pos = (0, 0, 40)
         label = hudmodel._carrier_label(state)
         self.assertIsNotNone(label)
+        self.assertTrue((label or "").startswith("Карриер"))
         self.assertIn("Home Base", label)
         self.assertIn("GHY-7TZ", label)
 
@@ -544,7 +545,7 @@ class CarrierClickTests(unittest.TestCase):
             self.assertIn("FromSys", text)
             self.assertIn("ToSys", text)
             self.assertNotIn("Карриер карриер", text)
-            self.assertIn("2× копия", window.lbl_carrier_hint.cget("text"))
+            self.assertEqual(window.lbl_carrier_hint.cget("text"), "")
             window.destroy()
         finally:
             root.destroy()
@@ -566,8 +567,10 @@ class CarrierClickTests(unittest.TestCase):
             state.system.address = 2
             window.update_state(state)
             text = window.lbl_carrier.cget("text")
-            self.assertTrue(text.startswith("Карриер:"))
+            self.assertTrue(text.startswith("Карриер"))
+            self.assertIn("Somewhere", text)
             self.assertNotIn("Карриер карриер", text)
+            self.assertEqual(window.lbl_carrier_hint.cget("text"), "")
             window.destroy()
         finally:
             root.destroy()
@@ -591,10 +594,15 @@ class CarrierClickTests(unittest.TestCase):
             window._on_system_double()
             window._on_carrier_double()
             self.assertEqual(copied, ["Alpha Centauri", "Carrier Home"])
-            self.assertNotIn("карриер карриер", window.lbl_carrier.cget("text").lower())
+            carrier_text = window.lbl_carrier.cget("text")
+            self.assertTrue(carrier_text.startswith("Карриер"))
+            self.assertIn("ABC-123", carrier_text)
+            self.assertIn("Carrier Home", carrier_text)
+            self.assertNotIn("карриер карриер", carrier_text.lower())
+            self.assertEqual(window.lbl_carrier_hint.cget("text"), "")
+            # 3× Spansh из шапки убран; API plot_to_carrier остаётся
             plotted: list[int] = []
             window.on_plot_to_carrier = lambda: plotted.append(1)
-            window._carrier_clicks = 3
             window._on_carrier_triple()
             self.assertEqual(plotted, [1])
             window.destroy()
@@ -1831,6 +1839,37 @@ class SampleGuideTests(unittest.TestCase):
             }
         )
         self.assertTrue(state.dss_in_probe_range())
+
+    def test_dss_in_probe_range_matches_too_fast_hud(self):
+        """Высота выше старого порога (×4.67), но уже зона «Too Fast» в игре."""
+        state = GameState()
+        state.system.address = 1
+        # R=3 Mm → старый лимит ~14 Mm, новый ~46.5 Mm
+        state.system.bodies[2] = Body(
+            body_id=2,
+            name="Here 2",
+            planet_class="Rocky body",
+            radius=3_000_000.0,
+            dss_scanned=False,
+        )
+        state.apply_status(
+            {
+                "Flags": 1 << 4,  # supercruise, без HasLatLong — как при раннем Too Fast
+                "Altitude": 20_000_000.0,
+                "PlanetRadius": 3_000_000.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
+        state.apply_status(
+            {
+                "Flags": 1 << 4,
+                "Altitude": 60_000_000.0,
+                "PlanetRadius": 3_000_000.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertFalse(state.dss_in_probe_range())
 
 
 class AppearanceTests(unittest.TestCase):

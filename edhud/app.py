@@ -567,7 +567,7 @@ class App:
             self.mainwindow._copy_text(text)
 
     def plot_route_to_carrier(self) -> None:
-        """3× по карриеру в шапке: маршрут Spansh в EDHUD (не прокладка в игре)."""
+        """Маршрут Spansh до карриера в EDHUD (не прокладка в игре; из шапки убран)."""
         start = self.state.system.name
         target = self.state.carrier.system
         if not start or not target:

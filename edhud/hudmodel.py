@@ -437,19 +437,21 @@ def _carrier_label(state: GameState) -> str | None:
     if not carrier.known:
         return None
     who = _carrier_who(carrier)
+    # Явно «Карриер», иначе callsign выглядит как обычная система
+    prefix = "Карриер" if who.lower() == "карриер" else f"Карриер {who}"
     where = carrier.system or "—"
     if carrier.jump_pending and carrier.jump_dest_system:
         frm = carrier.jump_from_system or where
-        return f"{who} · готовится: {frm} → {carrier.jump_dest_system}"
+        return f"{prefix} · готовится: {frm} → {carrier.jump_dest_system}"
     dist = state.carrier_distance_ly()
     if dist is None:
         if state.carrier_pos_pending:
-            return f"{who} · {where} · ищем ly…"
-        return f"{who} · {where}"
+            return f"{prefix} · {where} · ищем ly…"
+        return f"{prefix} · {where}"
     if dist < 0.05:
-        return f"{who} · {where} · здесь"
+        return f"{prefix} · {where} · здесь"
     text = f"{dist:,.1f}".replace(",", " ")
-    return f"{who} · {where} · {text} ly"
+    return f"{prefix} · {where} · {text} ly"
 
 
 def _append_carrier(row: Row, state: GameState) -> None:

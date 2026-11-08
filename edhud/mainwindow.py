@@ -345,8 +345,6 @@ class MainWindow:
         self.on_plot_to_carrier = on_plot_to_carrier
         self._carrier_system: str | None = None
         self._system_name: str | None = None
-        self._carrier_clicks = 0
-        self._carrier_click_job: str | None = None
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD")
         geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
@@ -422,13 +420,12 @@ class MainWindow:
             padx=4,
         )
         self.lbl_carrier.pack(side="left", padx=(12, 0))
-        # Double/Triple на Label в Windows часто срываются — считаем клики сами
-        self.lbl_carrier.bind("<Button-1>", self._on_carrier_click)
+        # Как у системы: только двойной клик — копия системы карриера
+        self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
         self.lbl_carrier_hint = ttk.Label(
             top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
         )
         self.lbl_carrier_hint.pack(side="left", padx=(4, 0))
-        self.lbl_carrier_hint.bind("<Button-1>", self._on_carrier_click)
 
         nb = ttk.Notebook(self.win, style="ED.TNotebook")
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -1114,19 +1111,21 @@ class MainWindow:
             to = state.carrier.jump_dest_system
             text = f"Карриер готовится прыгать из {frm} в {to}"
             self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
-            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут Spansh")
+            self.lbl_carrier_hint.configure(text="")
             return
         if self._carrier_system:
+            # Всегда явно «Карриер …», иначе в шапке неочевидно, что за система
+            prefix = "Карриер" if who.lower() == "карриер" else f"Карриер {who}"
             dist = state.carrier_distance_ly()
             if dist is None:
-                text = f"{who}: {self._carrier_system}"
+                text = f"{prefix}: {self._carrier_system}"
             elif dist < 0.05:
-                text = f"{who}: {self._carrier_system} · здесь"
+                text = f"{prefix}: {self._carrier_system} · здесь"
             else:
                 ly = f"{dist:,.0f}".replace(",", " ")
-                text = f"{who}: {self._carrier_system} · {ly} ly"
+                text = f"{prefix}: {self._carrier_system} · {ly} ly"
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
-            self.lbl_carrier_hint.configure(text="· 2× копия · 3× маршрут Spansh")
+            self.lbl_carrier_hint.configure(text="")
         else:
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
@@ -1148,27 +1147,8 @@ class MainWindow:
         else:
             self._copy_text(name)
 
-    def _on_carrier_click(self, _event=None) -> None:
-        """2 клика — копия системы карриера, 3 — маршрут Spansh до него (не в игру)."""
-        self._carrier_clicks += 1
-        if self._carrier_click_job is not None:
-            try:
-                self.win.after_cancel(self._carrier_click_job)
-            except (tk.TclError, ValueError):
-                pass
-
-        def flush() -> None:
-            n = self._carrier_clicks
-            self._carrier_clicks = 0
-            self._carrier_click_job = None
-            if n >= 3:
-                self._on_carrier_triple()
-            elif n == 2:
-                self._on_carrier_double()
-
-        self._carrier_click_job = self.win.after(320, flush)
-
     def _on_carrier_double(self, _event=None) -> None:
+        """Двойной клик по карриеру в шапке — копия системы, где он стоит."""
         name = self._carrier_system
         if self.on_copy_carrier and name:
             self.on_copy_carrier(name)
@@ -1176,6 +1156,7 @@ class MainWindow:
             self._copy_text(name)
 
     def _on_carrier_triple(self, _event=None) -> None:
+        """Оставлено для API/тестов: маршрут Spansh до карриера (из шапки убран)."""
         if self.on_plot_to_carrier and self._carrier_system:
             self.on_plot_to_carrier()
 
@@ -1195,7 +1176,7 @@ class MainWindow:
         self.route_info.configure(
             text=(
                 f"Источник: {src}{lock}{extra}{jump_txt}"
-                " · 2× система — копия · маршрут до карриера — 3× по карриеру в шапке"
+                " · 2× система / карриер в шапке — копия имени"
             )
         )
         here = route.index_of(current)
