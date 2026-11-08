@@ -172,10 +172,12 @@ class App:
         threading.Thread(target=work, name="edhud-nebulae", daemon=True).start()
 
     def _on_journal_catchup(self) -> None:
-        """После replay журнала: голос + подмешать кэш (координаты проб со прошлого запуска)."""
+        """После replay: голос, кэш проб с координатами, снимок на диск."""
         self.alerts.arm()
         self._cached_for = None
         self.sync_system()
+        self.state.persist_needed = False
+        self._save_system_now()
 
     def _on_alert(self, alert: Alert) -> None:
         if alert.overlay:
@@ -183,13 +185,19 @@ class App:
         if self.cfg.voice_enabled:
             self.voice.speak(alert.text)
 
+    def _save_system_now(self) -> None:
+        if not self.state.system.address or not self.state.system.bodies:
+            return
+        if self.watcher is not None and self.watcher.catchup_pending:
+            return
+        self.store.save(self.state.system)
+        self._last_save = time.time()
+
     def _on_event(self, event: dict) -> None:
         self.alerts.handle(event, self.state)
         if self.state.persist_needed:
             self.state.persist_needed = False
-            if self.state.system.address and self.state.system.bodies:
-                self.store.save(self.state.system)
-                self._last_save = time.time()
+            self._save_system_now()
         if event.get("event") != "FSDJump":
             return
         if not self.cfg.copy_next_system or self.overlay is None:
@@ -411,12 +419,14 @@ class App:
             self.store.save(self.state.system)
 
     def autosave(self) -> None:
+        if self.watcher is not None and self.watcher.catchup_pending:
+            return
         now = time.time()
         if now - self._last_save < SAVE_INTERVAL:
             return
-        self._last_save = now
         if self.state.system.address and self.state.system.bodies:
             self.store.save(self.state.system)
+            self._last_save = now
 
     # -------------------------------------------------------------------- UI
     def _ui(self, fn) -> None:

@@ -253,34 +253,69 @@ def _guide_dist(meters: float) -> str:
 
 
 def _sample_rows(state: GameState) -> list[Row]:
-    """Направления проб: видны и без F8, с корабля над планетой тоже."""
-    plan = state.sample_plan()
-    if plan is None:
+    """Прогресс проб + колония + ближайший образец (и после рестарта игры/EDHUD)."""
+    from . import codex
+
+    organic = state.active_organic()
+    if organic is None:
         return []
+    need = codex.sample_range(organic.genus)
+    rows: list[Row] = []
     head = Row(
         [
-            Segment(f"{plan.name} {plan.scans}", "warn"),
-            Segment(f"  · интервал {plan.need_m} м", "dim"),
+            Segment(f"ПРОБЫ {organic.genus_en}  {organic.scans_text}", "warn"),
+            Segment(f"  · интервал {need} м", "dim"),
         ]
     )
-    if plan.ready:
-        head.segments.append(Segment("  · можно брать", "ok"))
-    rows = [head]
+    colony = state.colony_distance()
+    if colony is not None:
+        dist, need_m = colony
+        if dist >= need_m:
+            head.segments.append(Segment("  · можно брать следующую", "ok"))
+        else:
+            gap = max(0.0, need_m - dist)
+            head.segments.append(
+                Segment(
+                    f"  · от прошлой {_guide_dist(dist)} · ещё {_guide_dist(gap)}",
+                    "bad",
+                )
+            )
+    elif organic.samples_done > 0 and not organic.sample_pos:
+        head.segments.append(Segment("  · координаты прошлой пробы неизвестны", "dim"))
+    rows.append(head)
+
+    plan = state.sample_plan()
+    if plan is None:
+        return rows
     for guide in plan.guides:
         if guide.kind == "away":
             course = f"{guide.bearing:.0f}°" if guide.bearing is not None else "—"
-            text = f"дальше  {_guide_dist(guide.distance_m)}  курс {course}{_guide_turn(guide.turn)}"
+            text = (
+                f"отойти ещё {_guide_dist(guide.distance_m)}  курс {course}"
+                f"{_guide_turn(guide.turn)}"
+            )
             rows.append(Row([Segment("  ", "dim"), Segment(text, "warn")]))
             continue
+        if guide.kind == "spot":
+            course = f"  на {guide.bearing:.0f}°" if guide.bearing is not None else ""
+            rows.append(
+                Row(
+                    [
+                        Segment("  ближайший образец  ", "accent"),
+                        Segment(str(guide.title), "text"),
+                        Segment(f"  {_guide_dist(guide.distance_m)}{course}{_guide_turn(guide.turn)}", "ok"),
+                    ]
+                )
+            )
+            continue
         style = "ok" if guide.ready else "bad"
-        mark = "можно" if guide.ready else "мало"
+        mark = "достаточно" if guide.ready else "близко"
         course = f"  на {guide.bearing:.0f}°" if guide.bearing is not None else ""
-        title = guide.title if guide.kind == "spot" else guide.title
         rows.append(
             Row(
                 [
-                    Segment(f"  {title}  ", "text"),
-                    Segment(f"{_guide_dist(guide.distance_m)}/{guide.need_m} м", style),
+                    Segment(f"  {guide.title}  ", "text"),
+                    Segment(f"{_guide_dist(guide.distance_m)} / {guide.need_m} м", style),
                     Segment(f"{course}{_guide_turn(guide.turn)}  {mark}", style),
                 ]
             )

@@ -1544,8 +1544,10 @@ class SampleGuideTests(unittest.TestCase):
         view = hudmodel.build_view(state, Config(), expanded=False)
         text = "\n".join(view.plain())
         self.assertIn("интервал 500 м", text)
-        self.assertIn("дальше", text)
+        self.assertIn("отойти ещё", text)
         self.assertIn("курс", text)
+        self.assertIn("осталось", text)
+        self.assertIn("от прошлой", text)
 
     def test_far_enough_sample_can_be_taken(self):
         state = self._state()
@@ -1554,6 +1556,9 @@ class SampleGuideTests(unittest.TestCase):
         assert plan is not None
         self.assertTrue(plan.ready)
         self.assertTrue(all(guide.kind != "away" for guide in plan.guides))
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        text = "\n".join(view.plain())
+        self.assertIn("можно брать следующую", text)
 
     def test_codex_spot_is_a_bearing_when_outside_the_colony(self):
         state = self._state()

@@ -263,10 +263,22 @@ class Organic:
         return base * FIRST_LOGGED_MULTIPLIER if self.first_logged else base
 
     @property
+    def samples_done(self) -> int:
+        return 3 if self.analysed else max(0, min(int(self.samples), 3))
+
+    @property
+    def samples_left(self) -> int:
+        return 0 if self.analysed else max(0, 3 - self.samples_done)
+
+    @property
     def scans_text(self) -> str:
         if self.analysed:
             return "готово"
-        return f"{min(self.samples, 3)}/3"
+        done = self.samples_done
+        left = self.samples_left
+        if left:
+            return f"{done}/3 · осталось {left}"
+        return f"{done}/3"
 
     def to_persist(self) -> dict:
         return {
@@ -1399,7 +1411,8 @@ class GameState:
         if lat is not None and lon is not None and scan_type in ("log", "sample"):
             Body._merge_sample_pos(organic, float(lat), float(lon))
             self._add_bio_spot(body, float(lat), float(lon), genus, organic.genus_en or "био")
-            self.persist_needed = True
+        # прогресс проб (счётчик и координаты) всегда пишем на диск — переживает выход из игры/EDHUD
+        self.persist_needed = True
         organic.last_ts = time.time()
 
     def _on_codexentry(self, e: dict) -> None:
@@ -1848,7 +1861,7 @@ class GameState:
             span = max((b.distance_m for b in blips if b.kind != "away"), default=float(need))
             range_m = min(5000.0, max(float(need) * 1.35, span * 1.15, 250.0))
             return RadarView(
-                title=f"{organic.genus_en} · интервал {need} м",
+                title=f"{organic.genus_en} · {organic.scans_text} · интервал {need} м",
                 range_m=range_m,
                 need_m=need,
                 heading=heading,
@@ -1875,6 +1888,16 @@ class GameState:
         blips = blips[:8]
         if not blips:
             # радар всё равно показываем: иначе кажется, что «пропал» после глида
+            if organic is not None and organic.samples_done > 0:
+                need = codex.sample_range(organic.genus)
+                return RadarView(
+                    title=f"{organic.genus_en} · {organic.scans_text} · нет координат пробы · ≥{need} м",
+                    range_m=float(max(need, 300)),
+                    need_m=need,
+                    heading=heading,
+                    ready=False,
+                    blips=(),
+                )
             names = [codex.display_name(key) for key in list(body.genuses)[:2]]
             hint = ", ".join(names) if names else "био"
             return RadarView(

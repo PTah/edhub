@@ -65,6 +65,11 @@ class JournalWatcher(threading.Thread):
         self.errors: list[str] = []
 
     # ------------------------------------------------------------------ API
+    @property
+    def catchup_pending(self) -> bool:
+        """True, пока идёт первичный replay журнала — на диск писать рано."""
+        return bool(self._catchup_pending)
+
     def stop(self) -> None:
         self._stop.set()
 
