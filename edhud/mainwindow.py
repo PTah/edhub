@@ -6,7 +6,7 @@ from tkinter import ttk
 from typing import Callable
 
 from . import bio, codex, values, winapi
-from .model import Body, GameState, format_dss_range, format_hotspots, is_belt_body
+from .model import Body, GameState, format_dss_range, format_hotspots, is_belt_body, is_ring_body
 from .route import Route
 
 
@@ -1384,10 +1384,11 @@ class MainWindow:
                 scroll = (0.0, 1.0)
 
         show_belts = True if self.cfg is None else bool(getattr(self.cfg, "show_belt_clusters", True))
+        # Кольца не отдельной строкой: hotspot уже на планете-носителе.
         bodies = [
             b
             for b in state.system.bodies.values()
-            if show_belts or not is_belt_body(b.name)
+            if not is_ring_body(b.name) and (show_belts or not is_belt_body(b.name))
         ]
         bodies = sorted(
             bodies,

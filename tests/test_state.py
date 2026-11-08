@@ -1205,6 +1205,24 @@ class CarrierDistanceTests(unittest.TestCase):
         from edhud.model import format_hotspots
 
         state = GameState()
+        state.system.address = 1488097135235
+        state.system.name = "Smojai HF-A d43"
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Smojai HF-A d43 6",
+                "BodyID": 6,
+                "PlanetClass": "Sudarsky class I gas giant",
+                "Radius": 30_000_000.0,
+                "Rings": [
+                    {
+                        "Name": "Smojai HF-A d43 6 A Ring",
+                        "RingClass": "eRingClass_Icy",
+                    }
+                ],
+                "WasDiscovered": True,
+            }
+        )
         state.apply(
             {
                 "event": "SAASignalsFound",
@@ -1218,13 +1236,16 @@ class CarrierDistanceTests(unittest.TestCase):
                 "Genuses": [],
             }
         )
-        body = state.system.body(40)
-        assert body is not None
-        self.assertEqual(body.hotspots.get("Alexandrite"), 1)
-        self.assertEqual(body.hotspots.get("Musgravite"), 2)
-        self.assertTrue(body.has_rings)
-        self.assertTrue(body.dss_scanned)
-        text = format_hotspots(body.hotspots)
+        planet = state.system.body(6)
+        ring = state.system.body(40)
+        assert planet is not None and ring is not None
+        self.assertEqual(planet.hotspots.get("Alexandrite"), 1)
+        self.assertEqual(planet.hotspots.get("Musgravite"), 2)
+        self.assertTrue(planet.has_rings)
+        self.assertFalse(planet.dss_scanned)
+        self.assertTrue(ring.dss_scanned)
+        self.assertEqual(ring.hotspots, {})
+        text = format_hotspots(planet.hotspots)
         self.assertIn("Alexandrite", text)
         self.assertIn("Musgravite ×2", text)
 
@@ -1232,13 +1253,12 @@ class CarrierDistanceTests(unittest.TestCase):
         root.withdraw()
         try:
             window = MainWindow(root)
-            state.system.address = 1488097135235
-            state.system.name = "Smojai HF-A d43"
             window.update_state(state)
             window.win.update_idletasks()
             titles = {key: title for key, title, *_rest in BODY_COLUMNS}
             self.assertEqual(titles["minerals"], "Минералы")
-            minerals_label = window._body_rows[40]["cells"]["minerals"][1]
+            self.assertNotIn(40, window._body_rows)
+            minerals_label = window._body_rows[6]["cells"]["minerals"][1]
             self.assertIn("Alexandrite", minerals_label.cget("text"))
             self.assertIn("Musgravite", minerals_label.cget("text"))
             window.destroy()

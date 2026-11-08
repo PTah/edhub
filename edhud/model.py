@@ -1326,6 +1326,8 @@ class GameState:
             body.was_footfalled = bool(e.get("WasFootfalled"))
         if e.get("BodyCount") is not None:
             self.system.body_count = e.get("BodyCount")
+        if is_ring_body(body.name):
+            self._merge_ring_hotspots_to_parent(body)
         self._account_scan(body_id)
 
     def _note_first_discovery(self, e: dict) -> None:
@@ -1458,37 +1460,70 @@ class GameState:
                 map_done += delta
         self._valued_bodies[key] = (scan_done, map_done)
 
+    def _signals_target(self, body: Body) -> Body:
+        """Куда писать сигналы: hotspot кольца — на планету-носителя."""
+        if is_ring_body(body.name):
+            parent = self._planet_for_ring_body(body)
+            if parent is not None:
+                return parent
+        return body
+
+    def _merge_ring_hotspots_to_parent(self, ring: Body) -> Body | None:
+        """Переносит hotspot с кольца на планету; возвращает родителя или None."""
+        if not is_ring_body(ring.name) or not ring.hotspots:
+            return self._planet_for_ring_body(ring) if is_ring_body(ring.name) else None
+        parent = self._planet_for_ring_body(ring)
+        if parent is None:
+            return None
+        for name, count in ring.hotspots.items():
+            parent.hotspots[name] = max(int(parent.hotspots.get(name) or 0), int(count or 0))
+        ring.hotspots.clear()
+        parent.has_rings = True
+        return parent
+
     def _on_fssbodysignals(self, e: dict) -> None:
         body = self._ensure_body(e)
         if body is None:
             return
-        _apply_signal_counts(body, e.get("Signals") or [])
-        body.signals_known = True
-        body.signals_local = True
-        self.last_fss_body_id = body.body_id
+        target = self._signals_target(body)
+        _apply_signal_counts(target, e.get("Signals") or [])
+        target.signals_known = True
+        target.signals_local = True
+        if target is not body and is_ring_body(body.name):
+            body.signals_known = True
+            body.signals_local = True
+        self.last_fss_body_id = target.body_id
 
     def _on_saasignalsfound(self, e: dict) -> None:
         body = self._ensure_body(e)
         if body is None:
             return
+        target = self._signals_target(body)
         body.signals_known = True
         body.signals_local = True
         body.dss_scanned = True
-        self.last_fss_body_id = body.body_id
-        _apply_signal_counts(body, e.get("Signals") or [], merge_bio=True)
-        genuses = e.get("Genuses") or []
-        if genuses:
-            body.genuses = {}
-            for item in genuses:
-                genus = item.get("Genus")
-                if genus:
-                    body.genuses[str(genus)] = int(item.get("Count") or 1)
+        # Кольцо: минералы на строке планеты; dss_scanned остаётся у кольца.
+        _apply_signal_counts(target, e.get("Signals") or [], merge_bio=True)
+        if target is not body:
+            target.signals_known = True
+            target.signals_local = True
+            target.has_rings = True
+        else:
+            genuses = e.get("Genuses") or []
+            if genuses:
+                body.genuses = {}
+                for item in genuses:
+                    genus = item.get("Genus")
+                    if genus:
+                        body.genuses[str(genus)] = int(item.get("Count") or 1)
+        self.last_fss_body_id = target.body_id
         self._account_scan(body.body_id, mapped=True)
 
     def _on_saascancomplete(self, e: dict) -> None:
         body = self._ensure_body(e)
         if body is not None:
             body.dss_scanned = True
+            self._merge_ring_hotspots_to_parent(body)
             self._account_scan(body.body_id, mapped=True)
 
     def _on_sellexplorationdata(self, e: dict) -> None:
