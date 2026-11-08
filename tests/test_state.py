@@ -1082,6 +1082,53 @@ class CarrierDistanceTests(unittest.TestCase):
         self.assertEqual(state.system.body(1).mining_locations, 15)
         self.assertTrue(state.system.body(1).dss_scanned)
 
+    def test_ring_hotspots_fill_minerals_column(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import BODY_COLUMNS, MainWindow
+        from edhud.model import format_hotspots
+
+        state = GameState()
+        state.apply(
+            {
+                "event": "SAASignalsFound",
+                "BodyName": "Smojai HF-A d43 6 A Ring",
+                "SystemAddress": 1488097135235,
+                "BodyID": 40,
+                "Signals": [
+                    {"Type": "Alexandrite", "Count": 1},
+                    {"Type": "Musgravite", "Count": 2},
+                ],
+                "Genuses": [],
+            }
+        )
+        body = state.system.body(40)
+        assert body is not None
+        self.assertEqual(body.hotspots.get("Alexandrite"), 1)
+        self.assertEqual(body.hotspots.get("Musgravite"), 2)
+        self.assertTrue(body.has_rings)
+        self.assertTrue(body.dss_scanned)
+        text = format_hotspots(body.hotspots)
+        self.assertIn("Alexandrite", text)
+        self.assertIn("Musgravite ×2", text)
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            state.system.address = 1488097135235
+            state.system.name = "Smojai HF-A d43"
+            window.update_state(state)
+            window.win.update_idletasks()
+            titles = {key: title for key, title, *_rest in BODY_COLUMNS}
+            self.assertEqual(titles["minerals"], "Минералы")
+            minerals_label = window._body_rows[40]["cells"]["minerals"][1]
+            self.assertIn("Alexandrite", minerals_label.cget("text"))
+            self.assertIn("Musgravite", minerals_label.cget("text"))
+            window.destroy()
+        finally:
+            root.destroy()
+
 
 class RouteMarkTests(unittest.TestCase):
     def test_passed_are_gray_and_current_is_larger(self):

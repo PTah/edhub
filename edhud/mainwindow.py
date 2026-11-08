@@ -6,7 +6,7 @@ from tkinter import ttk
 from typing import Callable
 
 from . import bio, codex, values, winapi
-from .model import Body, GameState, format_dss_range, is_belt_body
+from .model import Body, GameState, format_dss_range, format_hotspots, is_belt_body
 from .route import Route
 
 
@@ -38,6 +38,7 @@ BODY_COLUMNS = (
     ("guess", "Возможно", 220, "w"),
     ("geo", "Гео", 50, "center"),
     ("pml", "PML", 50, "center"),
+    ("minerals", "Минералы", 180, "w"),
     ("dss", "DSS", 50, "center"),
     ("value", "≈ Cr", 100, "e"),
     ("first", "1-е", 50, "center"),
@@ -61,6 +62,7 @@ MIN_COL_WIDTHS = {
     "atmos": 70,
     "temp": 90,
     "guess": 100,
+    "minerals": 120,
     "system": 140,
     "opened": 90,
 }
@@ -241,13 +243,22 @@ def signal_colors(column: str, count: int | None) -> tuple[str, str] | None:
         return COLORS["bad"], COLORS["row"]
     if column == "pml":
         return COLORS["ink"], COLORS["paper"]
+    if column == "minerals":
+        return COLORS["accent"], COLORS["row"]
     return None
 
 
 def _type_of(body: Body) -> str:
     if body.is_star or body.star_type:
         return f"{body.star_type or '?'} Star"
-    return body.planet_class or "—"
+    if body.planet_class:
+        return body.planet_class
+    name = (body.name or "").lower()
+    if " ring" in name or name.endswith(" ring"):
+        return "Ring"
+    if is_belt_body(body.name):
+        return "Belt Cluster"
+    return "—"
 
 
 def _ring_icon(master: tk.Misc) -> tk.PhotoImage:
@@ -1005,6 +1016,7 @@ class MainWindow:
                 b.bio_signals,
                 b.geo_signals,
                 b.mining_locations,
+                tuple(sorted((k, int(v)) for k, v in (b.hotspots or {}).items())),
                 b.dss_scanned,
                 b.was_discovered,
                 b.has_rings,
@@ -1242,6 +1254,7 @@ class MainWindow:
         bio_text = "—" if body.bio_signals is None and not body.signals_known else str(body.bio_signals or 0)
         geo = "—" if body.geo_signals is None and not body.signals_known else str(body.geo_signals or 0)
         pml = "—" if body.mining_locations is None else str(body.mining_locations)
+        minerals = format_hotspots(body.hotspots)
         guess, guess_color = _forecast(body, state)
         dss = "✔" if body.dss_scanned else ("?" if body.dss_remote else "—")
         first = "✔" if not body.was_discovered and not body.remote else "—"
@@ -1255,6 +1268,7 @@ class MainWindow:
             "guess": guess,
             "geo": geo,
             "pml": pml,
+            "minerals": minerals,
             "dss": dss,
             "value": _value_of(body, state.odyssey),
             "first": first,
@@ -1266,8 +1280,17 @@ class MainWindow:
             "bio": body.bio_signals,
             "geo": body.geo_signals,
             "pml": body.mining_locations,
+            "minerals": sum(int(v or 0) for v in (body.hotspots or {}).values()) or None,
         }
         tip = _forecast_tip(body, state)
+        minerals_tip = None
+        if body.hotspots:
+            minerals_tip = "Hotspot в кольце:\n" + "\n".join(
+                f"• {name}" + (f" ×{count}" if int(count or 0) > 1 else "")
+                for name, count in sorted(
+                    body.hotspots.items(), key=lambda item: (-int(item[1] or 0), item[0].lower())
+                )
+            )
         dss_tip = None
         if not body.is_star and (body.radius or 0) > 0 and not body.dss_scanned:
             dss_tip = f"DSS пробы примерно с высоты {format_dss_range(body.radius)}"
@@ -1285,6 +1308,8 @@ class MainWindow:
                 styles[key] = paint if paint else (COLORS["text"], COLORS["row"])
             if key in ("bio", "guess"):
                 tips[key] = tip
+            elif key == "minerals":
+                tips[key] = minerals_tip
             elif key == "dss":
                 tips[key] = dss_tip
             else:
@@ -1298,6 +1323,7 @@ class MainWindow:
             values["guess"],
             values["geo"],
             values["pml"],
+            values["minerals"],
             values["dss"],
             values["value"],
             values["first"],
@@ -1305,6 +1331,7 @@ class MainWindow:
             values["src"],
             values["belt"],
             tip,
+            minerals_tip,
             dss_tip,
             guess_color,
         )

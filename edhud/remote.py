@@ -703,6 +703,8 @@ def _apply_eddn_body(system: System, message: dict) -> bool:
         changed = True
 
     if event in ("FSSBodySignals", "SAASignalsFound"):
+        from .model import _hotspot_name
+
         for signal in message.get("Signals") or []:
             kind = (signal.get("Type") or "").lower()
             count = int(signal.get("Count") or 0)
@@ -713,6 +715,12 @@ def _apply_eddn_body(system: System, message: dict) -> bool:
             elif "geological" in kind and body.geo_signals is None:
                 body.geo_signals = count
                 changed = True
+            else:
+                name = _hotspot_name(signal) if isinstance(signal, dict) else None
+                if name and name not in body.hotspots:
+                    body.hotspots[name] = count
+                    body.has_rings = True
+                    changed = True
         genuses = message.get("Genuses") or []
         if genuses and not body.genuses:
             body.genuses = {

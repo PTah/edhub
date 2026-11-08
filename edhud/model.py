@@ -49,8 +49,21 @@ _MINEABLE_RING = {
 }
 
 
+def _hotspot_name(sig: dict) -> str | None:
+    """Имя минерала hotspot в кольце; None для био/гео/PML и прочих $SAA_…"""
+    kind = str(sig.get("Type") or "")
+    local = str(sig.get("Type_Localised") or "")
+    lower = kind.lower()
+    if kind.startswith("$") or "saa_signaltype" in lower or "planetarymining" in lower:
+        return None
+    if "mining location" in local.lower():
+        return None
+    label = (local or kind).strip()
+    return label or None
+
+
 def _apply_signal_counts(body: Body, signals: list, merge_bio: bool = False) -> None:
-    """Био, гео и Planetary Mining Location из FSSBodySignals / SAASignalsFound."""
+    """Био, гео, PML и hotspot-минералы колец из FSSBodySignals / SAASignalsFound."""
     for sig in signals:
         if not isinstance(sig, dict):
             continue
@@ -66,6 +79,22 @@ def _apply_signal_counts(body: Body, signals: list, merge_bio: bool = False) -> 
             body.geo_signals = count
         elif "planetarymining" in kind or "mining location" in local:
             body.mining_locations = count
+        else:
+            name = _hotspot_name(sig)
+            if name:
+                body.hotspots[name] = max(int(body.hotspots.get(name) or 0), count)
+                body.has_rings = True
+
+
+def format_hotspots(hotspots: dict[str, int] | None) -> str:
+    """«Alexandrite, Musgravite ×2» для колонки Минералы."""
+    if not hotspots:
+        return "—"
+    parts: list[str] = []
+    for name, count in sorted(hotspots.items(), key=lambda item: (-int(item[1] or 0), item[0].lower())):
+        n = int(count or 0)
+        parts.append(name if n <= 1 else f"{name} ×{n}")
+    return ", ".join(parts) if parts else "—"
 
 
 def is_belt_body(name: str | None) -> bool:
@@ -346,6 +375,8 @@ class Body:
     bio_signals: int | None = None
     geo_signals: int | None = None
     mining_locations: int | None = None  # Planetary Mining Location, штук на теле
+    # hotspot в кольцах после DSS: {"Alexandrite": 1, "Musgravite": 2}
+    hotspots: dict[str, int] = field(default_factory=dict)
     genuses: dict[str, int] = field(default_factory=dict)
     dss_scanned: bool = False
     dss_remote: bool = False
@@ -455,6 +486,12 @@ class Body:
             self.geo_signals = other.geo_signals
         if other.mining_locations is not None and self.mining_locations is None:
             self.mining_locations = other.mining_locations
+        if other.hotspots:
+            merged_hs = dict(self.hotspots)
+            for name, count in other.hotspots.items():
+                merged_hs[name] = max(int(merged_hs.get(name) or 0), int(count or 0))
+            self.hotspots = merged_hs
+            self.has_rings = True
         if other.genuses:
             merged = dict(self.genuses)
             merged.update(other.genuses)
