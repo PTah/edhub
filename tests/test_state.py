@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from edhud import demo, hudmodel, journal  # noqa: E402
 from edhud.config import Config  # noqa: E402
-from edhud.model import Body, GameState, System, surface_distance  # noqa: E402
+from edhud.model import Body, GameState, Organic, System, surface_distance  # noqa: E402
 from edhud.route import Route  # noqa: E402
 from edhud.store import SystemStore  # noqa: E402
 
@@ -113,6 +113,66 @@ class JournalPipelineTests(unittest.TestCase):
             assert body is not None
             self.assertEqual(body.bio_signals, 2)
             self.assertEqual(body.atmosphere_type, "Neon")
+
+    def test_cache_merge_restores_sample_pos_after_journal_replay(self):
+        """После рестарта журнал поднимает пробы без координат — кэш должен их вернуть."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SystemStore(Path(tmp))
+            live = GameState()
+            live.system.address = 42
+            live.system.name = "CacheSys"
+            body = Body(body_id=6, name="CacheSys 5", bio_signals=2, signals_local=True)
+            organic = Organic(
+                key="$Codex_Ent_Stratum_07_Name;",
+                genus="$Codex_Ent_Stratum_Genus_Name;",
+                species="$Codex_Ent_Stratum_07_Name;",
+                genus_local="Stratum",
+                samples=1,
+                sample_pos=[(-9.4, 93.58)],
+            )
+            body.organisms[organic.key] = organic
+            live.system.bodies[6] = body
+            self.assertTrue(store.save(live.system))
+
+            # как после replay: ScanOrganic без Status → samples есть, координат нет
+            restarted = GameState()
+            restarted.system.address = 42
+            restarted.system.name = "CacheSys"
+            restarted.apply(
+                {
+                    "event": "ScanOrganic",
+                    "ScanType": "Log",
+                    "Genus": "$Codex_Ent_Stratum_Genus_Name;",
+                    "Genus_Localised": "Stratum",
+                    "Species": "$Codex_Ent_Stratum_07_Name;",
+                    "Species_Localised": "Stratum Tectonicas",
+                    "SystemAddress": 42,
+                    "Body": 6,
+                }
+            )
+            replay_body = restarted.system.bodies[6]
+            self.assertEqual(replay_body.organisms[organic.key].samples, 1)
+            self.assertEqual(replay_body.organisms[organic.key].sample_pos, [])
+
+            cached = store.load(42, "CacheSys")
+            assert cached is not None
+            restarted.system.merge_from(cached)
+            restored = restarted.system.bodies[6].organisms[organic.key]
+            self.assertEqual(restored.sample_pos, [(-9.4, 93.58)])
+            restarted.apply_status(
+                {
+                    "Latitude": -9.39,
+                    "Longitude": 93.59,
+                    "Heading": 10.0,
+                    "PlanetRadius": 6_000_000.0,
+                    "BodyID": 6,
+                    "Flags": 1 << 19,
+                }
+            )
+            radar = restarted.radar_view()
+            self.assertIsNotNone(radar)
+            assert radar is not None
+            self.assertTrue(any(blip.kind == "sample" for blip in radar.blips))
 
     def test_locked_route_is_not_overwritten(self):
         state = GameState()

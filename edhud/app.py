@@ -172,8 +172,10 @@ class App:
         threading.Thread(target=work, name="edhud-nebulae", daemon=True).start()
 
     def _on_journal_catchup(self) -> None:
-        """После replay журнала включаем голосовые алерты на новые события."""
+        """После replay журнала: голос + подмешать кэш (координаты проб со прошлого запуска)."""
         self.alerts.arm()
+        self._cached_for = None
+        self.sync_system()
 
     def _on_alert(self, alert: Alert) -> None:
         if alert.overlay:
@@ -183,6 +185,11 @@ class App:
 
     def _on_event(self, event: dict) -> None:
         self.alerts.handle(event, self.state)
+        if self.state.persist_needed:
+            self.state.persist_needed = False
+            if self.state.system.address and self.state.system.bodies:
+                self.store.save(self.state.system)
+                self._last_save = time.time()
         if event.get("event") != "FSDJump":
             return
         if not self.cfg.copy_next_system or self.overlay is None:
@@ -342,14 +349,8 @@ class App:
             return
         cached = self.store.load(address, self.state.system.name)
         if cached is not None:
-            for body_id, body in cached.bodies.items():
-                self.state.system.bodies.setdefault(body_id, body)
-            if cached.remote_sources:
-                self.state.system.remote_sources = list(cached.remote_sources)
-            self.state.system.remote_scan_value = self.state.system.remote_scan_value or cached.remote_scan_value
-            self.state.system.remote_mapped_value = (
-                self.state.system.remote_mapped_value or cached.remote_mapped_value
-            )
+            # merge, не setdefault: журнал уже создал тело без sample_pos
+            self.state.system.merge_from(cached)
         self._cached_for = address
         self._eddn_filter.update(
             names={self.state.system.name} if self.state.system.name else set(),

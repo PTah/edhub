@@ -400,6 +400,104 @@ class Body:
             body.organisms[org.key] = org
         return body
 
+    def merge_from(self, other: "Body") -> None:
+        """Подмешать кэш: координаты проб и bio_spots переживают перезапуск."""
+        if not self.name and other.name:
+            self.name = other.name
+        for attr in (
+            "planet_class",
+            "star_type",
+            "atmosphere",
+            "atmosphere_type_hint",
+            "volcanism",
+            "terraform_state",
+            "discovered_by",
+            "mapped_by",
+            "source",
+        ):
+            if not getattr(self, attr) and getattr(other, attr):
+                setattr(self, attr, getattr(other, attr))
+        for attr in ("radius", "mass_em", "stellar_mass", "distance_ls", "surface_temp", "surface_gravity", "surface_pressure"):
+            if not getattr(self, attr) and getattr(other, attr):
+                setattr(self, attr, getattr(other, attr))
+        if not self.materials and other.materials:
+            self.materials = dict(other.materials)
+        if not self.atmosphere_composition and other.atmosphere_composition:
+            self.atmosphere_composition = dict(other.atmosphere_composition)
+        if not self.parent_ids and other.parent_ids:
+            self.parent_ids = list(other.parent_ids)
+        if other.landable:
+            self.landable = True
+        if other.has_rings:
+            self.has_rings = True
+        if other.dss_scanned:
+            self.dss_scanned = True
+        if other.signals_local:
+            self.signals_local = True
+        if other.signals_known:
+            self.signals_known = True
+        if other.bio_signals is not None:
+            self.bio_signals = max(int(self.bio_signals or 0), int(other.bio_signals or 0)) or other.bio_signals
+        if other.geo_signals is not None and self.geo_signals is None:
+            self.geo_signals = other.geo_signals
+        if other.mining_locations is not None and self.mining_locations is None:
+            self.mining_locations = other.mining_locations
+        if other.genuses:
+            merged = dict(self.genuses)
+            merged.update(other.genuses)
+            self.genuses = merged
+        for spot in other.bio_spots or []:
+            self._merge_bio_spot(spot)
+        for key, corg in other.organisms.items():
+            org = self.organisms.get(key)
+            if org is None:
+                self.organisms[key] = Organic.from_persist(corg.to_persist())
+                continue
+            org.samples = max(int(org.samples or 0), int(corg.samples or 0))
+            if corg.analysed:
+                org.analysed = True
+            for field_name in (
+                "genus",
+                "species",
+                "variant",
+                "genus_local",
+                "species_local",
+                "variant_local",
+            ):
+                if not getattr(org, field_name) and getattr(corg, field_name):
+                    setattr(org, field_name, getattr(corg, field_name))
+            if corg.was_logged is not None and org.was_logged is None:
+                org.was_logged = corg.was_logged
+            for pos in corg.sample_pos:
+                self._merge_sample_pos(org, float(pos[0]), float(pos[1]))
+            if corg.last_ts > org.last_ts:
+                org.last_ts = corg.last_ts
+
+    def _merge_bio_spot(self, spot: dict) -> None:
+        try:
+            lat, lon = float(spot["lat"]), float(spot["lon"])
+        except (KeyError, TypeError, ValueError):
+            return
+        radius = self.radius or 0.0
+        for existing in self.bio_spots:
+            if surface_distance(lat, lon, float(existing["lat"]), float(existing["lon"]), radius) < 30:
+                return
+        self.bio_spots.append(
+            {
+                "lat": lat,
+                "lon": lon,
+                "genus": spot.get("genus"),
+                "name": spot.get("name") or "био",
+            }
+        )
+
+    @staticmethod
+    def _merge_sample_pos(organic: Organic, lat: float, lon: float) -> None:
+        for plat, plon in organic.sample_pos:
+            if abs(plat - lat) < 1e-5 and abs(plon - lon) < 1e-5:
+                return
+        organic.sample_pos.append((lat, lon))
+
 
 @dataclass
 class Carrier:
@@ -503,6 +601,29 @@ class System:
             body = Body.from_persist(raw)
             system.bodies[body.body_id] = body
         return system
+
+    def merge_from(self, other: "System") -> None:
+        """Кэш на диск → живое состояние. Не затирает уже прочитанный журнал."""
+        if not self.name and other.name:
+            self.name = other.name
+        if self.star_pos is None and other.star_pos is not None:
+            self.star_pos = other.star_pos
+        if self.body_count is None and other.body_count is not None:
+            self.body_count = other.body_count
+        if other.remote_sources:
+            seen = set(self.remote_sources)
+            for src in other.remote_sources:
+                if src not in seen:
+                    self.remote_sources.append(src)
+                    seen.add(src)
+        self.remote_scan_value = self.remote_scan_value or other.remote_scan_value
+        self.remote_mapped_value = self.remote_mapped_value or other.remote_mapped_value
+        for body_id, cached in other.bodies.items():
+            live = self.bodies.get(body_id)
+            if live is None:
+                self.bodies[body_id] = Body.from_persist(cached.to_persist())
+            else:
+                live.merge_from(cached)
 
 
 @dataclass
@@ -729,6 +850,8 @@ class GameState:
     carrier_pos_pending: bool = False
     # корабль в атмосфере / у поверхности — верхний HUD приглушаем
     in_atmosphere: bool = False
+    # сразу сохранить систему (после пробы био с координатами)
+    persist_needed: bool = False
     _jump_tab_latched: bool = False
     _was_in_supercruise: bool = False
     fsd_target: str | None = None
@@ -1257,7 +1380,11 @@ class GameState:
         if "WasLogged" in e:
             organic.was_logged = bool(e.get("WasLogged"))
         scan_type = (e.get("ScanType") or "").lower()
-        lat, lon = self.status.lat, self.status.lon
+        # координаты: Status в момент скана; в событии их нет — при replay берём из кэша
+        lat = _f(e.get("Latitude"))
+        lon = _f(e.get("Longitude"))
+        if lat is None or lon is None:
+            lat, lon = self.status.lat, self.status.lon
         if scan_type == "log":
             organic.samples = max(organic.samples, 1)
             self._alert(f"Биология: {organic.genus_en} — первая проба")
@@ -1270,7 +1397,9 @@ class GameState:
             self.session_organic_estimate += organic.payout
             self._alert(f"Биология: {organic.genus_en} — анализ сдан")
         if lat is not None and lon is not None and scan_type in ("log", "sample"):
-            organic.sample_pos.append((float(lat), float(lon)))
+            Body._merge_sample_pos(organic, float(lat), float(lon))
+            self._add_bio_spot(body, float(lat), float(lon), genus, organic.genus_en or "био")
+            self.persist_needed = True
         organic.last_ts = time.time()
 
     def _on_codexentry(self, e: dict) -> None:
