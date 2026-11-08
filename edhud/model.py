@@ -108,6 +108,25 @@ def is_belt_body(name: str | None) -> bool:
     return "belt cluster" in (name or "").lower()
 
 
+def is_ring_body(name: str | None) -> bool:
+    """Кольцо планеты по имени («… B 4 B Ring»)."""
+    return (name or "").strip().lower().endswith(" ring")
+
+
+def ring_parent_name(name: str | None) -> str | None:
+    """Имя планеты-носителя из имени кольца; иначе None."""
+    text = (name or "").strip()
+    if not is_ring_body(text):
+        return None
+    parts = text.rsplit(None, 2)
+    # «Smojai … B 4 B Ring» → «Smojai … B 4»
+    if len(parts) >= 3 and parts[-1].lower() == "ring" and len(parts[-2]) == 1:
+        parent = " ".join(parts[:-2]).strip()
+        return parent or None
+    parent = text[: -len(" ring")].strip()
+    return parent or None
+
+
 def _mineable_belt(rings: list, name: str | None = None) -> bool:
     """Кольцо или пояс астероидов, где есть добыча."""
     if is_belt_body(name):
@@ -1688,19 +1707,58 @@ class GameState:
             return True
         return int(dest) != int(here)
 
-    def dss_target_body(self) -> Body | None:
-        """Тело, к которому летим / у которого стоим — кандидат на DSS."""
-        st = self.status
-        body = self.system.body(st.destination_body) or self.system.body(st.body_id)
-        if body is not None:
-            return body
-        dest = (st.destination_name or "").strip().lower()
-        if not dest:
+    def _body_by_destination_name(self, dest: str) -> Body | None:
+        """Ищет тело по имени Destination (полное или короткий хвост)."""
+        key = dest.strip().lower()
+        if not key:
             return None
         for candidate in self.system.bodies.values():
             name = (candidate.name or "").lower()
-            if dest == name or name.endswith(" " + dest) or name.endswith(dest):
+            if key == name or name.endswith(" " + key) or name.endswith(key):
                 return candidate
+        return None
+
+    def dss_target_body(self) -> Body | None:
+        """Тело, к которому летим / у которого стоим — кандидат на DSS.
+
+        Для колец Destination часто «… B 4 B Ring» с BodyID кольца, которого
+        ещё нет в journal до SAAScanComplete — тогда берём планету-носителя.
+        """
+        st = self.status
+        body = self.system.body(st.destination_body) or self.system.body(st.body_id)
+        if body is not None:
+            if is_ring_body(body.name):
+                parent = self._planet_for_ring_body(body)
+                if parent is not None:
+                    return parent
+            return body
+        dest = (st.destination_name or "").strip()
+        if not dest:
+            return None
+        found = self._body_by_destination_name(dest)
+        if found is not None:
+            if is_ring_body(found.name):
+                return self._planet_for_ring_body(found) or found
+            return found
+        parent_name = ring_parent_name(dest)
+        if parent_name:
+            return self._body_by_destination_name(parent_name)
+        return None
+
+    def _planet_for_ring_body(self, body: Body) -> Body | None:
+        """Планета, которой принадлежит кольцо (по Parents или имени)."""
+        for parent_id in body.parent_ids or []:
+            parent = self.system.body(parent_id)
+            if (
+                parent is not None
+                and not parent.is_star
+                and not is_ring_body(parent.name)
+                and not is_belt_body(parent.name)
+            ):
+                return parent
+        parent_name = ring_parent_name(body.name)
+        if parent_name:
+            return self._body_by_destination_name(parent_name)
         return None
 
     def dss_in_probe_range(self) -> bool:
@@ -1709,24 +1767,24 @@ class GameState:
         Важно: типичный DSS в суперкруизе (как у Smojai NP-A c8 A 1) проходит
         целиком без HasLatLong/Altitude в Status.json — к моменту Too Fast на
         прицеле высота в API ещё не появляется. Тогда ориентир — открытый
-        интерфейс DSS (GuiFocus=SAA) на неразмеченном теле.
+        интерфейс DSS (GuiFocus=SAA) на неразмеченном теле. У газовых гигантов
+        с кольцами Destination часто указывает на кольцо до Scan кольца.
         """
         body = self.dss_target_body()
         if body is None or body.is_star or body.dss_scanned:
             return False
         if not self.status.supercruise:
             return False
+        # Открыт DSS (SAA): надёжнее высоты. Altitude иногда есть, но ещё
+        # выше формулы, хотя на HUD уже Too Fast — не глушим голос.
+        if self.status.gui_focus == GUI_FOCUS_SAA:
+            return True
         radius = self.status.planet_radius or body.radius or 0.0
         limit = dss_probe_altitude_m(radius)
         alt = self.status.altitude
-        # Высота из Status — если игра её уже отдала (часто уже после Too Fast).
         if alt is not None:
             return float(alt) <= limit
         if self.status.has_lat_long:
-            return True
-        # SC + открыт DSS (SAA) на цель: ближайший доступный сигнал к Too Fast.
-        # Out of Range тоже открывает SAA — лучше раннее «Тормози», чем тишина.
-        if self.status.gui_focus == GUI_FOCUS_SAA:
             return True
         return False
 

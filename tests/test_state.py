@@ -2017,6 +2017,67 @@ class SampleGuideTests(unittest.TestCase):
         )
         self.assertFalse(state.dss_in_probe_range())
 
+    def test_dss_target_resolves_ring_to_planet_before_ring_scan(self):
+        """Smojai ME-A c1-1 B 4: Destination = кольцо (BodyID 53), Scan кольца ещё нет."""
+        from edhud.alerts import AlertEngine
+
+        state = GameState()
+        state.system.address = 360542704906
+        state.system.bodies[51] = Body(
+            body_id=51,
+            name="Smojai ME-A c1-1 B 4",
+            planet_class="Sudarsky class I gas giant",
+            radius=32_204_760.0,
+            dss_scanned=False,
+            has_rings=True,
+        )
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
+                "GuiFocus": 10,
+                "Destination": {
+                    "System": 360542704906,
+                    "Body": 53,
+                    "Name": "Smojai ME-A c1-1 B 4 B Ring",
+                },
+            }
+        )
+        target = state.dss_target_body()
+        assert target is not None
+        self.assertEqual(target.body_id, 51)
+        self.assertTrue(state.dss_in_probe_range())
+
+        engine = AlertEngine()
+        engine.arm()
+        alerts = engine.handle_status(state)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("Тормози", alerts[0].text)
+        self.assertIn("4", alerts[0].overlay or "")
+
+    def test_dss_in_probe_range_saa_beats_high_altitude(self):
+        """SAA открыт и Altitude ещё выше формулы — всё равно зона (Too Fast на HUD)."""
+        state = GameState()
+        state.system.address = 1
+        state.system.bodies[51] = Body(
+            body_id=51,
+            name="Smojai ME-A c1-1 B 4",
+            planet_class="Sudarsky class I gas giant",
+            radius=32_204_760.0,
+        )
+        state.apply_status(
+            {
+                "Flags": 1 << 4,
+                "GuiFocus": 10,
+                "Altitude": 900_000_000.0,
+                "Destination": {
+                    "System": 1,
+                    "Body": 51,
+                    "Name": "Smojai ME-A c1-1 B 4",
+                },
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
+
 
 class AppearanceTests(unittest.TestCase):
     def test_light_palette_and_settings_tab(self):

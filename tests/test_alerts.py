@@ -12,7 +12,16 @@ class AlertEngineTests(unittest.TestCase):
         self.fired: list = []
         self.engine = AlertEngine(on_alert=lambda a: self.fired.append(a))
         self.engine.configure(
-            type("Cfg", (), {"voice_enabled": True, "voice_bio": True, "voice_first_discovery": True})()
+            type(
+                "Cfg",
+                (),
+                {
+                    "voice_enabled": True,
+                    "voice_bio": True,
+                    "voice_first_discovery": True,
+                    "voice_dss_range": True,
+                },
+            )()
         )
         self.state = GameState()
         self.state.system.address = 12345
