@@ -186,7 +186,7 @@ class AlertEngineTests(unittest.TestCase):
         alerts = self.engine.handle_status(self.state)
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "dss_range")
-        self.assertIn("Тормози", alerts[0].text)
+        self.assertEqual(alerts[0].text, "Тормози, расстояние достаточное для DSS")
         self.assertEqual(self.engine.handle_status(self.state), [])
 
     def test_dss_range_voice_on_saa_without_altitude(self) -> None:
@@ -213,8 +213,7 @@ class AlertEngineTests(unittest.TestCase):
         alerts = self.engine.handle_status(self.state)
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "dss_range")
-        self.assertIn("Тормози", alerts[0].text)
-        self.assertIn("Too Fast", alerts[0].text)
+        self.assertEqual(alerts[0].text, "Тормози, расстояние достаточное для DSS")
 
 
 if __name__ == "__main__":

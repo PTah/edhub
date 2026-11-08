@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import bio
-from .model import GUI_FOCUS_SAA, GameState, format_dss_range
+from .model import GameState, format_dss_range
 
 
 @dataclass
@@ -143,11 +143,5 @@ class AlertEngine:
         radius = state.status.planet_radius or body.radius
         rng = format_dss_range(radius)
         short = (body.name or "тело").split()[-1]
-        if state.status.altitude is None and state.status.gui_focus == GUI_FOCUS_SAA:
-            text = (
-                f"Тормози — открыт DSS по {short}. "
-                f"Если на прицеле Too Fast — можно стрелять. Дальность около {rng}."
-            )
-        else:
-            text = f"Тормози, расстояние достаточное для скана. Дальность DSS около {rng}."
+        text = "Тормози, расстояние достаточное для DSS"
         return Alert(kind="dss_range", text=text, overlay=f"DSS готов · {short} · {rng}")
