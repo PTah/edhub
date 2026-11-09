@@ -2,6 +2,10 @@
 """Тесты конвейера: журнал -> состояние -> HUD, кэш систем, залоченный маршрут."""
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("EDHUD_LANG", "ru")
+
 import sys
 import tempfile
 import time
@@ -1566,11 +1570,17 @@ class BodyColorTests(unittest.TestCase):
             self.assertEqual(zeros[columns["bio"]], "#e8e8e8")
             self.assertEqual(zeros[columns["geo"]], "#e8e8e8")
             self.assertEqual(zeros[columns["pml"]], "#e8e8e8")
-            # хедер и строка одной ширины — колонки не разъезжаются
+            # хедер и строка одной ширины и на одной вертикали — колонки не разъезжаются
+            self.assertEqual(window._bodies_header.place_info().get("anchor"), "nw")
+            self.assertEqual(window._route_header.place_info().get("anchor"), "nw")
+            window.win.deiconify()
+            window.win.update()
             for col in range(len(BODY_COLUMNS)):
                 head = window._bodies_header.grid_slaves(row=0, column=col)[0]
                 body = window._bodies_inner.grid_slaves(row=0, column=col)[0]
                 self.assertEqual(int(head.cget("width")), int(body.cget("width")))
+                self.assertEqual(head.winfo_x(), body.winfo_x())
+                self.assertEqual(head.winfo_rootx(), body.winfo_rootx())
             window.destroy()
         finally:
             root.destroy()

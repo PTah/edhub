@@ -13,6 +13,8 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
+from .i18n import t
+
 from . import codex
 from .mining import format_hotspots, format_hotspots_tip  # noqa: F401 — re-export
 from .route import Route
@@ -197,8 +199,8 @@ def format_dss_range(radius_m: float | None) -> str:
     if alt >= 0.05 * LS_M:
         return f"≈{alt / LS_M:.2f} ls"
     if alt >= 1000:
-        return f"≈{alt / 1000:.0f} км"
-    return f"≈{alt:.0f} м"
+        return f"≈{alt / 1000:.0f} {t('unit.km')}"
+    return f"≈{alt:.0f} {t('unit.m')}"
 
 
 @dataclass(frozen=True)
@@ -322,11 +324,11 @@ class Organic:
     @property
     def scans_text(self) -> str:
         if self.analysed:
-            return "готово"
+            return t("hud.scans_done")
         done = self.samples_done
         left = self.samples_left
         if left:
-            return f"{done}/3 · осталось {left}"
+            return t("hud.scans_left", done=done, left=left)
         return f"{done}/3"
 
     def to_persist(self) -> dict:
@@ -1630,15 +1632,15 @@ class GameState:
             lat, lon = self.status.lat, self.status.lon
         if scan_type == "log":
             organic.samples = max(organic.samples, 1)
-            self._alert(f"Биология: {organic.genus_en} — первая проба")
+            self._alert(t("hud.alert_first", genus=organic.genus_en))
         elif scan_type == "sample":
             organic.samples = max(organic.samples, 2)
-            self._alert(f"Биология: {organic.genus_en} — вторая проба")
+            self._alert(t("hud.alert_second", genus=organic.genus_en))
         elif scan_type in ("analyse", "analyze"):
             organic.samples = 3
             organic.analysed = True
             self.session_organic_estimate += organic.payout
-            self._alert(f"Биология: {organic.genus_en} — анализ сдан")
+            self._alert(t("hud.alert_done", genus=organic.genus_en))
         if lat is not None and lon is not None and scan_type in ("log", "sample"):
             Body._merge_sample_pos(organic, float(lat), float(lon))
             self._add_bio_spot(body, float(lat), float(lon), genus, organic.genus_en or "био")
@@ -1964,7 +1966,7 @@ class GameState:
             guides.append(
                 SampleGuide(
                     kind="sample",
-                    title=f"проба {index}",
+                    title=t("hud.sample_n", n=index),
                     distance_m=dist,
                     need_m=need,
                     bearing=bearing,
@@ -1980,7 +1982,7 @@ class GameState:
             guides.append(
                 SampleGuide(
                     kind="away",
-                    title="дальше",
+                    title=t("hud.further"),
                     distance_m=max(0.0, need - closest_gap[0]),
                     need_m=need,
                     bearing=away,
@@ -1994,7 +1996,7 @@ class GameState:
                 guides.append(
                     SampleGuide(
                         kind="spot",
-                        title=str(spot.get("name") or "образец"),
+                        title=str(spot.get("name") or t("hud.specimen")),
                         distance_m=dist,
                         need_m=need,
                         bearing=bearing,
@@ -2087,7 +2089,7 @@ class GameState:
                 blips.append(
                     RadarBlip(
                         kind="sample",
-                        label=f"проба {index}",
+                        label=t("hud.sample_n", n=index),
                         distance_m=dist,
                         bearing=bearing,
                         turn=turn_deg(bearing, heading),
@@ -2102,7 +2104,7 @@ class GameState:
                 blips.append(
                     RadarBlip(
                         kind="away",
-                        label="дальше",
+                        label=t("hud.further"),
                         distance_m=max(0.0, need - closest_gap[0]),
                         bearing=away,
                         turn=turn_deg(away, heading),
@@ -2113,7 +2115,7 @@ class GameState:
                 blips.append(
                     RadarBlip(
                         kind="spot",
-                        label=str(spot.get("name") or "образец"),
+                        label=str(spot.get("name") or t("hud.specimen")),
                         distance_m=dist,
                         bearing=bearing,
                         turn=turn_deg(bearing, heading),
@@ -2137,7 +2139,7 @@ class GameState:
                 blips.append(
                     RadarBlip(
                         kind="other",
-                        label=str(spot.get("name") or "близко"),
+                        label=str(spot.get("name") or t("hud.near")),
                         distance_m=dist,
                         bearing=bearing,
                         turn=turn_deg(bearing, heading),
@@ -2148,7 +2150,7 @@ class GameState:
             span = max((b.distance_m for b in blips if b.kind != "away"), default=float(need))
             range_m = min(5000.0, max(float(need) * 1.35, span * 1.15, 250.0))
             return RadarView(
-                title=f"{organic.genus_en} · {organic.scans_text} · интервал {need} м",
+                title=t("hud.radar", genus=organic.genus_en, scans=organic.scans_text, need=need),
                 range_m=range_m,
                 need_m=need,
                 heading=heading,
@@ -2164,7 +2166,7 @@ class GameState:
             blips.append(
                 RadarBlip(
                     kind="spot",
-                    label=str(spot.get("name") or "био"),
+                    label=str(spot.get("name") or t("hud.bio_short")),
                     distance_m=dist,
                     bearing=bearing,
                     turn=turn_deg(bearing, heading),
@@ -2178,7 +2180,7 @@ class GameState:
             if organic is not None and organic.samples_done > 0:
                 need = codex.sample_range(organic.genus)
                 return RadarView(
-                    title=f"{organic.genus_en} · {organic.scans_text} · нет координат пробы · ≥{need} м",
+                    title=t("hud.radar_no_pos", genus=organic.genus_en, scans=organic.scans_text, need=need),
                     range_m=float(max(need, 300)),
                     need_m=need,
                     heading=heading,
@@ -2186,9 +2188,9 @@ class GameState:
                     blips=(),
                 )
             names = [codex.display_name(key) for key in list(body.genuses)[:2]]
-            hint = ", ".join(names) if names else "био"
+            hint = ", ".join(names) if names else t("hud.bio_short")
             return RadarView(
-                title=f"{hint} · нет отметок — композит/кодекс",
+                title=t("hud.radar_empty", hint=hint),
                 range_m=500.0,
                 need_m=0,
                 heading=heading,
@@ -2198,7 +2200,7 @@ class GameState:
         span = blips[-1].distance_m if blips else 300.0
         range_m = min(5000.0, max(span * 1.2, 300.0))
         return RadarView(
-            title="ближайшие био",
+            title=t("hud.radar_near"),
             range_m=range_m,
             need_m=0,
             heading=heading,

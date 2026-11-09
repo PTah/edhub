@@ -1,4 +1,8 @@
-"""Голосовые оповещения через Windows SAPI (русский голос, без внешних пакетов)."""
+"""Голосовые оповещения через Windows SAPI (без внешних пакетов).
+
+Голос выбирается по языку интерфейса: русский SAPI на русской Windows,
+английский — во всех остальных случаях.
+"""
 from __future__ import annotations
 
 import queue
@@ -7,33 +11,47 @@ import sys
 import threading
 from typing import Callable
 
+from .i18n import language
+
 
 def _escape_ps(text: str) -> str:
     return text.replace("'", "''")
 
 
-def _speak_powershell(text: str, rate: int = 0) -> None:
-    """Озвучка через SAPI.SpVoice; предпочитает голос с 'ru' в имени/Culture."""
-    if sys.platform != "win32":
-        return
+def voice_script(text: str, rate: int = 0, lang: str | None = None) -> str:
+    """Скрипт SAPI. Язык — ru или en; без -ExecutionPolicy Bypass и без .ps1 на диске."""
     safe = _escape_ps(text)
     rate = max(-10, min(10, int(rate)))
-    script = f"""
+    lang = "ru" if (lang or language()) == "ru" else "en"
+    if lang == "ru":
+        name_match = "ru|Russ|Елена|Ирина|Pavel|Mikhail|Dmitri|Katya"
+        lang_match = "0419|419"
+    else:
+        name_match = "English|David|Zira|Mark|Hazel|George|Susan|Hazel"
+        lang_match = "0409|0809|0C09|1009|409"
+    return f"""
 $ErrorActionPreference = 'SilentlyContinue'
 $v = New-Object -ComObject SAPI.SpVoice
 $voices = @($v.GetVoices())
-$ru = $voices | Where-Object {{
-  $_.GetDescription() -match 'ru|Russ|Елена|Ирина|Pavel|Mikhail|Dmitri|Katya'
+$pick = $voices | Where-Object {{
+  $_.GetDescription() -match '{name_match}'
 }} | Select-Object -First 1
-if (-not $ru) {{
-  $ru = $voices | Where-Object {{
-    try {{ $_.GetAttribute('Language') -match '0419|419|ru' }} catch {{ $false }}
+if (-not $pick) {{
+  $pick = $voices | Where-Object {{
+    try {{ $_.GetAttribute('Language') -match '{lang_match}' }} catch {{ $false }}
   }} | Select-Object -First 1
 }}
-if ($ru) {{ $v.Voice = $ru }}
+if ($pick) {{ $v.Voice = $pick }}
 $v.Rate = {rate}
 $v.Speak('{safe}')
 """
+
+
+def _speak_powershell(text: str, rate: int = 0, lang: str | None = None) -> None:
+    """Озвучка через SAPI.SpVoice выбранного языка."""
+    if sys.platform != "win32":
+        return
+    script = voice_script(text, rate, lang)
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -47,8 +65,14 @@ $v.Speak('{safe}')
 class Voice:
     """Очередь фраз в фоновом потоке (не блокирует UI/журнал)."""
 
-    def __init__(self, rate: int = 0, on_error: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        rate: int = 0,
+        on_error: Callable[[str], None] | None = None,
+        lang: str | None = None,
+    ) -> None:
         self.rate = rate
+        self.lang = lang
         self.on_error = on_error
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._thread = threading.Thread(target=self._worker, name="edhud-voice", daemon=True)
@@ -82,7 +106,7 @@ class Voice:
             if item is None:
                 return
             try:
-                _speak_powershell(item, self.rate)
+                _speak_powershell(item, self.rate, self.lang or language())
             except Exception as exc:
                 if self.on_error:
                     try:

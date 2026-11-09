@@ -8,6 +8,7 @@ from typing import Callable
 
 from . import bio, codex, values, winapi
 from .belts import BeltStore, SavedBelt
+from .i18n import t
 from .mining import format_hotspots, format_hotspots_tip
 from .model import Body, GameState, format_dss_range, is_belt_body, is_ring_body
 from .route import Route
@@ -31,32 +32,44 @@ COLORS = {
 }
 
 # Колонки таблицы тел. Пояс — отдельная узкая ячейка со значком кольца.
-BODY_COLUMNS = (
+def _columns(spec: tuple[tuple[str, str, int, str], ...]) -> tuple:
+    rows = []
+    for key, title, width, anchor in spec:
+        text = t(title) if title.startswith("col.") else title
+        rows.append((key, text, width, anchor))
+    return tuple(rows)
+
+
+_BODY_SPEC = (
     ("belt", "", 28, "center"),
-    ("name", "Имя", 200, "w"),
-    ("type", "Тип", 140, "w"),
-    ("atmos", "Атмосфера", 110, "w"),
-    ("temp", "Температура", 100, "e"),
-    ("bio", "Био", 50, "center"),
-    ("guess", "Возможно", 220, "w"),
-    ("geo", "Гео", 50, "center"),
+    ("name", "col.name", 200, "w"),
+    ("type", "col.type", 140, "w"),
+    ("atmos", "col.atmos", 110, "w"),
+    ("temp", "col.temp", 110, "e"),
+    ("bio", "col.bio", 50, "center"),
+    ("guess", "col.guess", 220, "w"),
+    ("geo", "col.geo", 50, "center"),
     ("pml", "PML", 50, "center"),
-    ("minerals", "Минералы", 180, "w"),
+    ("minerals", "col.minerals", 180, "w"),
     ("dss", "DSS", 50, "center"),
-    ("value", "Цена картографии", 140, "e"),
-    ("first", "1-е", 50, "center"),
-    ("dist", "ls", 80, "e"),
-    ("src", "Ист.", 70, "center"),
+    ("value", "col.value", 150, "e"),
+    ("first", "col.first", 50, "center"),
+    ("dist", "col.dist", 80, "e"),
+    ("src", "col.src", 70, "center"),
 )
 
-ROUTE_COLUMNS = (
+_ROUTE_SPEC = (
     ("idx", "#", 48, "center"),
-    ("system", "Система", 240, "w"),
-    ("star", "Класс", 70, "center"),
-    ("ly", "До след., ly", 100, "e"),
-    ("bodies", "Тела", 160, "w"),
-    ("opened", "Открыта", 130, "w"),
+    ("system", "col.system", 240, "w"),
+    ("star", "col.star", 70, "center"),
+    ("ly", "col.ly", 110, "e"),
+    ("bodies", "col.bodies", 160, "w"),
+    ("opened", "col.opened", 140, "w"),
 )
+
+# Заголовки читаются при импорте — язык Windows уже известен.
+BODY_COLUMNS = _columns(_BODY_SPEC)
+ROUTE_COLUMNS = _columns(_ROUTE_SPEC)
 
 MIN_COL_WIDTH = 28
 MIN_COL_WIDTHS = {
@@ -78,7 +91,7 @@ def _ls(value: float | None) -> str:
     if value is None:
         return "—"
     if value >= 10_000:
-        return f"{value / 1000:,.0f} тыс".replace(",", " ")
+        return f"{value / 1000:,.0f} {t('unit.thousand')}".replace(",", " ")
     return f"{value:,.0f}".replace(",", " ")
 
 
@@ -94,10 +107,10 @@ def _route_bodies_cell(hop, *, here: bool, system) -> str:
         local = sum(1 for b in system.bodies.values() if not getattr(b, "remote", False))
         text = f"{local}/{int(system.body_count)}"
         if system.nonbody_count:
-            text += f" · сигн.{int(system.nonbody_count)}"
+            text += t("route.signals", n=int(system.nonbody_count))
         progress = system.fss_progress
         if isinstance(progress, (int, float)) and progress < 0.999:
-            text += f" · FSS {progress * 100:.0f}%"
+            text += t("route.fss", n=f"{progress * 100:.0f}")
         return text
     return hop.bodies_label()
 
@@ -126,25 +139,25 @@ def _forecast_tip(body: Body, state: GameState) -> str | None:
             seen.add(prediction.label)
             price = values.credits(prediction.reward) if prediction.reward else ""
             rows.append(f"• {prediction.label}" + (f"  {price}" if price else ""))
-        header = "DSS:" if body.genuses else "Предположительно:"
+        header = "DSS:" if body.genuses else t("tip.maybe")
         return header + "\n" + "\n".join(rows)
     if body.genuses:
         names = [codex.display_name(key) for key in body.genuses]
-        return "DSS (роды):\n" + "\n".join(f"• {name}" for name in names)
+        return t("tip.dss_genera") + "\n" + "\n".join(f"• {name}" for name in names)
     if (body.bio_signals or 0) <= 0:
         return None
     missing: list[str] = []
     if not body.planet_class:
-        missing.append("класс")
+        missing.append(t("tip.miss_class"))
     if not body.atmosphere and not body.atmosphere_composition:
-        missing.append("атмосфера")
+        missing.append(t("tip.miss_atmo"))
     if body.surface_temp is None:
-        missing.append("температура")
+        missing.append(t("tip.miss_temp"))
     if not body.materials:
-        missing.append("материалы")
+        missing.append(t("tip.miss_mats"))
     if missing:
-        return "Нет прогноза — нужен детальный скан\n(нет: " + ", ".join(missing) + ")"
-    return "Нет совпадений в критериях био"
+        return t("tip.no_forecast", missing=", ".join(missing))
+    return t("tip.no_match")
 
 
 class _CellTip:
@@ -425,7 +438,9 @@ class MainWindow:
     def _build(self) -> None:
         top = ttk.Frame(self.win, style="ED.TFrame", padding=(12, 10))
         top.pack(fill="x")
-        self.lbl_system = ttk.Label(top, text="Система: —", style="ED.Header.TLabel", cursor="hand2")
+        self.lbl_system = ttk.Label(
+            top, text=t("win.system", name="—", opened=""), style="ED.Header.TLabel", cursor="hand2"
+        )
         self.lbl_system.pack(side="left")
         self.lbl_system.bind("<Double-Button-1>", self._on_system_double)
         self.lbl_status = ttk.Label(top, text="", style="ED.Muted.TLabel")
@@ -458,10 +473,10 @@ class MainWindow:
         self.tab_belts = ttk.Frame(nb, style="ED.TFrame", padding=8)
         nb.add(self.tab_route, text="Route")
         nb.add(self.tab_bodies, text="Bodies")
-        nb.add(self.tab_belts, text="Пояса")
+        nb.add(self.tab_belts, text=t("win.tab_belts"))
         nb.select(self.tab_bodies)
 
-        self.route_info = ttk.Label(self.tab_route, text="Маршрут пуст", style="ED.TLabel")
+        self.route_info = ttk.Label(self.tab_route, text=t("win.route_empty"), style="ED.TLabel")
         self.route_info.pack(anchor="w", pady=(0, 6))
         self._ring_icon = _ring_icon(self.win)
         self._build_route_table()
@@ -573,6 +588,10 @@ class MainWindow:
             inner.grid_columnconfigure(index, minsize=width, weight=0, pad=0)
         total = sum(widths)
         header.configure(width=total)
+        try:
+            header.place_configure(anchor="nw", width=total)
+        except tk.TclError:
+            pass
         for index, width in enumerate(widths):
             for box in header.grid_slaves(row=0, column=index):
                 box.configure(width=width)
@@ -688,7 +707,6 @@ class MainWindow:
         setattr(self, f"_{table}_header_clip", clip)
 
         header = tk.Frame(clip, bg=COLORS["panel"])
-        header.place(x=0, y=0, relheight=1)
         setattr(self, header_attr, header)
 
         pixel_widths = [
@@ -699,7 +717,7 @@ class MainWindow:
         head_h = _row_height(self._ui_size) + 8
         for index, (key, title, _default_w, anchor) in enumerate(columns):
             width = pixel_widths[index]
-            header.grid_columnconfigure(index, minsize=width, weight=0)
+            header.grid_columnconfigure(index, minsize=width, weight=0, pad=0)
             box = self._make_box(header, width, head_h, COLORS["panel"], header=True)
             label = tk.Label(
                 box,
@@ -718,6 +736,8 @@ class MainWindow:
             labels.append(label)
         setattr(self, labels_attr, labels)
         header.configure(width=sum(pixel_widths))
+        # anchor=nw: у place по умолчанию center, и шапка съезжает на полширины относительно строк
+        header.place(x=0, y=0, anchor="nw", relheight=1, width=sum(pixel_widths))
 
         canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
         scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
@@ -734,7 +754,7 @@ class MainWindow:
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
         setattr(self, f"_{table}_window", window)
         for index, width in enumerate(pixel_widths):
-            inner.grid_columnconfigure(index, minsize=width, weight=0)
+            inner.grid_columnconfigure(index, minsize=width, weight=0, pad=0)
 
         def _fit(event) -> None:
             widths_now = self._apply_column_geometry(table)
@@ -767,7 +787,7 @@ class MainWindow:
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
         header = self._bodies_header if table == "bodies" else self._route_header
         try:
-            header.place_configure(x=-canvas.canvasx(0), y=0)
+            header.place_configure(x=-int(canvas.canvasx(0)), y=0, anchor="nw")
         except tk.TclError:
             pass
 
@@ -775,7 +795,7 @@ class MainWindow:
         """Список сохранённых поясов с минералами."""
         self.belts_info = ttk.Label(
             self.tab_belts,
-            text="ПКМ по колонке «Минералы» в Bodies — сохранить пояс. Здесь — база.",
+            text=t("win.belts_hint"),
             style="ED.Muted.TLabel",
         )
         self.belts_info.pack(anchor="w", pady=(0, 6))
@@ -812,7 +832,7 @@ class MainWindow:
     def _refresh_belts_tab_title(self) -> None:
         count = len(self.belt_store)
         try:
-            self.nb.tab(self.tab_belts, text=f"Пояса ({count})" if count else "Пояса")
+            self.nb.tab(self.tab_belts, text=t("win.tab_belts_n", n=count) if count else t("win.tab_belts"))
         except tk.TclError:
             pass
 
@@ -825,7 +845,7 @@ class MainWindow:
         if not belts:
             tk.Label(
                 self._belts_inner,
-                text="Пока пусто — найдите богатый пояс и сохраните ПКМ по «Минералы».",
+                text=t("win.belts_empty"),
                 bg=COLORS["row"],
                 fg=COLORS["muted"],
                 anchor="w",
@@ -861,7 +881,7 @@ class MainWindow:
         left.pack(fill="x", pady=(2, 0))
         minerals = tk.Label(
             row,
-            text=f"{belt.minerals_label()}   ·  оценка ≈{estimate}   ·  {when}",
+            text=t("win.belt_meta", minerals=belt.minerals_label(), estimate=estimate, when=when),
             bg=COLORS["row"],
             fg=COLORS["accent"],
             anchor="w",
@@ -871,7 +891,7 @@ class MainWindow:
         )
         minerals.pack(fill="x", pady=(0, 6))
         tip = format_hotspots_tip(belt.hotspots) or ""
-        tip = (tip + "\n\nДвойной клик — копировать систему\nПКМ — удалить из базы").strip()
+        tip = (tip + "\n\n" + t("win.belt_copy_tip")).strip()
         for widget in (row, left, minerals):
             cell_tip = _CellTip(row, widget, text=tip)
             widget.tip = cell_tip
@@ -890,8 +910,8 @@ class MainWindow:
         menu = tk.Menu(self.win, tearoff=0)
         belt = next((b for b in self.belt_store.list() if b.key() == key), None)
         if belt is not None:
-            menu.add_command(label="Копировать систему", command=lambda: self._copy_belt_system(belt.system))
-        menu.add_command(label="Удалить из базы", command=lambda: self._delete_saved_belt(key))
+            menu.add_command(label=t("win.copy_system"), command=lambda: self._copy_belt_system(belt.system))
+        menu.add_command(label=t("win.delete_belt"), command=lambda: self._delete_saved_belt(key))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -900,7 +920,7 @@ class MainWindow:
     def _delete_saved_belt(self, key: str) -> None:
         if self.belt_store.remove(key):
             self._refresh_belts_list()
-            self._flash_status("Пояс удалён из базы")
+            self._flash_status(t("win.belt_deleted"))
             if self._state is not None:
                 self._last_key = None
                 self._update_bodies(self._state)
@@ -919,8 +939,8 @@ class MainWindow:
 
     def _popup_minerals_header_menu(self, event) -> None:
         menu = tk.Menu(self.win, tearoff=0)
-        menu.add_command(label="Сохранить все пояса системы", command=self._save_all_system_belts)
-        menu.add_command(label="Открыть вкладку «Пояса»", command=self._show_belts_tab)
+        menu.add_command(label=t("win.save_all"), command=self._save_all_system_belts)
+        menu.add_command(label=t("win.open_belts"), command=self._show_belts_tab)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -973,15 +993,17 @@ class MainWindow:
             return
         body = state.system.body(body_id)
         if body is None or not body.hotspots:
-            self._flash_status("Нет минералов пояса для сохранения")
+            self._flash_status(t("win.no_minerals"))
             return
         belt = self._body_to_saved_belt(body, state)
         if belt is None or not belt.system:
-            self._flash_status("Не удалось сохранить пояс")
+            self._flash_status(t("win.belt_save_fail"))
             return
         self.belt_store.upsert(belt)
         self._refresh_belts_list()
-        self._flash_status(f"Пояс сохранён: {belt.system} · {(belt.body_name or '').split()[-1]}")
+        self._flash_status(
+            t("win.belt_saved", system=belt.system, body=(belt.body_name or "").split()[-1])
+        )
         self._last_key = None
         self._update_bodies(state)
 
@@ -1000,11 +1022,11 @@ class MainWindow:
             saved += 1
         self._refresh_belts_list()
         if saved:
-            self._flash_status(f"Сохранено поясов: {saved}")
+            self._flash_status(t("win.belts_saved", n=saved))
             self._last_key = None
             self._update_bodies(state)
         else:
-            self._flash_status("В системе нет поясов с минералами")
+            self._flash_status(t("win.no_belts"))
 
     def _popup_minerals_cell_menu(self, event, body_id: int) -> None:
         state = self._state
@@ -1016,7 +1038,7 @@ class MainWindow:
                 body_id,
                 state.system.name if state else "",
             )
-            label = "Обновить в базе" if already else "Сохранить пояс в базу"
+            label = t("win.update_belt") if already else t("win.save_belt")
             menu.add_command(label=label, command=lambda: self._save_body_belt(body_id))
             if already:
                 saved = self.belt_store.get(
@@ -1026,13 +1048,13 @@ class MainWindow:
                 )
                 if saved is not None:
                     menu.add_command(
-                        label="Удалить из базы",
+                        label=t("win.delete_belt"),
                         command=lambda k=saved.key(): self._delete_saved_belt(k),
                     )
         else:
-            menu.add_command(label="Нет минералов пояса", state="disabled")
+            menu.add_command(label=t("win.no_belt_minerals"), state="disabled")
         menu.add_separator()
-        menu.add_command(label="Открыть вкладку «Пояса»", command=self._show_belts_tab)
+        menu.add_command(label=t("win.open_belts"), command=self._show_belts_tab)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1117,7 +1139,7 @@ class MainWindow:
             label.tip = cell_tip
             box.tip = cell_tip
         if copy_text:
-            tip_text = tip or f"Двойной клик — копировать\n{copy_text}"
+            tip_text = tip or t("tip.copy", name=copy_text)
             if not tip:
                 cell_tip = _CellTip(box, label, text=tip_text)
                 label.tip = cell_tip
@@ -1417,11 +1439,11 @@ class MainWindow:
         known = len(state.system.bodies)
         total = state.system.body_count or known
         bio = sum(1 for b in state.system.bodies.values() if (b.bio_signals or 0) > 0)
-        opened = " — открыта вами" if state.system.discovered_by_me else ""
-        self.lbl_system.configure(text=f"Система: {name}{opened}")
+        opened = t("win.opened") if state.system.discovered_by_me else ""
+        self.lbl_system.configure(text=t("win.system", name=name, opened=opened))
         self.lbl_status.configure(
-            text=f"тел {known}/{total} · био-тел {bio}"
-            + (" · маршрут залочен" if state.route.locked else "")
+            text=t("win.status", known=known, total=total, bio=bio)
+            + (t("win.locked") if state.route.locked else "")
         )
         self._carrier_system = state.carrier.system if state.carrier.known else None
         if not state.carrier.known:
@@ -1434,21 +1456,22 @@ class MainWindow:
         if state.carrier.jump_pending and state.carrier.jump_dest_system:
             frm = state.carrier.jump_from_system or self._carrier_system or "—"
             to = state.carrier.jump_dest_system
-            text = f"Карриер готовится прыгать из {frm} в {to}"
+            text = t("win.carrier_jump", frm=frm, to=to)
             self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
             self.lbl_carrier_hint.configure(text="")
             return
         if self._carrier_system:
             # Всегда явно «Карриер …», иначе в шапке неочевидно, что за система
-            prefix = "Карриер" if who.lower() == "карриер" else f"Карриер {who}"
+            generic = t("hud.carrier")
+            prefix = generic if who.lower() == generic.lower() else f"{generic} {who}"
             dist = state.carrier_distance_ly()
             if dist is None:
-                text = f"{prefix}: {self._carrier_system}"
+                text = t("win.carrier_line", prefix=prefix, system=self._carrier_system)
             elif dist < 0.05:
-                text = f"{prefix}: {self._carrier_system} · здесь"
+                text = t("win.carrier_here", prefix=prefix, system=self._carrier_system)
             else:
                 ly = f"{dist:,.0f}".replace(",", " ")
-                text = f"{prefix}: {self._carrier_system} · {ly} ly"
+                text = t("win.carrier_dist", prefix=prefix, system=self._carrier_system, ly=ly)
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
             self.lbl_carrier_hint.configure(text="")
         else:
@@ -1491,21 +1514,17 @@ class MainWindow:
         for child in self._route_inner.winfo_children():
             child.destroy()
         if not route.hops:
-            self.route_info.configure(text="Маршрут пуст (проложите в игре или plot/import)")
+            self.route_info.configure(text=t("win.route_empty"))
             self._route_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
         remaining = route.distance_remaining(current)
         src = route.source or "game"
-        lock = " · залочен" if route.locked else ""
-        extra = f" · осталось ~{remaining:,.1f} ly".replace(",", " ") if remaining else ""
+        lock = t("win.route_locked") if route.locked else ""
+        extra = t("win.route_left", ly=f"{remaining:,.1f}".replace(",", " ")) if remaining else ""
         jumps = route.total_jumps
-        jump_txt = f" · ~{jumps} прыж." if jumps else ""
+        jump_txt = t("win.route_jumps", n=jumps) if jumps else ""
         self.route_info.configure(
-            text=(
-                f"Источник: {src}{lock}{extra}{jump_txt}"
-                " · тела: EDSM до визита; здесь — скан/FSS после хонка"
-                " · 2× система / карриер — копия"
-            )
+            text=t("win.route_info", src=src, lock=lock, extra=extra, jumps=jump_txt)
         )
         here = route.index_of(current)
         here_row = None
@@ -1575,7 +1594,7 @@ class MainWindow:
         else:
             dss = "—"
         first = "✔" if not body.was_discovered and not body.remote else "—"
-        src = body.source or ("своё" if not body.remote else "?")
+        src = body.source or (t("src.own") if not body.remote else "?")
         values = {
             "name": body.name or f"#{body.body_id}",
             "type": _type_of(body),
@@ -1603,15 +1622,15 @@ class MainWindow:
         minerals_tip = format_hotspots_tip(body.hotspots)
         if body.hotspots:
             saved = self.belt_store.contains(state.system.address, body.body_id, state.system.name or "")
-            extra = "ПКМ — сохранить пояс в базу"
+            extra = t("tip.save_belt")
             if saved:
-                extra = "★ уже в базе · ПКМ — обновить / удалить"
+                extra = t("tip.saved_belt")
             minerals_tip = (minerals_tip + "\n\n" + extra) if minerals_tip else extra
         dss_tip = None
         if body.rings_mapped and not body.dss_scanned:
-            dss_tip = "Отсканирован пояс/кольца; поверхность планеты — нет"
+            dss_tip = t("tip.rings_only")
         elif not body.is_star and (body.radius or 0) > 0 and not body.dss_scanned:
-            dss_tip = f"DSS пробы примерно с высоты {format_dss_range(body.radius)}"
+            dss_tip = t("tip.dss_alt", rng=format_dss_range(body.radius))
         styles: dict[str, tuple[str, str]] = {}
         tips: dict[str, str | None] = {}
         for key, _title, _width, _anchor in BODY_COLUMNS:

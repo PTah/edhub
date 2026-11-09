@@ -163,7 +163,9 @@ class Config:
     # EDSM: чтение тел/стоимости — без ключа; ключ только для личных API
     edsm_api_key: str = ""
     edsm_commander: str = ""
-    # голос (Windows SAPI, русский)
+    # голос (Windows SAPI: русский или английский — по языку Windows)
+    # обновления: auto — проверка релиза GitHub при запуске, manual — только из настроек
+    update_check: str = "auto"
     voice_enabled: bool = True
     voice_bio: bool = True
     voice_first_discovery: bool = True

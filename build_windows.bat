@@ -60,6 +60,11 @@ powershell -NoProfile -Command ^
 copy /y "dist\EDHUD-portable-%VERSION%.zip" "dist\EDHUD-portable.zip" >nul
 
 echo.
+echo Упаковка каталога приложения для автообновления...
+powershell -NoProfile -Command ^
+  "Compress-Archive -Path 'dist\EDHUD\*' -DestinationPath 'dist\EDHUD-%VERSION%-windows.zip' -Force" || goto :err
+
+echo.
 echo [3/3] Установщик Inno Setup...
 set "ISCC="
 if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
@@ -80,6 +85,7 @@ echo.
 echo ========== Готово ==========
 echo Portable:   "%CD%\dist\EDHUD-portable\EDHUD.exe"
 echo ZIP:        "%CD%\dist\EDHUD-portable.zip"
+echo Win zip:    "%CD%\dist\EDHUD-%VERSION%-windows.zip"
 echo Onedir:     "%CD%\dist\EDHUD\EDHUD.exe"
 if exist "dist\EDHUD-Setup-%VERSION%.exe" (
   echo Installer:  "%CD%\dist\EDHUD-Setup-%VERSION%.exe"

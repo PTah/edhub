@@ -21,11 +21,10 @@ from .route import Route
 from .belts import BeltStore
 from .store import SystemStore
 from .tui import run_tui
+from .i18n import t
 from .voice import Voice
 
 SAVE_INTERVAL = 20.0
-FULLSCREEN_HINT = "полноэкранный режим: если оверлея не видно — Alt+Enter (Borderless)"
-LEGACY_HINT = "Legacy 3.8: Odyssey-бонусы, EDSM/EDDN и био-прогноз отключены"
 
 
 def _system_discoverer_from_remote(result) -> str | None:
@@ -70,6 +69,7 @@ class App:
         self.demo_speed = demo_speed
         self.eddn: eddn.EddnListener | None = None
         self.voice = Voice(rate=int(cfg.voice_rate or 0))
+        self._update_busy = False
         self.alerts = AlertEngine(on_alert=self._on_alert)
         self.alerts.configure(cfg)
         self._eddn_filter = eddn.SetFilter()
@@ -354,13 +354,13 @@ class App:
     def hint(self) -> str | None:
         hints: list[str] = []
         if self.state.legacy:
-            hints.append(LEGACY_HINT)
+            hints.append(t("hint.legacy"))
         if (
             self.overlay is not None
             and self.cfg.warn_fullscreen
             and getattr(self.overlay, "fullscreen", None) is True
         ):
-            hints.append(FULLSCREEN_HINT)
+            hints.append(t("hint.fullscreen"))
         return " · ".join(hints) if hints else None
 
     def sync_system(self) -> None:
@@ -491,7 +491,7 @@ class App:
     def _start_tray(self) -> None:
         self.tray = tray.TrayIcon(
             on_command=self._on_tray_command,
-            tip="EDHUD — оверлей исследователя",
+            tip=t("tray.tip"),
             state_provider=self._tray_state,
         )
         self.tray.start()
@@ -521,6 +521,7 @@ class App:
             tray.ID_OPEN_EDSM: self.open_edsm_system,
             tray.ID_OPEN_MAP: self.open_spansh_map,
             tray.ID_SETTINGS: self.open_settings,
+            tray.ID_CHECK_UPDATE: lambda: self.check_updates(interactive=True),
             tray.ID_OPEN_CONFIG: self.open_config_folder,
             tray.ID_QUIT: self.request_quit,
         }
@@ -585,21 +586,21 @@ class App:
         start = self.state.system.name
         target = self.state.carrier.system
         if not start or not target:
-            self._voice_alert = "нет системы или карриера для маршрута"
+            self._voice_alert = t("voice.no_route")
             return
         if start.lower() == target.lower():
-            self._voice_alert = "карриер уже в этой системе"
+            self._voice_alert = t("voice.carrier_here")
             return
         if not self.cfg.allow_network:
-            self._voice_alert = "сеть отключена — маршрут не построить"
+            self._voice_alert = t("voice.offline")
             return
         if getattr(self, "_plot_busy", False):
             return
         self._plot_busy = True
-        self._voice_alert = f"строим маршрут Spansh → {target}…"
+        self._voice_alert = t("voice.plotting", target=target)
         if self.mainwindow is not None:
             try:
-                self.mainwindow.route_info.configure(text=f"Spansh: строим маршрут → {target}…")
+                self.mainwindow.route_info.configure(text=t("win.plotting", target=target))
                 self.mainwindow.nb.select(self.mainwindow.tab_route)
             except Exception:
                 pass
@@ -621,15 +622,15 @@ class App:
                     self.state.sync_route_discoverers()
                     self.state.view_tab = "route"
                     jumps = route.total_jumps
-                    self._voice_alert = (
-                        f"маршрут до карриера: {len(route.hops)} систем, ~{jumps} прыжков"
+                    self._voice_alert = t(
+                        "voice.plotted", count=len(route.hops), jumps=jumps
                     )
                 else:
-                    self._voice_alert = f"маршрут не построен: {error or 'пусто'}"
+                    self._voice_alert = t("voice.plot_fail", error=error or t("voice.empty"))
                     if self.mainwindow is not None:
                         try:
                             self.mainwindow.route_info.configure(
-                                text=f"Spansh: не построен — {error or 'пусто'}"
+                                text=t("win.plot_fail", error=error or t("voice.empty"))
                             )
                         except Exception:
                             pass
@@ -665,6 +666,7 @@ class App:
             self.cfg,
             on_saved=on_saved,
             on_live=self._apply_window_layout,
+            on_check_updates=lambda parent: self.check_updates(interactive=True, parent=parent),
         )
         dlg.win.bind("<Destroy>", lambda e: on_close() if e.widget is dlg.win else None)
 
@@ -736,6 +738,119 @@ class App:
             self.eddn.stop()
             self.eddn = None
 
+    def check_updates(self, interactive: bool = False, parent=None) -> None:
+        """Проверка релиза GitHub. В авторежиме молчит, если новой версии нет."""
+        if self._update_busy or self.overlay is None:
+            return
+        self._update_busy = True
+        owner = parent
+
+        def work() -> None:
+            from . import update as upd
+
+            try:
+                info = upd.check()
+            except Exception as exc:
+                info = upd.UpdateInfo(current=upd.current_version(), error=str(exc))
+
+            def show() -> None:
+                self._update_busy = False
+                self._present_update(info, interactive, owner)
+
+            self._ui(show)
+
+        threading.Thread(target=work, name="edhud-update-check", daemon=True).start()
+
+    def _present_update(self, info, interactive: bool, parent) -> None:
+        from tkinter import messagebox
+
+        from . import update as upd
+
+        host = parent if parent is not None else (self.overlay.root if self.overlay else None)
+        if info.error:
+            if interactive:
+                messagebox.showerror("EDHUD", t("update.error", error=info.error), parent=host)
+            return
+        if not info.available:
+            if interactive:
+                messagebox.showinfo("EDHUD", t("update.none", current=info.current), parent=host)
+            return
+        notes = (info.notes or "").strip()
+        if len(notes) > 700:
+            notes = notes[:700].rstrip() + "…"
+        if not messagebox.askyesno(
+            t("update.title"),
+            t("update.available", latest=info.latest, current=info.current, notes=notes or "—"),
+            parent=host,
+        ):
+            return
+        if upd.install_kind() == "source":
+            if messagebox.askyesno("EDHUD", t("update.source"), parent=host):
+                webbrowser.open(info.url or upd.RELEASE_PAGE)
+            return
+        if not info.asset_url:
+            messagebox.showerror("EDHUD", t("update.no_asset", latest=info.latest), parent=host)
+            return
+        self._download_update(info, host)
+
+    def _download_update(self, info, parent) -> None:
+        import tkinter as tk
+        from tkinter import messagebox, ttk
+
+        from . import update as upd
+
+        win = tk.Toplevel(parent)
+        win.title(t("update.title"))
+        win.attributes("-topmost", True)
+        win.resizable(False, False)
+        label = ttk.Label(win, text=t("update.downloading", name=info.asset_name), padding=16)
+        label.pack()
+
+        def progress(done: int, total: int) -> None:
+            if total:
+                text = t(
+                    "update.progress_total",
+                    done=upd.format_bytes(done),
+                    total=upd.format_bytes(total),
+                )
+            else:
+                text = t("update.progress", done=upd.format_bytes(done))
+
+            def paint() -> None:
+                try:
+                    label.configure(text=text)
+                except tk.TclError:
+                    pass
+
+            self._ui(paint)
+
+        def work() -> None:
+            try:
+                payload = upd.stage_update(info, progress=progress)
+                upd.spawn_helper(payload)
+            except Exception as exc:
+                def fail() -> None:
+                    try:
+                        win.destroy()
+                    except tk.TclError:
+                        pass
+                    messagebox.showerror("EDHUD", t("update.failed", error=exc), parent=parent)
+
+                self._ui(fail)
+                return
+
+            def restart() -> None:
+                try:
+                    win.destroy()
+                except tk.TclError:
+                    pass
+                messagebox.showinfo("EDHUD", t("update.restarting"), parent=parent)
+                self.request_quit()
+
+            self._ui(restart)
+
+        threading.Thread(target=work, name="edhud-update-download", daemon=True).start()
+
     def request_quit(self) -> None:
         """Корректный выход: остановить потоки и закрыть окно tkinter."""
         self._stop.set()
@@ -755,9 +870,9 @@ class App:
 
     def run(self) -> int:
         if not self.prepare():
-            print("Не найден каталог журналов Elite Dangerous.")
-            print('Укажите его: run.py run --journal-dir "..."')
-            print("Или откройте Настройки из трея после запуска с --demo.")
+            print(t("app.no_journal"))
+            print(t("app.no_journal_2"))
+            print(t("app.no_journal_3"))
             return 2
         if self.ui == "tui":
             self.start()
@@ -779,6 +894,14 @@ class App:
                 self.overlay.root.after(200, loop)
 
         loop()
+        try:
+            from .update import cleanup_staging
+
+            cleanup_staging()
+        except Exception:
+            pass
+        if str(getattr(self.cfg, "update_check", "auto") or "auto") != "manual":
+            self.overlay.root.after(4000, lambda: self.check_updates(interactive=False))
         try:
             self.overlay.run()
         except KeyboardInterrupt:

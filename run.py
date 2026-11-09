@@ -308,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # Самоприменение обновления: тот же EDHUD.exe, без PowerShell и .ps1.
+    if "--apply-update" in argv:
+        from edhud.update import apply_from_argv
+
+        return apply_from_argv(argv)
     winapi.enable_dpi_awareness()  # до создания окна: иначе шрифт мылится на 125/150 %
     parser = build_parser()
     if not argv or argv[0].startswith("-"):

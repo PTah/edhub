@@ -50,25 +50,29 @@ class RouteHop:
         }
 
     def opened_label(self) -> str:
+        from .i18n import t
+
         if self.discovered_by_me:
-            return "Ваше открытие"
+            return t("route.your_discovery")
         if self.discovered_by:
             return self.discovered_by
         return "—"
 
     def bodies_label(self) -> str:
         """Краткий состав системы для колонки Route (данные EDSM)."""
+        from .i18n import t
+
         if self.edsm_missing:
-            return "нет в EDSM"
+            return t("route.not_in_edsm")
         if self.edsm_stars is None and self.edsm_planets is None:
             return "—"
         parts: list[str] = []
         if self.edsm_stars:
             parts.append(f"★{self.edsm_stars}")
         if self.edsm_planets:
-            parts.append(f"{self.edsm_planets}п")
+            parts.append(t("route.planets", n=self.edsm_planets))
         if not parts and (self.edsm_bodies or 0) > 0:
-            parts.append(f"{self.edsm_bodies} тел")
+            parts.append(t("route.n_bodies", n=self.edsm_bodies))
         return " · ".join(parts) if parts else "—"
 
     @property

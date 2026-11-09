@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import bio, codex, values
+from .i18n import jumps_word, t
 from .model import FIRST_LOGGED_MULTIPLIER, Body, GameState, RadarView
 
 
@@ -65,30 +66,18 @@ def _ly(value: float) -> str:
     return f"{value:,.1f}".replace(",", " ") if value else "—"
 
 
-def _jumps_word(count: int) -> str:
-    n = abs(int(count)) % 100
-    if 11 <= n <= 14:
-        return "прыжков"
-    last = n % 10
-    if last == 1:
-        return "прыжок"
-    if 2 <= last <= 4:
-        return "прыжка"
-    return "прыжков"
-
-
 def _ls(value: float) -> str:
     if not value:
         return "—"
     if value >= 1_000_000:
-        return f"{value / 1_000_000:.1f} млн ls"
+        return f"{value / 1_000_000:.1f} {t('unit.million')} ls"
     if value >= 10_000:
-        return f"{value / 1000:,.0f} тыс ls".replace(",", " ")
+        return f"{value / 1000:,.0f} {t('unit.thousand')} ls".replace(",", " ")
     return f"{value:,.0f} ls".replace(",", " ")
 
 
 def _meters(value: float) -> str:
-    return f"{value:,.0f} м".replace(",", " ")
+    return f"{value:,.0f} {t('unit.m')}".replace(",", " ")
 
 
 def _genuses(body: Body, limit: int = 4) -> str:
@@ -116,13 +105,13 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
     system = state.system.name
     row = Row()
     if not route.hops:
-        row.segments.append(Segment("МАРШРУТ ", "dim"))
+        row.segments.append(Segment(t("hud.route"), "dim"))
         if state.fsd_target:
             row.segments.append(Segment(state.fsd_target, "accent"))
             if state.jumps_in_route:
-                row.segments.append(Segment(f" · {state.jumps_in_route} прыжк.", "text"))
+                row.segments.append(Segment(t("hud.jumps_short", n=state.jumps_in_route), "text"))
         else:
-            row.segments.append(Segment("не задан — проложите в карте галактики", "muted"))
+            row.segments.append(Segment(t("hud.route_unset"), "muted"))
         _append_carrier(row, state)
         return row, (0, 0), [], "muted"
 
@@ -131,7 +120,7 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
     remaining = route.remaining(system)
     remaining_ly = route.distance_remaining(system, state.position)
 
-    row.segments.append(Segment("МАРШРУТ ", "dim"))
+    row.segments.append(Segment(t("hud.route"), "dim"))
     row.segments.append(Segment(f"{done}/{total}", "fg"))
     if next_hop:
         star = f"{next_hop.star_class}" if next_hop.star_class else "?"
@@ -139,22 +128,22 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
         row.segments.append(Segment(next_hop.system, "accent"))
         row.segments.append(Segment(f" ({star} · {_ly(next_hop.distance)} ly)", "muted"))
         if remaining:
-            row.segments.append(Segment("   осталось ", "dim"))
+            row.segments.append(Segment(t("hud.remaining"), "dim"))
             row.segments.append(
-                Segment(f"{remaining} {_jumps_word(remaining)} из {total}", "text")
+                Segment(f"{remaining} {jumps_word(remaining)} {t('hud.of')} {total}", "text")
             )
             if remaining_ly:
                 row.segments.append(Segment(f" · {_ly(remaining_ly)} ly", "muted"))
         row.segments.append(Segment("  ", "text"))
         if next_hop.scoopable:
-            row.segments.append(Segment("заправка ✔", "ok"))
+            row.segments.append(Segment(t("hud.scoop"), "ok"))
         else:
-            row.segments.append(Segment("не заправка", "warn"))
+            row.segments.append(Segment(t("hud.no_scoop"), "warn"))
     else:
-        row.segments.append(Segment("  финиш маршрута", "ok"))
+        row.segments.append(Segment(t("hud.finish"), "ok"))
 
     if route.locked:
-        row.segments.append(Segment("  [залочен]", "warn"))
+        row.segments.append(Segment(t("hud.locked"), "warn"))
     _append_carrier(row, state)
 
     dots_total = max(1, total)
@@ -166,20 +155,20 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
 def _body_row(state: GameState, cfg) -> Row:
     row = Row()
     body = state.body_for_status() or state.current_body()
-    row.segments.append(Segment("ТЕЛО ", "dim"))
+    row.segments.append(Segment(t("hud.body"), "dim"))
     if body is None:
         name = state.system.name or "—"
-        count = f" · тел {state.system.body_count}" if state.system.body_count else ""
+        count = t("hud.bodies_n", n=state.system.body_count) if state.system.body_count else ""
         row.segments.append(Segment(f"{name}{count}", "muted"))
         return row
 
-    body_class = body.planet_class or ("звезда" if body.is_star else "?")
+    body_class = body.planet_class or (t("hud.star") if body.is_star else "?")
     row.segments.append(Segment(body.name, "fg"))
     row.segments.append(Segment(f" · {body_class}", "muted"))
     if body.distance_ls:
         row.segments.append(Segment(f" · {_ls(body.distance_ls)}", "muted"))
 
-    row.segments.append(Segment("   БИО ", "dim"))
+    row.segments.append(Segment(t("hud.bio"), "dim"))
     if body.bio_signals is None and not body.signals_known:
         row.segments.append(Segment("?", "muted"))
     elif not body.bio_signals:
@@ -194,7 +183,7 @@ def _body_row(state: GameState, cfg) -> Row:
             if genuses:
                 row.segments.append(Segment(f" ({genuses})", "muted"))
         if body.geo_signals:
-            row.segments.append(Segment(f" · гео {body.geo_signals}", "muted"))
+            row.segments.append(Segment(t("hud.geo", n=body.geo_signals), "muted"))
 
     if body.landable or body.bio_signals:
         row.segments.append(Segment("   DSS ", "dim"))
@@ -216,18 +205,18 @@ def _body_row(state: GameState, cfg) -> Row:
 
     organic = state.active_organic()
     if organic is not None:
-        row.segments.append(Segment("   ПРОБЫ ", "dim"))
+        row.segments.append(Segment(t("hud.samples"), "dim"))
         row.segments.append(Segment(f"{organic.genus_en} {organic.scans_text}", "warn"))
         colony = state.colony_distance()
         if colony:
             dist, need = colony
             style = "bad" if dist < need else "ok"
-            row.segments.append(Segment(f" · {_meters(dist)}/{need} м", style))
+            row.segments.append(Segment(t("hud.colony", dist=_meters(dist), need=need), style))
 
     if state.status.srv:
         row.segments.append(Segment("   [SRV]", "accent"))
     elif state.mode == "OnFoot":
-        row.segments.append(Segment("   [пешком]", "accent"))
+        row.segments.append(Segment(t("hud.on_foot"), "accent"))
     if state.legacy:
         row.segments.append(Segment("   [Legacy 3.8]", "warn"))
     return row
@@ -244,8 +233,8 @@ def _guide_turn(turn: float | None) -> str:
 
 def _guide_dist(meters: float) -> str:
     if meters >= 10_000:
-        return f"{meters / 1000:.1f} км"
-    return f"{meters:,.0f} м".replace(",", " ")
+        return f"{meters / 1000:.1f} {t('unit.km')}"
+    return f"{meters:,.0f} {t('unit.m')}".replace(",", " ")
 
 
 def _sample_rows(state: GameState) -> list[Row]:
@@ -259,25 +248,25 @@ def _sample_rows(state: GameState) -> list[Row]:
     rows: list[Row] = []
     head = Row(
         [
-            Segment(f"ПРОБЫ {organic.genus_en}  {organic.scans_text}", "warn"),
-            Segment(f"  · интервал {need} м", "dim"),
+            Segment(t("hud.sample_head", genus=organic.genus_en, scans=organic.scans_text), "warn"),
+            Segment(t("hud.interval", need=need), "dim"),
         ]
     )
     colony = state.colony_distance()
     if colony is not None:
         dist, need_m = colony
         if dist >= need_m:
-            head.segments.append(Segment("  · можно брать следующую", "ok"))
+            head.segments.append(Segment(t("hud.next_sample"), "ok"))
         else:
             gap = max(0.0, need_m - dist)
             head.segments.append(
                 Segment(
-                    f"  · от прошлой {_guide_dist(dist)} · ещё {_guide_dist(gap)}",
+                    t("hud.from_prev", dist=_guide_dist(dist), gap=_guide_dist(gap)),
                     "bad",
                 )
             )
     elif organic.samples_done > 0 and not organic.sample_pos:
-        head.segments.append(Segment("  · координаты прошлой пробы неизвестны", "dim"))
+        head.segments.append(Segment(t("hud.no_sample_pos"), "dim"))
     rows.append(head)
 
     plan = state.sample_plan()
@@ -287,17 +276,17 @@ def _sample_rows(state: GameState) -> list[Row]:
         if guide.kind == "away":
             course = f"{guide.bearing:.0f}°" if guide.bearing is not None else "—"
             text = (
-                f"отойти ещё {_guide_dist(guide.distance_m)}  курс {course}"
-                f"{_guide_turn(guide.turn)}"
+                t("hud.step_away", dist=_guide_dist(guide.distance_m), course=course)
+                + _guide_turn(guide.turn)
             )
             rows.append(Row([Segment("  ", "dim"), Segment(text, "warn")]))
             continue
         if guide.kind == "spot":
-            course = f"  на {guide.bearing:.0f}°" if guide.bearing is not None else ""
+            course = t("hud.bearing", deg=f"{guide.bearing:.0f}") if guide.bearing is not None else ""
             rows.append(
                 Row(
                     [
-                        Segment("  ближайший образец  ", "accent"),
+                        Segment(t("hud.nearest"), "accent"),
                         Segment(str(guide.title), "text"),
                         Segment(f"  {_guide_dist(guide.distance_m)}{course}{_guide_turn(guide.turn)}", "ok"),
                     ]
@@ -305,13 +294,13 @@ def _sample_rows(state: GameState) -> list[Row]:
             )
             continue
         style = "ok" if guide.ready else "bad"
-        mark = "достаточно" if guide.ready else "близко"
-        course = f"  на {guide.bearing:.0f}°" if guide.bearing is not None else ""
+        mark = t("hud.enough") if guide.ready else t("hud.close")
+        course = t("hud.bearing", deg=f"{guide.bearing:.0f}") if guide.bearing is not None else ""
         rows.append(
             Row(
                 [
                     Segment(f"  {guide.title}  ", "text"),
-                    Segment(f"{_guide_dist(guide.distance_m)} / {guide.need_m} м", style),
+                    Segment(t("hud.need_m", dist=_guide_dist(guide.distance_m), need=guide.need_m), style),
                     Segment(f"{course}{_guide_turn(guide.turn)}  {mark}", style),
                 ]
             )
@@ -342,22 +331,22 @@ def _value_row(state: GameState, body: Body) -> Row | None:
     breakdown = values.body_values(body, odyssey=state.odyssey)
     if breakdown is None:
         return None
-    row = Row([Segment("стоимость: ", "dim")])
-    row.segments.append(Segment(f"скан ≈{values.credits(breakdown.scan)}", "text"))
-    row.segments.append(Segment(f" · с DSS ≈{values.credits(breakdown.mapped)}", "text"))
+    row = Row([Segment(t("hud.value"), "dim")])
+    row.segments.append(Segment(t("hud.scan", value=values.credits(breakdown.scan)), "text"))
+    row.segments.append(Segment(t("hud.with_dss", value=values.credits(breakdown.mapped)), "text"))
     if breakdown.first_discoverer:
-        row.segments.append(Segment(f" · ×{values.DISCOVERY_MULTIPLIER:g} за первое открытие", "ok"))
+        row.segments.append(Segment(t("hud.first_disc", mult=values.DISCOVERY_MULTIPLIER), "ok"))
     elif breakdown.first_mapper:
-        row.segments.append(Segment(" · DSS первым (×8.1)", "ok"))
+        row.segments.append(Segment(t("hud.first_map"), "ok"))
     if body.landable:
         if body.was_footfalled:
-            row.segments.append(Segment(" · футфол уже был", "muted"))
+            row.segments.append(Segment(t("hud.foot_done"), "muted"))
         else:
-            row.segments.append(Segment(" · чужого футфола нет: шанс на ×5 First Logged", "ok"))
+            row.segments.append(Segment(t("hud.foot_chance"), "ok"))
     if body.discovered_by:
-        row.segments.append(Segment(f" · открыл {body.discovered_by}", "muted"))
+        row.segments.append(Segment(t("hud.discovered_by", name=body.discovered_by), "muted"))
     if body.mapped_by:
-        row.segments.append(Segment(f" · картографировал {body.mapped_by}", "muted"))
+        row.segments.append(Segment(t("hud.mapped_by", name=body.mapped_by), "muted"))
     return row
 
 
@@ -380,7 +369,7 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     ):
         predictions = bio.predict_for_body(body, state.system, limit=max_pred)
         if predictions:
-            head = Row([Segment("предсказание: ", "dim")])
+            head = Row([Segment(t("hud.predict"), "dim")])
             head.segments.append(Segment(", ".join(sorted({p.genus for p in predictions})), "accent"))
             rows.append(head)
             for prediction in predictions[:max_pred]:
@@ -391,12 +380,12 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
 
     system_bio = [b for b in state.system.bio_bodies if b is not body]
     if system_bio:
-        head = Row([Segment("био в системе: ", "dim")])
+        head = Row([Segment(t("hud.bio_in_system"), "dim")])
         head.segments.append(Segment(f"{len(system_bio)}", "ok"))
         rows.append(head)
         for candidate in sorted(system_bio, key=lambda b: b.distance_ls)[:6]:
             row = Row([Segment("• ", "muted"), Segment(candidate.name, "text")])
-            row.segments.append(Segment(f"  {candidate.bio_signals} сигн.", "ok"))
+            row.segments.append(Segment(t("hud.signals", n=candidate.bio_signals), "ok"))
             forecast = bio.forecast_names(candidate, state.system, limit=3)
             if forecast:
                 prefix = "  ≈ " if not candidate.genuses else "  "
@@ -424,7 +413,7 @@ def _carrier_who(carrier) -> str:
         "карриеркарриер",
         "carriercarrier",
     }:
-        return "Карриер"
+        return t("hud.carrier")
     return who
 
 
@@ -434,20 +423,21 @@ def _carrier_label(state: GameState) -> str | None:
         return None
     who = _carrier_who(carrier)
     # Явно «Карриер», иначе callsign выглядит как обычная система
-    prefix = "Карриер" if who.lower() == "карриер" else f"Карриер {who}"
+    generic = t("hud.carrier")
+    prefix = generic if who.lower() == generic.lower() else f"{generic} {who}"
     where = carrier.system or "—"
     if carrier.jump_pending and carrier.jump_dest_system:
         frm = carrier.jump_from_system or where
-        return f"{prefix} · готовится: {frm} → {carrier.jump_dest_system}"
+        return t("hud.carrier_prep", prefix=prefix, frm=frm, dest=carrier.jump_dest_system)
     dist = state.carrier_distance_ly()
     if dist is None:
         if state.carrier_pos_pending:
-            return f"{prefix} · {where} · ищем ly…"
-        return f"{prefix} · {where}"
+            return t("hud.carrier_seek", prefix=prefix, where=where)
+        return t("hud.carrier_at", prefix=prefix, where=where)
     if dist < 0.05:
-        return f"{prefix} · {where} · здесь"
+        return t("hud.carrier_here", prefix=prefix, where=where)
     text = f"{dist:,.1f}".replace(",", " ")
-    return f"{prefix} · {where} · {text} ly"
+    return t("hud.carrier_dist", prefix=prefix, where=where, dist=text)
 
 
 def _append_carrier(row: Row, state: GameState) -> None:
@@ -462,47 +452,47 @@ def _append_carrier(row: Row, state: GameState) -> None:
 def _system_row(state: GameState) -> Row:
     system = state.system
     scan_sum, mapped_sum = values.system_totals(system, odyssey=state.odyssey)
-    row = Row([Segment("система: ", "dim")])
+    row = Row([Segment(t("hud.system"), "dim")])
     if system.name:
         row.segments.append(Segment(system.name, "fg"))
         row.segments.append(Segment(" · ", "muted"))
     if system.discovered_by_me:
-        row.segments.append(Segment("открыта вами", "ok"))
+        row.segments.append(Segment(t("hud.opened_by_you"), "ok"))
         row.segments.append(Segment(" · ", "muted"))
-    row.segments.append(Segment(f"{len(system.bodies)} тел", "text"))
+    row.segments.append(Segment(t("hud.n_bodies", n=len(system.bodies)), "text"))
     if scan_sum:
-        row.segments.append(Segment(f" · данных ≈{values.credits(scan_sum)}", "text"))
-        row.segments.append(Segment(f" · с DSS ≈{values.credits(mapped_sum)}", "text"))
+        row.segments.append(Segment(t("hud.data", value=values.credits(scan_sum)), "text"))
+        row.segments.append(Segment(t("hud.dss_sum", value=values.credits(mapped_sum)), "text"))
     if system.remote_scan_value:
         label = f" · EDSM ≈{values.credits(system.remote_scan_value)}"
         if system.remote_mapped_value:
-            label += f" / с картами ≈{values.credits(system.remote_mapped_value)}"
+            label += t("hud.edsm_maps", value=values.credits(system.remote_mapped_value))
         row.segments.append(Segment(label, "accent"))
     if system.remote_sources:
-        row.segments.append(Segment(f" · догрузка: {', '.join(system.remote_sources)}", "muted"))
+        row.segments.append(Segment(t("hud.remote", sources=", ".join(system.remote_sources)), "muted"))
     if state.legacy:
-        row.segments.append(Segment(" · Legacy 3.8 (без Odyssey-бонусов)", "warn"))
+        row.segments.append(Segment(t("hud.legacy"), "warn"))
     return row
 
 
 def _session_row(state: GameState) -> Row:
-    row = Row([Segment("сессия: ", "dim")])
-    row.segments.append(Segment(f"{state.session_jumps} прыжк.", "text"))
+    row = Row([Segment(t("hud.session"), "dim")])
+    row.segments.append(Segment(t("hud.session_jumps", n=state.session_jumps), "text"))
     fresh = "ok" if state.session_new_systems else "text"
-    row.segments.append(Segment(f" · новых систем: {state.session_new_systems}", fresh))
+    row.segments.append(Segment(t("hud.new_systems", n=state.session_new_systems), fresh))
     if state.avg_jump_sec >= 10:
-        row.segments.append(Segment(f" · ~{state.avg_jump_sec:.0f} с/прыжок", "muted"))
+        row.segments.append(Segment(t("hud.sec_jump", n=state.avg_jump_sec), "muted"))
     if state.session_scan_value:
-        row.segments.append(Segment(f" · скан {values.credits(state.session_scan_value)}", "text"))
+        row.segments.append(Segment(t("hud.sess_scan", value=values.credits(state.session_scan_value)), "text"))
     if state.session_map_value:
-        row.segments.append(Segment(f" · DSS {values.credits(state.session_map_value)}", "text"))
+        row.segments.append(Segment(t("hud.sess_dss", value=values.credits(state.session_map_value)), "text"))
     if state.session_organic_estimate:
-        row.segments.append(Segment(f" · био ≈{values.credits(state.session_organic_estimate)}", "ok"))
+        row.segments.append(Segment(t("hud.sess_bio", value=values.credits(state.session_organic_estimate)), "ok"))
     if state.session_sold or state.session_organic_sold:
         total = state.session_sold + state.session_organic_sold
-        row.segments.append(Segment(f" · продано {values.credits(total)}", "accent"))
+        row.segments.append(Segment(t("hud.sold", value=values.credits(total)), "accent"))
     if state.status.low_fuel:
-        row.segments.append(Segment("  МАЛО ТОПЛИВА", "bad"))
+        row.segments.append(Segment(t("hud.low_fuel"), "bad"))
     return row
 
 
@@ -748,7 +738,7 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
         for key in body.genuses:
             lines.append(BioLine(segments=[Segment(codex.display_name(key), "ok")]))
     elif not groups and not body.organisms and not body.genuses:
-        note = "подходящих видов не нашлось" if body.planet_class else "параметров скана ещё нет"
+        note = t("hud.no_species") if body.planet_class else t("hud.no_scan")
         lines.append(BioLine(segments=[Segment(note, "dim")]))
     low, high = _body_reward_span(body, state)
     return lines, (low, high)
@@ -815,9 +805,9 @@ def _marked(body: Body, state: GameState) -> bool:
 
 
 def _footers(low: int, high: int, ff_low: int, ff_high: int, with_bonus: bool) -> list[tuple[str, str]]:
-    footers = [(f"итого ≈ {_credit_span(low, high)}", "fg")]
+    footers = [(t("hud.total", value=_credit_span(low, high)), "fg")]
     if with_bonus and (ff_low or ff_high) and (ff_low != low or ff_high != high):
-        footers.append((f"футфол ×5 ≈ {_credit_span(ff_low, ff_high)}", "accent"))
+        footers.append((t("hud.footfall", value=_credit_span(ff_low, ff_high)), "accent"))
     return footers
 
 
@@ -840,7 +830,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
         ff_low = low * FIRST_LOGGED_MULTIPLIER if bonus else low
         ff_high = high * FIRST_LOGGED_MULTIPLIER if bonus else high
         count = focus.bio_signals or 0
-        title = f"{_short_body(focus, state.system)} · био ×{count}"
+        title = t("hud.body_bio", name=_short_body(focus, state.system), n=count)
         return BioBoard(
             title=title,
             lines=lines,
@@ -851,7 +841,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
     total = sum(body.bio_signals or 0 for body in bodies)
     bonus = any(body.landable and not body.was_footfalled for body in bodies)
     return BioBoard(
-        title=f"биосигналы ×{total}",
+        title=t("hud.bio_title", n=total),
         lines=lines,
         footers=_footers(low, high, ff_low, ff_high, bonus),
         radar=radar,

@@ -1,6 +1,10 @@
 """Тесты детектора голосовых алертов (без реального TTS)."""
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("EDHUD_LANG", "ru")
+
 import unittest
 
 from edhud.alerts import AlertEngine

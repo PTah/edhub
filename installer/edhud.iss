@@ -8,7 +8,7 @@
 
 #define MyAppName "EDHUD"
 #define MyAppPublisher "EDHUD"
-#define MyAppURL "https://github.com/edhub/edhub"
+#define MyAppURL "https://github.com/PTah/edhub"
 #define MyAppExeName "EDHUD.exe"
 
 [Setup]

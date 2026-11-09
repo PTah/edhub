@@ -6,6 +6,7 @@ from typing import Callable
 
 from . import bio
 from . import values
+from .i18n import t
 from .model import GameState, format_dss_range
 
 
@@ -112,13 +113,12 @@ class AlertEngine:
         if not (self.armed and self.voice_enabled and self.voice_bio):
             return None
         body = state.system.bodies.get(body_id)
-        body_name = (body.name if body else None) or event.get("BodyName") or "тело"
-        short = body_name.split()[-1] if body_name else "тело"
+        body_name = (body.name if body else None) or event.get("BodyName") or t("voice.body")
+        short = body_name.split()[-1] if body_name else t("voice.body")
         forecast = bio.forecast_names(body, state.system, limit=3) if body is not None else []
-        possible = f" Возможно: {', '.join(forecast)}." if forecast else ""
-        # short — обозначение тела (часто «2»/«A 4»), count — число биосигналов
-        text = f"Биологический сигнал найден на {short}. Сигналов: {count}.{possible}"
-        overlay = f"био ×{count}: {body_name}"
+        possible = t("voice.possible", names=", ".join(forecast)) if forecast else ""
+        text = t("voice.bio", short=short, count=count, possible=possible)
+        overlay = f"{t('col.bio').lower()} ×{count}: {body_name}"
         if forecast:
             overlay += " · " + ", ".join(forecast)
         return Alert(kind="bio", text=text, overlay=overlay)
@@ -137,9 +137,9 @@ class AlertEngine:
         self._system_seen.add(address)
         if not (self.armed and self.voice_enabled and self.voice_first_discovery):
             return None
-        system = state.system.name or event.get("StarSystem") or "система"
-        text = "Звёздная система открыта вами."
-        return Alert(kind="first_discovery", text=text, overlay=f"первое открытие: {system}")
+        system = state.system.name or event.get("StarSystem") or t("voice.system")
+        text = t("voice.discovered")
+        return Alert(kind="first_discovery", text=text, overlay=t("voice.discovered_overlay", system=system))
 
     def _check_dss_range(self, state: GameState) -> Alert | None:
         if not (self.armed and self.voice_enabled and self.voice_dss_range):
@@ -156,9 +156,9 @@ class AlertEngine:
         self._dss_ready_seen.add(key)
         radius = state.status.planet_radius or body.radius
         rng = format_dss_range(radius)
-        short = (body.name or "тело").split()[-1]
-        text = "Тормози"
-        return Alert(kind="dss_range", text=text, overlay=f"DSS готов · {short} · {rng}")
+        short = (body.name or t("voice.body")).split()[-1]
+        text = t("voice.brake")
+        return Alert(kind="dss_range", text=text, overlay=t("voice.dss_overlay", short=short, rng=rng))
 
     def _check_expensive_planet(self, event: dict, state: GameState) -> Alert | None:
         if event.get("StarType"):
@@ -183,11 +183,11 @@ class AlertEngine:
         self._expensive_seen.add(key)
         if not (self.armed and self.voice_enabled and self.voice_expensive_planets):
             return None
-        short = (body.name or event.get("BodyName") or "планета").split()[-1]
+        short = (body.name or event.get("BodyName") or t("voice.planet")).split()[-1]
         amount = values.credits(payout)
-        text = f"Дорогая планета {short}. Цена картографии {amount} кредитов"
+        text = t("voice.expensive", short=short, amount=amount)
         return Alert(
             kind="expensive_planet",
             text=text,
-            overlay=f"дорого · {short} · {amount}",
+            overlay=t("voice.expensive_overlay", short=short, amount=amount),
         )

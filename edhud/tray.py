@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config
+from .i18n import t
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -48,6 +49,7 @@ ID_OPEN_EDSM = 1006
 ID_OPEN_MAP = 1007
 ID_SETTINGS = 1008
 ID_OPEN_CONFIG = 1009
+ID_CHECK_UPDATE = 1010
 ID_QUIT = 1099
 
 # 64-bit: указатели, не c_long
@@ -291,19 +293,20 @@ class TrayIcon(threading.Thread):
             flags = MF_STRING | (MF_CHECKED if checked else 0)
             user32.AppendMenuW(menu, flags, cid, text)
 
-        item(ID_TOGGLE_VISIBLE, "Показать оверлей" if not visible else "Скрыть оверлей", visible)
-        item(ID_TOGGLE_MAIN, "Окно EDHUD (Route / Bodies)", main_visible)
-        item(ID_TOGGLE_EXPANDED, "Подробности (F8)", expanded)
-        item(ID_TOGGLE_CLICK, "Сквозной режим мыши (F9)", click_through)
+        item(ID_TOGGLE_VISIBLE, t("tray.show") if not visible else t("tray.hide"), visible)
+        item(ID_TOGGLE_MAIN, t("tray.main"), main_visible)
+        item(ID_TOGGLE_EXPANDED, t("tray.details"), expanded)
+        item(ID_TOGGLE_CLICK, t("tray.click"), click_through)
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-        item(ID_OPEN_SPANSH, "Система на Spansh…")
-        item(ID_OPEN_EDSM, "Система на EDSM…")
-        item(ID_OPEN_MAP, "Галактическая карта Spansh…")
+        item(ID_OPEN_SPANSH, t("tray.spansh"))
+        item(ID_OPEN_EDSM, t("tray.edsm"))
+        item(ID_OPEN_MAP, t("tray.map"))
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-        item(ID_SETTINGS, "Настройки…")
-        item(ID_OPEN_CONFIG, "Папка настроек и кэша…")
+        item(ID_SETTINGS, t("tray.settings"))
+        item(ID_CHECK_UPDATE, t("tray.update"))
+        item(ID_OPEN_CONFIG, t("tray.config"))
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-        item(ID_QUIT, "Выход (F12)")
+        item(ID_QUIT, t("tray.quit"))
 
         pt = POINT()
         user32.GetCursorPos(ctypes.byref(pt))
