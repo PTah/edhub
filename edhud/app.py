@@ -18,6 +18,7 @@ from .hotkeys import Hotkeys
 from .journal import JournalWatcher
 from .model import GameState
 from .route import Route
+from .belts import BeltStore
 from .store import SystemStore
 from .tui import run_tui
 from .voice import Voice
@@ -58,6 +59,7 @@ class App:
         self.journal_dir = Path(journal_dir) if journal_dir else cfg.resolved_journal_dir()
         self.state = GameState()
         self.store = SystemStore()
+        self.belt_store = BeltStore()
         self.remote_client = self._make_remote_client()
         self.watcher: JournalWatcher | None = None
         self.overlay = None
@@ -477,6 +479,7 @@ class App:
         self.mainwindow = MainWindow(
             self.overlay.root,
             cfg=self.cfg,
+            belt_store=self.belt_store,
             on_copy_system=self.copy_system_name,
             on_copy_carrier=self.copy_system_name,
             on_plot_to_carrier=self.plot_route_to_carrier,

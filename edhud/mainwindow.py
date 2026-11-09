@@ -1,11 +1,13 @@
-"""Основное окно EDHUD (стиль EDEB): вкладки Route и Bodies."""
+"""Основное окно EDHUD (стиль EDEB): вкладки Route, Bodies и Пояса."""
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
 from . import bio, codex, values, winapi
+from .belts import BeltStore, SavedBelt
 from .mining import format_hotspots, format_hotspots_tip
 from .model import Body, GameState, format_dss_range, is_belt_body, is_ring_body
 from .route import Route
@@ -351,12 +353,14 @@ class MainWindow:
         root: tk.Misc,
         on_close: Callable[[], None] | None = None,
         cfg=None,
+        belt_store: BeltStore | None = None,
         on_copy_system: Callable[[str], None] | None = None,
         on_copy_carrier: Callable[[str], None] | None = None,
         on_plot_to_carrier: Callable[[], None] | None = None,
     ) -> None:
         self.on_close = on_close
         self.cfg = cfg
+        self.belt_store = belt_store if belt_store is not None else BeltStore()
         self.on_copy_system = on_copy_system
         self.on_copy_carrier = on_copy_carrier
         self.on_plot_to_carrier = on_plot_to_carrier
@@ -451,8 +455,10 @@ class MainWindow:
 
         self.tab_route = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
+        self.tab_belts = ttk.Frame(nb, style="ED.TFrame", padding=8)
         nb.add(self.tab_route, text="Route")
         nb.add(self.tab_bodies, text="Bodies")
+        nb.add(self.tab_belts, text="Пояса")
         nb.select(self.tab_bodies)
 
         self.route_info = ttk.Label(self.tab_route, text="Маршрут пуст", style="ED.TLabel")
@@ -460,6 +466,9 @@ class MainWindow:
         self._ring_icon = _ring_icon(self.win)
         self._build_route_table()
         self._build_bodies_table()
+        self._build_belts_tab()
+        self._bind_minerals_header_menu()
+        self._refresh_belts_tab_title()
 
     def _load_column_widths(self) -> None:
         if self.cfg is None:
@@ -761,6 +770,282 @@ class MainWindow:
             header.place_configure(x=-canvas.canvasx(0), y=0)
         except tk.TclError:
             pass
+
+    def _build_belts_tab(self) -> None:
+        """Список сохранённых поясов с минералами."""
+        self.belts_info = ttk.Label(
+            self.tab_belts,
+            text="ПКМ по колонке «Минералы» в Bodies — сохранить пояс. Здесь — база.",
+            style="ED.Muted.TLabel",
+        )
+        self.belts_info.pack(anchor="w", pady=(0, 6))
+        host = tk.Frame(self.tab_belts, bg=COLORS["bg"])
+        host.pack(fill="both", expand=True)
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(0, weight=1)
+        canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
+        scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        inner = tk.Frame(canvas, bg=COLORS["row"])
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        self._belts_canvas = canvas
+        self._belts_inner = inner
+        self._belts_window = window
+
+        def _fit(event) -> None:
+            canvas.itemconfigure(window, width=int(event.width) or 1)
+
+        def _region(_event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, 0, 0))
+
+        def _wheel(event) -> None:
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind("<Configure>", _fit)
+        inner.bind("<Configure>", _region)
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        self._refresh_belts_list()
+
+    def _refresh_belts_tab_title(self) -> None:
+        count = len(self.belt_store)
+        try:
+            self.nb.tab(self.tab_belts, text=f"Пояса ({count})" if count else "Пояса")
+        except tk.TclError:
+            pass
+
+    def _refresh_belts_list(self) -> None:
+        if not hasattr(self, "_belts_inner"):
+            return
+        for child in self._belts_inner.winfo_children():
+            child.destroy()
+        belts = self.belt_store.list()
+        if not belts:
+            tk.Label(
+                self._belts_inner,
+                text="Пока пусто — найдите богатый пояс и сохраните ПКМ по «Минералы».",
+                bg=COLORS["row"],
+                fg=COLORS["muted"],
+                anchor="w",
+                font=(self._ui_family, self._ui_size),
+                padx=8,
+                pady=10,
+            ).pack(fill="x")
+            self._refresh_belts_tab_title()
+            return
+        for belt in belts:
+            self._add_belt_row(belt)
+        self._refresh_belts_tab_title()
+
+    def _add_belt_row(self, belt: SavedBelt) -> None:
+        row = tk.Frame(self._belts_inner, bg=COLORS["row"])
+        row.pack(fill="x", pady=1)
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(belt.saved_at)) if belt.saved_at else "—"
+        estimate = values.credits(belt.estimate_cr())
+        body_short = (belt.body_name or "").split()[-1] if belt.body_name else f"#{belt.body_id}"
+        title = f"{belt.system} · {body_short}"
+        if belt.planet_class:
+            title += f" · {belt.planet_class}"
+        left = tk.Label(
+            row,
+            text=title,
+            bg=COLORS["row"],
+            fg=COLORS["fg"],
+            anchor="w",
+            font=(self._ui_family, self._ui_size, "bold"),
+            padx=8,
+            cursor="hand2",
+        )
+        left.pack(fill="x", pady=(2, 0))
+        minerals = tk.Label(
+            row,
+            text=f"{belt.minerals_label()}   ·  оценка ≈{estimate}   ·  {when}",
+            bg=COLORS["row"],
+            fg=COLORS["accent"],
+            anchor="w",
+            font=(self._ui_family, self._ui_size),
+            padx=8,
+            cursor="hand2",
+        )
+        minerals.pack(fill="x", pady=(0, 6))
+        tip = format_hotspots_tip(belt.hotspots) or ""
+        tip = (tip + "\n\nДвойной клик — копировать систему\nПКМ — удалить из базы").strip()
+        for widget in (row, left, minerals):
+            cell_tip = _CellTip(row, widget, text=tip)
+            widget.tip = cell_tip
+            widget.bind("<Double-Button-1>", lambda _e, name=belt.system: self._copy_belt_system(name), add="+")
+            widget.bind("<Button-3>", lambda e, key=belt.key(): self._popup_belt_row_menu(e, key), add="+")
+
+    def _copy_belt_system(self, name: str) -> None:
+        if not name:
+            return
+        if self.on_copy_system:
+            self.on_copy_system(name)
+        else:
+            self._copy_text(name)
+
+    def _popup_belt_row_menu(self, event, key: str) -> None:
+        menu = tk.Menu(self.win, tearoff=0)
+        belt = next((b for b in self.belt_store.list() if b.key() == key), None)
+        if belt is not None:
+            menu.add_command(label="Копировать систему", command=lambda: self._copy_belt_system(belt.system))
+        menu.add_command(label="Удалить из базы", command=lambda: self._delete_saved_belt(key))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _delete_saved_belt(self, key: str) -> None:
+        if self.belt_store.remove(key):
+            self._refresh_belts_list()
+            self._flash_status("Пояс удалён из базы")
+            if self._state is not None:
+                self._last_key = None
+                self._update_bodies(self._state)
+
+    def _bind_minerals_header_menu(self) -> None:
+        for index, (key, _title, _w, _a) in enumerate(BODY_COLUMNS):
+            if key != "minerals":
+                continue
+            if index >= len(self._header_labels):
+                return
+            label = self._header_labels[index]
+            box = label.master
+            for widget in (label, box):
+                widget.bind("<Button-3>", self._popup_minerals_header_menu, add="+")
+            return
+
+    def _popup_minerals_header_menu(self, event) -> None:
+        menu = tk.Menu(self.win, tearoff=0)
+        menu.add_command(label="Сохранить все пояса системы", command=self._save_all_system_belts)
+        menu.add_command(label="Открыть вкладку «Пояса»", command=self._show_belts_tab)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _show_belts_tab(self) -> None:
+        try:
+            self.nb.select(self.tab_belts)
+        except tk.TclError:
+            return
+        self._shown_tab = "belts"
+        self._refresh_belts_list()
+
+    def _flash_status(self, text: str) -> None:
+        if getattr(self, "lbl_status", None) is None:
+            return
+        prev = self.lbl_status.cget("text")
+        self.lbl_status.configure(text=text)
+        self.win.after(3500, lambda: self._restore_status(prev, text))
+
+    def _restore_status(self, prev: str, expected: str) -> None:
+        if getattr(self, "lbl_status", None) is None:
+            return
+        try:
+            if self.lbl_status.cget("text") == expected:
+                self.lbl_status.configure(text=prev)
+        except tk.TclError:
+            pass
+
+    def _body_to_saved_belt(self, body: Body, state: GameState) -> SavedBelt | None:
+        if not body.hotspots:
+            return None
+        pos = state.system.star_pos
+        star_pos = [float(pos[0]), float(pos[1]), float(pos[2])] if pos and len(pos) == 3 else None
+        return SavedBelt(
+            system=state.system.name or "",
+            address=int(state.system.address) if state.system.address is not None else None,
+            body_id=int(body.body_id),
+            body_name=body.name or f"Body {body.body_id}",
+            hotspots={str(k): int(v or 0) for k, v in body.hotspots.items()},
+            planet_class=body.planet_class,
+            star_pos=star_pos,
+            saved_at=time.time(),
+            rings_mapped=bool(getattr(body, "rings_mapped", False) or body.has_rings),
+        )
+
+    def _save_body_belt(self, body_id: int) -> None:
+        state = self._state
+        if state is None:
+            return
+        body = state.system.body(body_id)
+        if body is None or not body.hotspots:
+            self._flash_status("Нет минералов пояса для сохранения")
+            return
+        belt = self._body_to_saved_belt(body, state)
+        if belt is None or not belt.system:
+            self._flash_status("Не удалось сохранить пояс")
+            return
+        self.belt_store.upsert(belt)
+        self._refresh_belts_list()
+        self._flash_status(f"Пояс сохранён: {belt.system} · {(belt.body_name or '').split()[-1]}")
+        self._last_key = None
+        self._update_bodies(state)
+
+    def _save_all_system_belts(self) -> None:
+        state = self._state
+        if state is None:
+            return
+        saved = 0
+        for body in state.system.bodies.values():
+            if is_ring_body(body.name) or not body.hotspots:
+                continue
+            belt = self._body_to_saved_belt(body, state)
+            if belt is None or not belt.system:
+                continue
+            self.belt_store.upsert(belt)
+            saved += 1
+        self._refresh_belts_list()
+        if saved:
+            self._flash_status(f"Сохранено поясов: {saved}")
+            self._last_key = None
+            self._update_bodies(state)
+        else:
+            self._flash_status("В системе нет поясов с минералами")
+
+    def _popup_minerals_cell_menu(self, event, body_id: int) -> None:
+        state = self._state
+        body = state.system.body(body_id) if state is not None else None
+        menu = tk.Menu(self.win, tearoff=0)
+        if body is not None and body.hotspots:
+            already = self.belt_store.contains(
+                state.system.address if state else None,
+                body_id,
+                state.system.name if state else "",
+            )
+            label = "Обновить в базе" if already else "Сохранить пояс в базу"
+            menu.add_command(label=label, command=lambda: self._save_body_belt(body_id))
+            if already:
+                saved = self.belt_store.get(
+                    state.system.address if state else None,
+                    body_id,
+                    state.system.name if state else "",
+                )
+                if saved is not None:
+                    menu.add_command(
+                        label="Удалить из базы",
+                        command=lambda k=saved.key(): self._delete_saved_belt(k),
+                    )
+        else:
+            menu.add_command(label="Нет минералов пояса", state="disabled")
+        menu.add_separator()
+        menu.add_command(label="Открыть вкладку «Пояса»", command=self._show_belts_tab)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _bind_minerals_cell(self, box: tk.Misc, label: tk.Misc, body_id: int) -> None:
+        for widget in (box, label):
+            widget._belt_body_id = body_id  # type: ignore[attr-defined]
+
+            def _menu(event, bid=body_id) -> None:
+                self._popup_minerals_cell_menu(event, bid)
+
+            widget.bind("<Button-3>", _menu, add="+")
 
     def _build_bodies_table(self) -> None:
         """Таблица тел на метках: Treeview не умеет красить отдельные ячейки."""
@@ -1102,11 +1387,21 @@ class MainWindow:
                 self._state.view_tab = "bodies"
                 self._update_header(self._state)
                 self._update_bodies(self._state)
+            return
+        if current == str(self.tab_belts):
+            self._shown_tab = "belts"
+            self._refresh_belts_list()
 
     def _apply_tab(self, state: GameState) -> None:
+        # Вкладку «Пояса» игра не переключает — оставляем, если пользователь там.
+        if self._shown_tab == "belts":
+            return
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
         try:
             current = self.nb.select()
+            if current == str(self.tab_belts):
+                self._shown_tab = "belts"
+                return
             shown = "route" if current == str(self.tab_route) else "bodies"
         except tk.TclError:
             shown = self._shown_tab
@@ -1306,6 +1601,12 @@ class MainWindow:
         }
         tip = _forecast_tip(body, state)
         minerals_tip = format_hotspots_tip(body.hotspots)
+        if body.hotspots:
+            saved = self.belt_store.contains(state.system.address, body.body_id, state.system.name or "")
+            extra = "ПКМ — сохранить пояс в базу"
+            if saved:
+                extra = "★ уже в базе · ПКМ — обновить / удалить"
+            minerals_tip = (minerals_tip + "\n\n" + extra) if minerals_tip else extra
         dss_tip = None
         if body.rings_mapped and not body.dss_scanned:
             dss_tip = "Отсканирован пояс/кольца; поверхность планеты — нет"
@@ -1441,6 +1742,8 @@ class MainWindow:
                         )
                     box = label.master
                     cells[key] = (box, label)
+                    if key == "minerals":
+                        self._bind_minerals_cell(box, label, body.body_id)
                 self._body_rows[body.body_id] = {"cells": cells, "sig": sig, "row": row_idx}
                 continue
 
@@ -1458,6 +1761,8 @@ class MainWindow:
                         label.configure(text=values[key], fg=fg, bg=bg, anchor=anchor)
                         box.configure(bg=bg)
                         self._set_cell_tip(box, label, tips.get(key))
+                    if key == "minerals":
+                        self._bind_minerals_cell(box, label, body.body_id)
                 entry["sig"] = sig
 
             if entry["row"] != row_idx:
