@@ -148,7 +148,172 @@ def _is_under(path: Path, root: Path) -> bool:
         return False
 
 
+def _winhttp_get(
+    url: str,
+    timeout: float,
+    accept: str = "",
+    *,
+    follow: bool = True,
+    on_chunk=None,
+) -> tuple[int, str, int]:
+    """GET через WinHTTP (хранилище сертификатов Windows, без PowerShell).
+
+    urllib на этой машине не доверяет цепочке GitHub. WinHTTP использует
+    те же корни, что браузер и системные программы.
+    """
+    import ctypes
+    from ctypes import wintypes
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
+    port = int(parts.port or (443 if parts.scheme == "https" else 80))
+    secure = parts.scheme == "https"
+
+    wh = ctypes.WinDLL("winhttp")
+    wh.WinHttpOpen.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    wh.WinHttpOpen.restype = ctypes.c_void_p
+    wh.WinHttpConnect.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR, wintypes.WORD, wintypes.DWORD]
+    wh.WinHttpConnect.restype = ctypes.c_void_p
+    wh.WinHttpOpenRequest.argtypes = [
+        ctypes.c_void_p,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    wh.WinHttpOpenRequest.restype = ctypes.c_void_p
+    wh.WinHttpSetTimeouts.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    wh.WinHttpSetTimeouts.restype = wintypes.BOOL
+    wh.WinHttpSetOption.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+    wh.WinHttpSetOption.restype = wintypes.BOOL
+    wh.WinHttpSendRequest.argtypes = [
+        ctypes.c_void_p,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_size_t,
+    ]
+    wh.WinHttpSendRequest.restype = wintypes.BOOL
+    wh.WinHttpReceiveResponse.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    wh.WinHttpReceiveResponse.restype = wintypes.BOOL
+    wh.WinHttpQueryHeaders.argtypes = [
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    wh.WinHttpQueryHeaders.restype = wintypes.BOOL
+    wh.WinHttpQueryDataAvailable.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
+    wh.WinHttpQueryDataAvailable.restype = wintypes.BOOL
+    wh.WinHttpReadData.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    wh.WinHttpReadData.restype = wintypes.BOOL
+    wh.WinHttpCloseHandle.argtypes = [ctypes.c_void_p]
+    wh.WinHttpCloseHandle.restype = wintypes.BOOL
+
+    access = 4  # WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
+    session = wh.WinHttpOpen(USER_AGENT, access, None, None, 0)
+    if not session:
+        session = wh.WinHttpOpen(USER_AGENT, 0, None, None, 0)
+    if not session:
+        raise OSError("WinHttpOpen failed")
+    connect = request = None
+    try:
+        ms = max(1000, int(timeout * 1000))
+        wh.WinHttpSetTimeouts(session, ms, ms, ms, ms)
+        connect = wh.WinHttpConnect(session, host, port, 0)
+        if not connect:
+            raise OSError(f"WinHttpConnect {host}")
+        flags = 0x00800000 if secure else 0
+        request = wh.WinHttpOpenRequest(connect, "GET", path, None, None, None, flags)
+        if not request:
+            raise OSError("WinHttpOpenRequest failed")
+        if not follow:
+            policy = wintypes.DWORD(0)  # WINHTTP_OPTION_REDIRECT_POLICY_NEVER
+            wh.WinHttpSetOption(request, 88, ctypes.byref(policy), ctypes.sizeof(policy))
+        extra = f"Accept: {accept}\r\n" if accept else None
+        sent = wh.WinHttpSendRequest(request, extra, -1 if extra else 0, None, 0, 0, 0)
+        if not sent or not wh.WinHttpReceiveResponse(request, None):
+            raise OSError(f"WinHTTP GET failed ({ctypes.get_last_error()})")
+        status_code = wintypes.DWORD()
+        status_len = wintypes.DWORD(ctypes.sizeof(status_code))
+        status_idx = wintypes.DWORD(0)
+        if not wh.WinHttpQueryHeaders(
+            request,
+            19 | 0x20000000,  # STATUS_CODE | FLAG_NUMBER
+            None,
+            ctypes.byref(status_code),
+            ctypes.byref(status_len),
+            ctypes.byref(status_idx),
+        ):
+            raise OSError("WinHTTP status missing")
+        location = _winhttp_header(wh, request, "Location")
+        length_text = _winhttp_header(wh, request, "Content-Length")
+        try:
+            total_hint = int(length_text or "0")
+        except ValueError:
+            total_hint = 0
+        done = 0
+        while True:
+            avail = wintypes.DWORD(0)
+            if not wh.WinHttpQueryDataAvailable(request, ctypes.byref(avail)) or not avail.value:
+                break
+            n = min(int(avail.value), 256 * 1024)
+            block = ctypes.create_string_buffer(n)
+            read = wintypes.DWORD(0)
+            if not wh.WinHttpReadData(request, block, n, ctypes.byref(read)) or not read.value:
+                break
+            piece = block.raw[: int(read.value)]
+            done += len(piece)
+            if done > MAX_ASSET_BYTES:
+                raise OSError("update file is too large")
+            if on_chunk is not None:
+                on_chunk(piece, total_hint)
+        return int(status_code.value), location, total_hint or done
+    finally:
+        if request:
+            wh.WinHttpCloseHandle(request)
+        if connect:
+            wh.WinHttpCloseHandle(connect)
+        wh.WinHttpCloseHandle(session)
+
+
+def _winhttp_header(wh, request, name: str) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    size = wintypes.DWORD(0)
+    index = wintypes.DWORD(0)
+    wh.WinHttpQueryHeaders(request, 65535, name, None, ctypes.byref(size), ctypes.byref(index))
+    if not size.value:
+        return ""
+    buf = ctypes.create_unicode_buffer(max(1, size.value // 2 + 1))
+    index = wintypes.DWORD(0)
+    if not wh.WinHttpQueryHeaders(request, 65535, name, buf, ctypes.byref(size), ctypes.byref(index)):
+        return ""
+    return buf.value or ""
+
+
 def _request(url: str, timeout: float, accept: str = "") -> bytes:
+    if sys.platform == "win32":
+        chunks: list[bytes] = []
+
+        def take(piece: bytes, _total: int) -> None:
+            chunks.append(piece)
+
+        status, _location, _done = _winhttp_get(url, timeout, accept, on_chunk=take)
+        if status >= 300:
+            raise urllib.error.HTTPError(url, status, f"HTTP {status}", hdrs=None, fp=None)
+        return b"".join(chunks)
     headers = {"User-Agent": USER_AGENT}
     if accept:
         headers["Accept"] = accept
@@ -176,6 +341,15 @@ def _request(url: str, timeout: float, accept: str = "") -> bytes:
 
 
 def _latest_tag_from_redirect() -> str:
+    if sys.platform == "win32":
+        status, location, _done = _winhttp_get(RELEASE_PAGE, 20, follow=False)
+        if status < 300 or status >= 400 or not location:
+            raise urllib.error.URLError(f"HTTP {status}")
+        tag = location.rstrip("/").rsplit("/", 1)[-1]
+        if not tag.lower().startswith("v") or not parse_version(tag):
+            raise urllib.error.URLError(f"bad release tag {tag!r}")
+        return tag
+
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
             return None
@@ -271,6 +445,26 @@ def format_bytes(value: int) -> str:
 def download(url: str, dest: Path, progress=None) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
+    if sys.platform == "win32":
+        done = 0
+
+        def take(piece: bytes, total: int) -> None:
+            nonlocal done
+            handle.write(piece)
+            done += len(piece)
+            if progress is not None:
+                progress(done, total)
+
+        with tmp.open("wb") as handle:
+            status, _location, total = _winhttp_get(url, 120, on_chunk=take)
+        if status >= 300:
+            tmp.unlink(missing_ok=True)
+            raise OSError(f"download HTTP {status}")
+        if total and done < total:
+            tmp.unlink(missing_ok=True)
+            raise OSError(f"downloaded {done} of {total} bytes")
+        tmp.replace(dest)
+        return
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=120) as response:
         total = int(response.headers.get("Content-Length") or 0)
