@@ -56,9 +56,10 @@ class FormulaTests(unittest.TestCase):
 
     def test_credits_format(self):
         self.assertEqual(values.credits(0), "—")
-        self.assertEqual(values.credits(2_500_000), "2.50 Mcr")
-        self.assertEqual(values.credits(450_000), "450 Kcr")
-        self.assertEqual(values.credits(999), "999 cr")
+        self.assertEqual(values.credits(2_500_000), "2 500 000")
+        self.assertEqual(values.credits(450_000), "450 000")
+        self.assertEqual(values.credits(7_006), "7 006")
+        self.assertEqual(values.credits(999), "999")
 
 
 class BodyValueTests(unittest.TestCase):

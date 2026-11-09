@@ -168,6 +168,8 @@ class Config:
     voice_bio: bool = True
     voice_first_discovery: bool = True
     voice_dss_range: bool = True
+    voice_expensive_planets: bool = True
+    expensive_planet_credits: int = 2_500_000
     voice_rate: int = 0  # SAPI Rate -10..10
     # живой фид EDDN (ZeroMQ); pyzmq не обязателен — есть встроенный ZMTP-клиент
     eddn_enabled: bool = True

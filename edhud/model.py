@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import codex
+from .mining import format_hotspots, format_hotspots_tip  # noqa: F401 — re-export
 from .route import Route
 from .values import body_values
 
@@ -43,6 +44,8 @@ LS_M = 299_792_458.0
 # Старый множитель 4.67 (диск 20°) срабатывал уже после «Too Fast» — голос опаздывал.
 _DSS_ALT_FACTOR = 15.5
 _DSS_ALT_MIN_M = 25_000.0
+# Голос «Тормози» — раньше зоны пробы (кратно лимиту), но не когда уже внутри неё.
+_DSS_WARN_MULT = 3.0
 # GuiFocus 10 = SAA (интерфейс DSS). В SC при «Too Fast» Altitude в Status.json
 # часто ещё нет — без DSS-прицела голос «Тормози» в полёте не сработает.
 GUI_FOCUS_SAA = 10
@@ -91,17 +94,6 @@ def _apply_signal_counts(body: Body, signals: list, merge_bio: bool = False) -> 
             if name:
                 body.hotspots[name] = max(int(body.hotspots.get(name) or 0), count)
                 body.has_rings = True
-
-
-def format_hotspots(hotspots: dict[str, int] | None) -> str:
-    """«Alexandrite, Musgravite ×2» для колонки Минералы."""
-    if not hotspots:
-        return "—"
-    parts: list[str] = []
-    for name, count in sorted(hotspots.items(), key=lambda item: (-int(item[1] or 0), item[0].lower())):
-        n = int(count or 0)
-        parts.append(name if n <= 1 else f"{name} ×{n}")
-    return ", ".join(parts) if parts else "—"
 
 
 def is_belt_body(name: str | None) -> bool:
@@ -407,6 +399,8 @@ class Body:
     genuses: dict[str, int] = field(default_factory=dict)
     dss_scanned: bool = False
     dss_remote: bool = False
+    # DSS только колец/пояса (газовый гигант): поверхность планеты не картографировали
+    rings_mapped: bool = False
     signals_known: bool = False
     signals_local: bool = False  # сигналы пришли из нашего журнала, не из EDSM/Spansh
     organisms: dict[str, Organic] = field(default_factory=dict)
@@ -503,6 +497,8 @@ class Body:
             self.has_rings = True
         if other.dss_scanned:
             self.dss_scanned = True
+        if other.rings_mapped:
+            self.rings_mapped = True
         if other.signals_local:
             self.signals_local = True
         if other.signals_known:
@@ -1495,15 +1491,54 @@ class GameState:
             body.signals_local = True
         self.last_fss_body_id = target.body_id
 
+    def _saa_is_rings_only(self, body: Body, e: dict) -> bool:
+        """True, если событие — DSS колец/пояса, а не картография поверхности планеты."""
+        if is_ring_body(body.name) or is_belt_body(body.name):
+            return True
+        # EfficiencyTarget=0 типичен для кольца; у планет обычно 6–7.
+        try:
+            efficiency = int(e.get("EfficiencyTarget")) if e.get("EfficiencyTarget") is not None else None
+        except (TypeError, ValueError):
+            efficiency = None
+        planet = (body.planet_class or "").lower()
+        gas = "gas giant" in planet
+        if efficiency == 0 and (body.has_rings or gas):
+            return True
+        signals = e.get("Signals")
+        if isinstance(signals, list) and signals:
+            has_bio_geo = False
+            has_mineral = False
+            for sig in signals:
+                if not isinstance(sig, dict):
+                    continue
+                kind = (sig.get("Type") or "").lower()
+                local = (sig.get("Type_Localised") or "").lower()
+                if "biological" in kind or "geological" in kind:
+                    has_bio_geo = True
+                elif "planetarymining" in kind or "mining location" in local:
+                    has_bio_geo = True
+                elif _hotspot_name(sig):
+                    has_mineral = True
+            if has_mineral and not has_bio_geo and not (e.get("Genuses") or []) and (body.has_rings or gas):
+                return True
+        return False
+
     def _on_saasignalsfound(self, e: dict) -> None:
         body = self._ensure_body(e)
         if body is None:
             return
         target = self._signals_target(body)
+        rings_only = self._saa_is_rings_only(body, e)
         body.signals_known = True
         body.signals_local = True
-        body.dss_scanned = True
-        # Кольцо: минералы на строке планеты; dss_scanned остаётся у кольца.
+        if rings_only:
+            # Кольцо/пояс: минералы на планете, ✔ DSS поверхности не ставим.
+            if is_ring_body(body.name) or is_belt_body(body.name):
+                body.dss_scanned = True
+            target.rings_mapped = True
+            target.has_rings = True
+        else:
+            body.dss_scanned = True
         _apply_signal_counts(target, e.get("Signals") or [], merge_bio=True)
         if target is not body:
             target.signals_known = True
@@ -1522,10 +1557,28 @@ class GameState:
 
     def _on_saascancomplete(self, e: dict) -> None:
         body = self._ensure_body(e)
-        if body is not None:
-            body.dss_scanned = True
-            self._merge_ring_hotspots_to_parent(body)
+        if body is None:
+            return
+        rings_only = self._saa_is_rings_only(body, e)
+        if rings_only:
+            if is_ring_body(body.name) or is_belt_body(body.name):
+                body.dss_scanned = True
+                parent = self._merge_ring_hotspots_to_parent(body)
+                if parent is not None:
+                    parent.rings_mapped = True
+                    parent.has_rings = True
+                else:
+                    body.rings_mapped = True
+            else:
+                # Игра иногда вешает кольцевой DSS на BodyID газового гиганта.
+                body.rings_mapped = True
+                body.has_rings = True
+                # Не ставим dss_scanned — поверхность гиганта не картографировали.
             self._account_scan(body.body_id, mapped=True)
+            return
+        body.dss_scanned = True
+        self._merge_ring_hotspots_to_parent(body)
+        self._account_scan(body.body_id, mapped=True)
 
     def _on_sellexplorationdata(self, e: dict) -> None:
         try:
@@ -1804,13 +1857,12 @@ class GameState:
         return self.status.flag(FLAG_HUD_ANALYSIS) and self.status.flag(FLAG_HARDPOINTS)
 
     def dss_in_probe_range(self) -> bool:
-        """Зона «можно тормозить под DSS» — пока ещё летим в SC, не после сброса.
+        """Зона «тормози под DSS» — подлёт в SC, не когда уже стоишь у пробы.
 
-        1) Если Status отдал Altitude — только она: Too Fast ≈ высота ≤ лимита.
-           Выше лимита = Out of Range, даже при открытом SAA.
-        2) Без высоты и без HasLatLong (типичный подлёт на полной SC) — DSS-прицел
-           (SAA или анализ+пилоны): на HUD уже Too Fast, а lat/alt ещё нет.
-        3) HasLatLong без высоты = уже орбита/сброс скорости — для «Тормози» поздно.
+        1) Есть Altitude: только полоса limit < alt ≤ limit·WARN.
+           Уже ≤ limit (зона пробы / «стою и стреляю») — поздно, молчим.
+        2) Нет высоты и нет HasLatLong — DSS-прицел (SAA / анализ+пилоны).
+        3) HasLatLong без высоты — орбита/сброс, для голоса поздно.
         """
         body = self.dss_target_body()
         if body is None or body.is_star or body.dss_scanned:
@@ -1819,9 +1871,13 @@ class GameState:
             return False
         radius = self.status.planet_radius or body.radius or 0.0
         limit = dss_probe_altitude_m(radius)
+        warn = limit * _DSS_WARN_MULT
         alt = self.status.altitude
         if alt is not None:
-            return float(alt) <= limit
+            alt_f = float(alt)
+            if alt_f <= limit:
+                return False
+            return alt_f <= warn
         if self.status.has_lat_long:
             return False
         return self._dss_sight_engaged()

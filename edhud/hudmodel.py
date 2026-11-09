@@ -104,15 +104,11 @@ def _genuses(body: Body, limit: int = 4) -> str:
 
 
 def _body_value_text(body: Body, odyssey: bool = True) -> tuple[str, str]:
-    """(текст, стиль) стоимости тела: скан или скан+DSS, с множителем."""
+    """(текст, стиль) цены картографии тела."""
     breakdown = values.body_values(body, odyssey=odyssey)
     if breakdown is None:
         return "", "muted"
-    if body.dss_scanned:
-        text = f"≈{values.credits(breakdown.mapped)}"
-    else:
-        text = f"≈{values.credits(breakdown.scan)}"
-    return text, "accent"
+    return values.credits(breakdown.mapped), "accent"
 
 
 def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool], str]:

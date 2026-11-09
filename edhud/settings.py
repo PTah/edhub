@@ -107,6 +107,12 @@ class SettingsDialog:
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
         self.voice_dss_range = BooleanVar(value=bool(getattr(self.cfg, "voice_dss_range", True)))
+        self.voice_expensive_planets = BooleanVar(
+            value=bool(getattr(self.cfg, "voice_expensive_planets", True))
+        )
+        self.expensive_planet_credits = StringVar(
+            value=str(int(getattr(self.cfg, "expensive_planet_credits", 2_500_000) or 2_500_000))
+        )
         self.show_belt_clusters = BooleanVar(value=bool(getattr(self.cfg, "show_belt_clusters", True)))
         self.voice_rate = IntVar(value=int(self.cfg.voice_rate or 0))
 
@@ -199,6 +205,23 @@ class SettingsDialog:
         ttk.Checkbutton(
             frm, text="Тормози — зона DSS", variable=self.voice_dss_range
         ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm, text="Озвучивать дорогие планеты", variable=self.voice_expensive_planets
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        erow = ttk.Frame(frm)
+        erow.grid(row=row, column=0, sticky="w", **pad)
+        ttk.Label(erow, text="Порог дорогой планеты, кредиты").pack(side="left")
+        ttk.Entry(erow, textvariable=self.expensive_planet_credits, width=14).pack(
+            side="left", padx=8
+        )
+        row += 1
+        ttk.Label(
+            frm,
+            text="Например 2500000 — озвучка, если цена картографии ≥ порога",
+            foreground="#666",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
         row += 1
         vrow = ttk.Frame(frm)
         vrow.grid(row=row, column=0, sticky="w", **pad)
@@ -537,6 +560,17 @@ class SettingsDialog:
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
         self.cfg.voice_dss_range = bool(self.voice_dss_range.get())
+        self.cfg.voice_expensive_planets = bool(self.voice_expensive_planets.get())
+        try:
+            raw = self.expensive_planet_credits.get().replace(" ", "").replace(",", "")
+            self.cfg.expensive_planet_credits = max(0, int(raw))
+        except (TypeError, ValueError):
+            messagebox.showerror(
+                "EDHUD",
+                "Порог дорогой планеты — целое число кредитов (например 2500000).",
+                parent=self.win,
+            )
+            return
         self.cfg.show_belt_clusters = bool(self.show_belt_clusters.get())
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))
         look_error = self._read_look()

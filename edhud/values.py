@@ -201,13 +201,7 @@ def system_totals(system, odyssey: bool = True) -> tuple[int, int]:
 
 
 def credits(value: int | None) -> str:
-    """Компактно: 1.23 Mcr / 456 Kcr / 789 cr."""
+    """Полная сумма кредитов с разделителем тысяч: 7 006 / 2 500 000."""
     if not value:
         return "—"
-    if value >= 1_000_000_000:
-        return f"{value / 1_000_000_000:.2f} Bcr"
-    if value >= 1_000_000:
-        return f"{value / 1_000_000:.2f} Mcr"
-    if value >= 1_000:
-        return f"{value / 1_000:.0f} Kcr"
-    return f"{value} cr"
+    return f"{int(value):,}".replace(",", " ")

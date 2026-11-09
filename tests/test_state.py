@@ -1242,12 +1242,22 @@ class CarrierDistanceTests(unittest.TestCase):
         self.assertEqual(planet.hotspots.get("Alexandrite"), 1)
         self.assertEqual(planet.hotspots.get("Musgravite"), 2)
         self.assertTrue(planet.has_rings)
+        self.assertTrue(planet.rings_mapped)
         self.assertFalse(planet.dss_scanned)
         self.assertTrue(ring.dss_scanned)
         self.assertEqual(ring.hotspots, {})
         text = format_hotspots(planet.hotspots)
-        self.assertIn("Alexandrite", text)
+        # дороже (Musgravite) раньше дешевле (Alexandrite)
+        self.assertLess(text.index("Musgravite"), text.index("Alexandrite"))
         self.assertIn("Musgravite ×2", text)
+
+        from edhud.mining import format_hotspots_tip
+
+        tip = format_hotspots_tip(planet.hotspots)
+        assert tip is not None
+        self.assertIn("239 000", tip)
+        self.assertIn("236 000", tip)
+        self.assertLess(tip.index("Musgravite"), tip.index("Alexandrite"))
 
         root = tk.Tk()
         root.withdraw()
@@ -1259,11 +1269,62 @@ class CarrierDistanceTests(unittest.TestCase):
             self.assertEqual(titles["minerals"], "Минералы")
             self.assertNotIn(40, window._body_rows)
             minerals_label = window._body_rows[6]["cells"]["minerals"][1]
-            self.assertIn("Alexandrite", minerals_label.cget("text"))
-            self.assertIn("Musgravite", minerals_label.cget("text"))
+            minerals_text = minerals_label.cget("text")
+            self.assertLess(minerals_text.index("Musgravite"), minerals_text.index("Alexandrite"))
+            dss_label = window._body_rows[6]["cells"]["dss"][1]
+            self.assertEqual(dss_label.cget("text"), "—")
             window.destroy()
         finally:
             root.destroy()
+
+    def test_gas_giant_ring_dss_does_not_check_planet(self):
+        """SAAScanComplete иногда на BodyID гиганта с EfficiencyTarget=0 — не ✔ DSS."""
+        from edhud.model import format_hotspots
+
+        state = GameState()
+        state.system.address = 1
+        state.apply(
+            {
+                "event": "Scan",
+                "BodyName": "Giant 1",
+                "BodyID": 5,
+                "PlanetClass": "Sudarsky class I gas giant",
+                "Radius": 30_000_000.0,
+                "Rings": [{"Name": "Giant 1 A Ring", "RingClass": "eRingClass_Icy"}],
+                "WasDiscovered": True,
+            }
+        )
+        state.apply(
+            {
+                "event": "SAAScanComplete",
+                "BodyName": "Giant 1",
+                "BodyID": 5,
+                "SystemAddress": 1,
+                "ProbesUsed": 1,
+                "EfficiencyTarget": 0,
+            }
+        )
+        state.apply(
+            {
+                "event": "SAASignalsFound",
+                "BodyName": "Giant 1",
+                "BodyID": 5,
+                "SystemAddress": 1,
+                "Signals": [
+                    {"Type": "Tritium", "Count": 4},
+                    {"Type": "Alexandrite", "Count": 1},
+                ],
+                "Genuses": [],
+            }
+        )
+        planet = state.system.body(5)
+        assert planet is not None
+        self.assertTrue(planet.rings_mapped)
+        self.assertFalse(planet.dss_scanned)
+        self.assertEqual(planet.hotspots.get("Alexandrite"), 1)
+        self.assertEqual(planet.hotspots.get("Tritium"), 4)
+        text = format_hotspots(planet.hotspots)
+        self.assertLess(text.index("Alexandrite"), text.index("Tritium"))
 
 
 class RouteMarkTests(unittest.TestCase):
@@ -1960,19 +2021,20 @@ class SampleGuideTests(unittest.TestCase):
                 "Flags": (1 << 4) | (1 << 21),
                 "Latitude": 1.0,
                 "Longitude": 2.0,
-                "Altitude": 1_500_000.0,
+                "Altitude": 50_000_000.0,
                 "PlanetRadius": 2_000_000.0,
                 "BodyID": 2,
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
+        # limit≈31 Mm, warn≈93 Mm — 50 Mm в полосе подлёта
         self.assertTrue(state.dss_in_probe_range())
 
     def test_dss_in_probe_range_matches_too_fast_hud(self):
-        """Высота выше старого порога (×4.67), но уже зона «Too Fast» в игре."""
+        """Голос в полосе limit < alt ≤ warn; внутри зоны пробы и далеко — нет."""
         state = GameState()
         state.system.address = 1
-        # R=3 Mm → старый лимит ~14 Mm, новый ~46.5 Mm
+        # R=3 Mm → limit≈46.5 Mm, warn≈139.5 Mm
         state.system.bodies[2] = Body(
             body_id=2,
             name="Here 2",
@@ -1982,17 +2044,28 @@ class SampleGuideTests(unittest.TestCase):
         )
         state.apply_status(
             {
-                "Flags": 1 << 4,  # supercruise, без HasLatLong — как при раннем Too Fast
-                "Altitude": 20_000_000.0,
+                "Flags": 1 << 4,  # supercruise, без HasLatLong
+                "Altitude": 80_000_000.0,
                 "PlanetRadius": 3_000_000.0,
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
         self.assertTrue(state.dss_in_probe_range())
+        # уже в зоне пробы — поздно
         state.apply_status(
             {
                 "Flags": 1 << 4,
-                "Altitude": 60_000_000.0,
+                "Altitude": 20_000_000.0,
+                "PlanetRadius": 3_000_000.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertFalse(state.dss_in_probe_range())
+        # ещё далеко (выше warn)
+        state.apply_status(
+            {
+                "Flags": 1 << 4,
+                "Altitude": 200_000_000.0,
                 "PlanetRadius": 3_000_000.0,
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
@@ -2122,7 +2195,8 @@ class SampleGuideTests(unittest.TestCase):
             {
                 "Flags": 1 << 4,
                 "GuiFocus": 10,
-                "Altitude": 900_000_000.0,
+                # limit≈499 Mm, warn≈1.5 Gm — берём заведомо выше warn
+                "Altitude": 3_000_000_000.0,
                 "Destination": {
                     "System": 1,
                     "Body": 51,

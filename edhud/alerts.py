@@ -5,12 +5,13 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import bio
+from . import values
 from .model import GameState, format_dss_range
 
 
 @dataclass
 class Alert:
-    kind: str  # bio | first_discovery | dss_range
+    kind: str  # bio | first_discovery | dss_range | expensive_planet
     text: str
     overlay: str | None = None
 
@@ -24,9 +25,12 @@ class AlertEngine:
     voice_bio: bool = True
     voice_first_discovery: bool = True
     voice_dss_range: bool = True
+    voice_expensive_planets: bool = True
+    expensive_planet_credits: int = 2_500_000
     _bio_seen: set[tuple[int, int]] = field(default_factory=set)
     _system_seen: set[int] = field(default_factory=set)
     _dss_ready_seen: set[tuple[int, int]] = field(default_factory=set)
+    _expensive_seen: set[tuple[int, int]] = field(default_factory=set)
     on_alert: Callable[[Alert], None] | None = None
 
     def configure(self, cfg) -> None:
@@ -34,6 +38,13 @@ class AlertEngine:
         self.voice_bio = bool(getattr(cfg, "voice_bio", True))
         self.voice_first_discovery = bool(getattr(cfg, "voice_first_discovery", True))
         self.voice_dss_range = bool(getattr(cfg, "voice_dss_range", True))
+        self.voice_expensive_planets = bool(getattr(cfg, "voice_expensive_planets", True))
+        try:
+            self.expensive_planet_credits = max(
+                0, int(getattr(cfg, "expensive_planet_credits", 2_500_000) or 0)
+            )
+        except (TypeError, ValueError):
+            self.expensive_planet_credits = 2_500_000
 
     def arm(self) -> None:
         self.armed = True
@@ -53,6 +64,9 @@ class AlertEngine:
                 fired.append(alert)
         elif name == "Scan":
             alert = self._check_discovery(event, state)
+            if alert:
+                fired.append(alert)
+            alert = self._check_expensive_planet(event, state)
             if alert:
                 fired.append(alert)
         for alert in fired:
@@ -143,5 +157,37 @@ class AlertEngine:
         radius = state.status.planet_radius or body.radius
         rng = format_dss_range(radius)
         short = (body.name or "тело").split()[-1]
-        text = "Тормози, расстояние достаточное для DSS"
+        text = "Тормози"
         return Alert(kind="dss_range", text=text, overlay=f"DSS готов · {short} · {rng}")
+
+    def _check_expensive_planet(self, event: dict, state: GameState) -> Alert | None:
+        if event.get("StarType"):
+            return None
+        body_id = event.get("BodyID")
+        address = state.system.address or event.get("SystemAddress")
+        if body_id is None or address is None:
+            return None
+        key = (int(address), int(body_id))
+        if key in self._expensive_seen:
+            return None
+        body = state.system.bodies.get(int(body_id))
+        if body is None:
+            return None
+        breakdown = values.body_values(body, odyssey=bool(getattr(state, "odyssey", True)))
+        if breakdown is None:
+            return None
+        payout = int(breakdown.mapped)
+        threshold = int(self.expensive_planet_credits or 0)
+        if payout < threshold:
+            return None
+        self._expensive_seen.add(key)
+        if not (self.armed and self.voice_enabled and self.voice_expensive_planets):
+            return None
+        short = (body.name or event.get("BodyName") or "планета").split()[-1]
+        amount = values.credits(payout)
+        text = f"Дорогая планета {short}. Цена картографии {amount} кредитов"
+        return Alert(
+            kind="expensive_planet",
+            text=text,
+            overlay=f"дорого · {short} · {amount}",
+        )
