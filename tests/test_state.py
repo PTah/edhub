@@ -2365,6 +2365,26 @@ class AppearanceTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_settings_visible_when_overlay_withdrawn(self):
+        """После F10/скрытия оверлея настройки из трея всё ещё должны открываться."""
+        import tkinter as tk
+
+        from edhud.config import Config
+        from edhud.settings import SettingsDialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.update_idletasks()
+        try:
+            self.assertFalse(bool(root.winfo_viewable()))
+            dialog = SettingsDialog(root, Config())
+            dialog.win.update_idletasks()
+            self.assertTrue(bool(dialog.win.winfo_viewable()))
+            self.assertEqual(str(dialog.win.wm_state()), "normal")
+            dialog.win.destroy()
+        finally:
+            root.destroy()
+
     def test_geometry_xy_parser(self):
         from edhud.mainwindow import _geometry_xy
 

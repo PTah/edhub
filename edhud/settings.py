@@ -56,13 +56,24 @@ class SettingsDialog:
         self.win.title(t("set.title"))
         self.win.attributes("-topmost", True)
         self.win.resizable(True, True)
+        # transient к свёрнутому оверлею (F10/withdraw) прячет и это окно на Windows.
         try:
-            self.win.transient(root)
+            if bool(root.winfo_viewable()):
+                self.win.transient(root)
         except tk.TclError:
             pass
         self._live_ready = False
         self._build()
-        self.win.grab_set()
+        try:
+            self.win.deiconify()
+            self.win.lift()
+            self.win.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        try:
+            self.win.grab_set()
+        except tk.TclError:
+            pass
         self.win.focus_force()
         self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
         self.win.after(200, self._arm_live)
