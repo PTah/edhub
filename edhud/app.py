@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import demo, eddn, galaxy, hudmodel, remote, spansh, tray
+from . import demo, eddn, edsm_upload, galaxy, hudmodel, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -72,6 +72,9 @@ class App:
         self._update_busy = False
         self.alerts = AlertEngine(on_alert=self._on_alert)
         self.alerts.configure(cfg)
+        from . import __version__
+
+        self.edsm = edsm_upload.EdsmUploader(lambda: self.cfg, __version__)
         self._eddn_filter = eddn.SetFilter()
         self._eddn_messages: queue.Queue = queue.Queue(maxsize=512)
         self._cached_for: int | None = None
@@ -174,12 +177,13 @@ class App:
         threading.Thread(target=work, name="edhud-nebulae", daemon=True).start()
 
     def _on_journal_catchup(self) -> None:
-        """После replay: голос, кэш проб с координатами, снимок на диск."""
+        """После replay: голос, кэш проб с координатами, снимок на диск, выгрузка на EDSM."""
         self.alerts.arm()
         self._cached_for = None
         self.sync_system()
         self.state.persist_needed = False
         self._save_system_now()
+        self.edsm.enable_live(self.journal_dir)
 
     def _on_alert(self, alert: Alert) -> None:
         if alert.overlay:
@@ -197,6 +201,7 @@ class App:
 
     def _on_event(self, event: dict) -> None:
         self.alerts.handle(event, self.state)
+        self.edsm.note(event, self.state)
         if self.state.persist_needed:
             self.state.persist_needed = False
             self._save_system_now()

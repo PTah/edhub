@@ -538,18 +538,24 @@ class CarrierClickTests(unittest.TestCase):
         self.assertIn("FromSys", label or "")
         self.assertIn("ToSys", label or "")
         self.assertNotIn("карриер карриер", (label or "").lower())
+        copies = [part.copy for part in hudmodel._carrier_segments(state) if part.copy]
+        self.assertEqual(copies, ["FromSys", "ToSys"])
 
         root = tk.Tk()
         root.withdraw()
         try:
-            window = MainWindow(root)
+            copied: list[str] = []
+            window = MainWindow(root, on_copy_carrier=copied.append)
             window.update_state(state)
-            text = window.lbl_carrier.cget("text")
+            text = window.carrier_header_text()
             self.assertIn("готовится прыгать", text)
             self.assertIn("FromSys", text)
             self.assertIn("ToSys", text)
             self.assertNotIn("Карриер карриер", text)
             self.assertEqual(window.lbl_carrier_hint.cget("text"), "")
+            window._copy_carrier_name("FromSys")
+            window._copy_carrier_name("ToSys")
+            self.assertEqual(copied, ["FromSys", "ToSys"])
             window.destroy()
         finally:
             root.destroy()

@@ -67,6 +67,7 @@ class Overlay:
         self._menu = None
         self._planet_dim = False
         self._carrier_hit: tuple[int, int, int, int] | None = None
+        self._copy_hits: list[tuple[int, int, int, int, str]] = []
 
         self.root = tk.Tk()
         self.root.title("EDHUD")
@@ -292,10 +293,8 @@ class Overlay:
         if self.cfg.click_through:
             return
         self._drag = None
-        if not self._carrier_hit_test(event.x, event.y):
-            return
-        name = None
-        if self.carrier_system_provider:
+        name = self._copy_at(event.x, event.y)
+        if not name and self._carrier_hit_test(event.x, event.y) and self.carrier_system_provider:
             try:
                 name = self.carrier_system_provider()
             except Exception:
@@ -401,6 +400,7 @@ class Overlay:
             )
         canvas.create_line(0, height - 1, width, height - 1, fill=cfg.color("dim"))
         self._carrier_hit = None
+        self._copy_hits = []
 
         text_limit = width - PAD * 2
         if not cfg.click_through:
@@ -476,6 +476,7 @@ class Overlay:
         canvas = self.canvas
         cfg = self.cfg
         cursor = x
+        line_h = font.metrics("linespace")
         for segment in segments:
             if cursor > limit:
                 break
@@ -498,10 +499,19 @@ class Overlay:
                 fill=cfg.color(segment.style),
                 font=font,
             )
+            copy = getattr(segment, "copy", None)
+            if copy:
+                self._copy_hits.append((cursor, y, cursor + seg_width, y + line_h, str(copy)))
             cursor += seg_width
             if text.endswith("…"):
                 break
         return cursor
+
+    def _copy_at(self, x: int, y: int) -> str | None:
+        for x0, y0, x1, y1, name in self._copy_hits:
+            if x0 <= x <= x1 and y0 <= y <= y1 and name:
+                return name
+        return None
 
     def _draw_row(
         self,

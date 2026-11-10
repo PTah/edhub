@@ -445,9 +445,11 @@ class MainWindow:
         self.lbl_system.bind("<Double-Button-1>", self._on_system_double)
         self.lbl_status = ttk.Label(top, text="", style="ED.Muted.TLabel")
         self.lbl_status.pack(side="left", padx=(16, 0))
-        # tk.Label: курсор-рука и подчёркивание — видно, что карриер кликабелен
+        # Несколько подписей: у прыжка «из A в B» каждая система копируется отдельно.
+        self.frm_carrier = tk.Frame(top, bg=COLORS["bg"])
+        self.frm_carrier.pack(side="left", padx=(12, 0))
         self.lbl_carrier = tk.Label(
-            top,
+            self.frm_carrier,
             text="",
             bg=COLORS["bg"],
             fg=COLORS["accent"],
@@ -455,9 +457,9 @@ class MainWindow:
             cursor="hand2",
             padx=4,
         )
-        self.lbl_carrier.pack(side="left", padx=(12, 0))
-        # Как у системы: только двойной клик — копия системы карриера
+        self.lbl_carrier.pack(side="left")
         self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
+        self._carrier_links: list[tk.Label] = []
         self.lbl_carrier_hint = ttk.Label(
             top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
         )
@@ -1305,11 +1307,11 @@ class MainWindow:
                     parent.configure(bg=COLORS["panel"], height=_row_height(self._ui_size) + 8)
                     _paint_grid(parent, COLORS["panel"])
             self._apply_column_geometry(table)
-        if getattr(self, "lbl_carrier", None) is not None:
-            self.lbl_carrier.configure(
-                bg=COLORS["bg"],
-                font=(self._ui_family, self._ui_size, "underline"),
-            )
+        if getattr(self, "frm_carrier", None) is not None:
+            self.frm_carrier.configure(bg=COLORS["bg"])
+            for child in self.frm_carrier.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=COLORS["bg"])
         if getattr(self, "lbl_carrier_hint", None) is not None:
             self.lbl_carrier_hint.configure(font=(self._ui_family, max(7, self._ui_size - 1)))
 
@@ -1447,6 +1449,7 @@ class MainWindow:
         )
         self._carrier_system = state.carrier.system if state.carrier.known else None
         if not state.carrier.known:
+            self._clear_carrier_links()
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
             return
@@ -1456,10 +1459,11 @@ class MainWindow:
         if state.carrier.jump_pending and state.carrier.jump_dest_system:
             frm = state.carrier.jump_from_system or self._carrier_system or "—"
             to = state.carrier.jump_dest_system
-            text = t("win.carrier_jump", frm=frm, to=to)
-            self.lbl_carrier.configure(text=text, fg=COLORS["warn"], bg=COLORS["bg"])
+            self._show_carrier_jump(frm, to)
             self.lbl_carrier_hint.configure(text="")
             return
+        self._clear_carrier_links()
+        self.lbl_carrier.configure(cursor="hand2", font=(self._ui_family, self._ui_size, "underline"))
         if self._carrier_system:
             # Всегда явно «Карриер …», иначе в шапке неочевидно, что за система
             generic = t("hud.carrier")
@@ -1477,6 +1481,51 @@ class MainWindow:
         else:
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
+
+    def _clear_carrier_links(self) -> None:
+        for label in self._carrier_links:
+            label.destroy()
+        self._carrier_links.clear()
+
+    def _carrier_link(self, text: str, copy: str | None, fg: str) -> None:
+        label = tk.Label(
+            self.frm_carrier,
+            text=text,
+            bg=COLORS["bg"],
+            fg=fg,
+            font=(self._ui_family, self._ui_size, "underline") if copy else (self._ui_family, self._ui_size),
+            cursor="hand2" if copy else "",
+        )
+        label.pack(side="left")
+        if copy:
+            label.bind("<Double-Button-1>", lambda _e, name=copy: self._copy_carrier_name(name))
+        self._carrier_links.append(label)
+
+    def _show_carrier_jump(self, frm: str, to: str) -> None:
+        self._clear_carrier_links()
+        self.lbl_carrier.configure(
+            text=t("win.carrier_jump_prefix"),
+            fg=COLORS["warn"],
+            bg=COLORS["bg"],
+            cursor="",
+            font=(self._ui_family, self._ui_size),
+        )
+        self._carrier_link(frm, None if frm == "—" else frm, COLORS["warn"])
+        self._carrier_link(t("win.carrier_jump_mid"), None, COLORS["warn"])
+        self._carrier_link(to, to or None, COLORS["warn"])
+
+    def carrier_header_text(self) -> str:
+        parts = [self.lbl_carrier.cget("text")]
+        parts.extend(label.cget("text") for label in self._carrier_links)
+        return "".join(parts)
+
+    def _copy_carrier_name(self, name: str | None) -> None:
+        if not name or name == "—":
+            return
+        if self.on_copy_carrier:
+            self.on_copy_carrier(name)
+        else:
+            self._copy_text(name)
 
     def _copy_text(self, text: str | None) -> None:
         if not text:

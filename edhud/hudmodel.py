@@ -18,6 +18,8 @@ from .model import FIRST_LOGGED_MULTIPLIER, Body, GameState, RadarView
 class Segment:
     text: str
     style: str = "text"
+    # Если задано — двойной клик по этому куску копирует имя системы, а не всю строку.
+    copy: str | None = None
 
     def __post_init__(self) -> None:
         # журнал иногда отдаёт Body как int — не роняем "".join в plain()
@@ -417,36 +419,60 @@ def _carrier_who(carrier) -> str:
     return who
 
 
-def _carrier_label(state: GameState) -> str | None:
+def _carrier_context(state: GameState) -> tuple[str, str] | None:
     carrier = state.carrier
     if not carrier.known:
         return None
     who = _carrier_who(carrier)
-    # Явно «Карриер», иначе callsign выглядит как обычная система
     generic = t("hud.carrier")
     prefix = generic if who.lower() == generic.lower() else f"{generic} {who}"
     where = carrier.system or "—"
+    return prefix, where
+
+
+def _carrier_segments(state: GameState) -> list[Segment]:
+    ctx = _carrier_context(state)
+    if ctx is None:
+        return []
+    prefix, where = ctx
+    carrier = state.carrier
     if carrier.jump_pending and carrier.jump_dest_system:
         frm = carrier.jump_from_system or where
-        return t("hud.carrier_prep", prefix=prefix, frm=frm, dest=carrier.jump_dest_system)
+        dest = carrier.jump_dest_system
+        return [
+            Segment(t("hud.carrier_prep_head", prefix=prefix), "accent"),
+            Segment(frm, "warn", copy=None if frm == "—" else frm),
+            Segment(t("hud.carrier_prep_arrow"), "accent"),
+            Segment(dest, "warn", copy=dest),
+        ]
     dist = state.carrier_distance_ly()
     if dist is None:
         if state.carrier_pos_pending:
-            return t("hud.carrier_seek", prefix=prefix, where=where)
-        return t("hud.carrier_at", prefix=prefix, where=where)
-    if dist < 0.05:
-        return t("hud.carrier_here", prefix=prefix, where=where)
-    text = f"{dist:,.1f}".replace(",", " ")
-    return t("hud.carrier_dist", prefix=prefix, where=where, dist=text)
+            label = t("hud.carrier_seek", prefix=prefix, where=where)
+        else:
+            label = t("hud.carrier_at", prefix=prefix, where=where)
+    elif dist < 0.05:
+        label = t("hud.carrier_here", prefix=prefix, where=where)
+    else:
+        text = f"{dist:,.1f}".replace(",", " ")
+        label = t("hud.carrier_dist", prefix=prefix, where=where, dist=text)
+    copy = None if where == "—" else where
+    return [Segment(label, "accent", copy=copy)]
+
+
+def _carrier_label(state: GameState) -> str | None:
+    parts = _carrier_segments(state)
+    if not parts:
+        return None
+    return "".join(part.text for part in parts)
 
 
 def _append_carrier(row: Row, state: GameState) -> None:
-    label = _carrier_label(state)
-    if not label:
+    parts = _carrier_segments(state)
+    if not parts:
         return
-    # who уже в label — не дублировать «карриер карриер»
     row.tail.append(Segment("   ", "dim"))
-    row.tail.append(Segment(label, "accent"))
+    row.tail.extend(parts)
 
 
 def _system_row(state: GameState) -> Row:

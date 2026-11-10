@@ -160,7 +160,7 @@ class Config:
     remote_ttl_sec: int = 6 * 3600
     remote_timeout: float = 10.0
     remote_in_legacy: bool = False
-    # EDSM: чтение тел/стоимости — без ключа; ключ только для личных API
+    # EDSM: без ключа читаем публичные тела; с ключом ещё отправляем журнал
     edsm_api_key: str = ""
     edsm_commander: str = ""
     # голос (Windows SAPI: русский или английский — по языку Windows)
