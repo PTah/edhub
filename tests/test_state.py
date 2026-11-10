@@ -2031,20 +2031,20 @@ class SampleGuideTests(unittest.TestCase):
                 "Flags": (1 << 4) | (1 << 21),
                 "Latitude": 1.0,
                 "Longitude": 2.0,
-                "Altitude": 50_000_000.0,
+                "Altitude": 20_000_000.0,
                 "PlanetRadius": 2_000_000.0,
                 "BodyID": 2,
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
-        # limit≈31 Mm, warn≈93 Mm — 50 Mm в полосе подлёта
+        # limit≈31 Mm — 20 Mm уже в зоне запуска проб
         self.assertTrue(state.dss_in_probe_range())
 
     def test_dss_in_probe_range_matches_too_fast_hud(self):
-        """Голос в полосе limit < alt ≤ warn; внутри зоны пробы и далеко — нет."""
+        """Голос на дистанции запуска проб и ниже, пока не у самой поверхности."""
         state = GameState()
         state.system.address = 1
-        # R=3 Mm → limit≈46.5 Mm, warn≈139.5 Mm
+        # R=3 Mm → limit≈46.5 Mm
         state.system.bodies[2] = Body(
             body_id=2,
             name="Here 2",
@@ -2060,8 +2060,8 @@ class SampleGuideTests(unittest.TestCase):
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
-        self.assertTrue(state.dss_in_probe_range())
-        # уже в зоне пробы — поздно
+        self.assertFalse(state.dss_in_probe_range())
+        # внутри дистанции запуска
         state.apply_status(
             {
                 "Flags": 1 << 4,
@@ -2070,8 +2070,8 @@ class SampleGuideTests(unittest.TestCase):
                 "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
             }
         )
-        self.assertFalse(state.dss_in_probe_range())
-        # ещё далеко (выше warn)
+        self.assertTrue(state.dss_in_probe_range())
+        # ещё далеко
         state.apply_status(
             {
                 "Flags": 1 << 4,
@@ -2081,9 +2081,19 @@ class SampleGuideTests(unittest.TestCase):
             }
         )
         self.assertFalse(state.dss_in_probe_range())
+        # уже у поверхности, не подлёт к пробам
+        state.apply_status(
+            {
+                "Flags": 1 << 4,
+                "Altitude": 1_000.0,
+                "PlanetRadius": 3_000_000.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Here 2"},
+            }
+        )
+        self.assertFalse(state.dss_in_probe_range())
 
     def test_dss_in_probe_range_saa_without_altitude(self):
-        """Реальный DSS в SC: Too Fast на HUD, в Status нет Altitude — только GuiFocus=SAA."""
+        """Открытый DSS без высоты — ещё не подлёт, «Тормози» не звучит."""
         state = GameState()
         state.system.address = 2284083844354
         state.system.bodies[3] = Body(
@@ -2093,7 +2103,6 @@ class SampleGuideTests(unittest.TestCase):
             radius=6_813_696.0,
             dss_scanned=False,
         )
-        # Как после FSS до SAAScanComplete: SC + Analysis, Destination=A1, без lat/alt
         state.apply_status(
             {
                 "Flags": (1 << 4) | (1 << 24) | (1 << 27),
@@ -2105,21 +2114,7 @@ class SampleGuideTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(state.dss_in_probe_range())
-        # анализ без пилонов и без SAA — ещё не зона
-        state.apply_status(
-            {
-                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
-                "GuiFocus": 0,
-                "Destination": {
-                    "System": 2284083844354,
-                    "Body": 3,
-                    "Name": "Smojai NP-A c8 A 1",
-                },
-            }
-        )
         self.assertFalse(state.dss_in_probe_range())
-        # в полёте: анализ + пилоны DSS, без Altitude/HasLatLong
         state.apply_status(
             {
                 "Flags": (1 << 4) | (1 << 6) | (1 << 24) | (1 << 27),
@@ -2131,7 +2126,7 @@ class SampleGuideTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(state.dss_in_probe_range())
+        self.assertFalse(state.dss_in_probe_range())
 
     def test_dss_in_probe_range_skips_after_speed_drop(self):
         """HasLatLong без высоты = уже сбросили скорость — «Тормози» не орём."""
@@ -2182,8 +2177,23 @@ class SampleGuideTests(unittest.TestCase):
         target = state.dss_target_body()
         assert target is not None
         self.assertEqual(target.body_id, 51)
-        self.assertTrue(state.dss_in_probe_range())
+        self.assertFalse(state.dss_in_probe_range())
 
+        # limit≈499 Mm — высота внутри зоны запуска
+        state.apply_status(
+            {
+                "Flags": (1 << 4) | (1 << 24) | (1 << 27),
+                "GuiFocus": 10,
+                "Altitude": 200_000_000.0,
+                "PlanetRadius": 32_204_760.0,
+                "Destination": {
+                    "System": 360542704906,
+                    "Body": 53,
+                    "Name": "Smojai ME-A c1-1 B 4 B Ring",
+                },
+            }
+        )
+        self.assertTrue(state.dss_in_probe_range())
         engine = AlertEngine()
         engine.arm()
         alerts = engine.handle_status(state)

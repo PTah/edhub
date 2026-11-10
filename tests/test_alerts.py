@@ -176,13 +176,13 @@ class AlertEngineTests(unittest.TestCase):
             planet_class="Rocky body",
             radius=3_000_000.0,
         )
-        # limit = 3e6 * 15.5 = 46.5e6; warn = 139.5e6 → высота в полосе подлёта
+        # limit = 3e6 * 15.5 = 46.5e6 → высота внутри дистанции запуска
         self.state.apply_status(
             {
                 "Flags": (1 << 4) | (1 << 21),
                 "Latitude": 0.0,
                 "Longitude": 0.0,
-                "Altitude": 80_000_000.0,
+                "Altitude": 30_000_000.0,
                 "PlanetRadius": 3_000_000.0,
                 "BodyID": 2,
                 "Destination": {"System": 12345, "Body": 2, "Name": "Test System 2"},
@@ -215,10 +215,35 @@ class AlertEngineTests(unittest.TestCase):
                 },
             }
         )
-        alerts = self.engine.handle_status(self.state)
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0].kind, "dss_range")
-        self.assertEqual(alerts[0].text, "Тормози")
+        self.assertEqual(self.engine.handle_status(self.state), [])
+
+    def test_dss_range_uses_body_under_ship_not_distant_target(self) -> None:
+        from edhud.model import Body
+
+        self.engine.arm()
+        self.state.system.bodies[2] = Body(
+            body_id=2,
+            name="Near 2",
+            planet_class="Rocky body",
+            radius=3_000_000.0,
+            dss_scanned=True,
+        )
+        self.state.system.bodies[9] = Body(
+            body_id=9,
+            name="Far 9",
+            planet_class="Rocky body",
+            radius=3_000_000.0,
+        )
+        self.state.apply_status(
+            {
+                "Flags": 1 << 4,
+                "Altitude": 20_000_000.0,
+                "PlanetRadius": 3_000_000.0,
+                "BodyID": 2,
+                "Destination": {"System": 12345, "Body": 9, "Name": "Far 9"},
+            }
+        )
+        self.assertEqual(self.engine.handle_status(self.state), [])
 
 
 if __name__ == "__main__":

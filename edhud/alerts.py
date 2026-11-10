@@ -146,7 +146,7 @@ class AlertEngine:
             return None
         if not state.dss_in_probe_range():
             return None
-        body = state.dss_target_body()
+        body = state.dss_probe_body()
         address = state.system.address or state.status.destination_system
         if body is None or address is None or body.body_id is None:
             return None

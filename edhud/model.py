@@ -24,7 +24,6 @@ from .values import body_values
 FLAG_DOCKED = 1 << 0
 FLAG_LANDED = 1 << 1
 FLAG_SUPERCRUISE = 1 << 4
-FLAG_HARDPOINTS = 1 << 6
 FLAG_SCOOPING = 1 << 11
 # Бит 17 — FsdCharging в Status.json (журнал Frontier). Бит 12 — ручник ТРП.
 FLAG_FSD_CHARGING = 1 << 17
@@ -34,7 +33,6 @@ FLAG_FSD_JUMP = 1 << 30
 FLAG_LOW_FUEL = 1 << 14
 FLAG_IN_MAINSHIP = 1 << 19
 FLAG_IN_FIGHTER = 1 << 20
-FLAG_HUD_ANALYSIS = 1 << 27
 # Flags2: планирование / атмосфера
 FLAG2_GLIDE = 1 << 12
 # ниже этого (м) считаем, что ещё в атмосфере / у поверхности
@@ -46,11 +44,8 @@ LS_M = 299_792_458.0
 # Старый множитель 4.67 (диск 20°) срабатывал уже после «Too Fast» — голос опаздывал.
 _DSS_ALT_FACTOR = 15.5
 _DSS_ALT_MIN_M = 25_000.0
-# Голос «Тормози» — раньше зоны пробы (кратно лимиту), но не когда уже внутри неё.
-_DSS_WARN_MULT = 3.0
-# GuiFocus 10 = SAA (интерфейс DSS). В SC при «Too Fast» Altitude в Status.json
-# часто ещё нет — без DSS-прицела голос «Тормози» в полёте не сработает.
-GUI_FOCUS_SAA = 10
+# Ниже этой доли зоны проб высота уже «у поверхности», а не подлёт к запуску.
+_DSS_PROBE_FLOOR = 0.25
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
 _MINEABLE_RING = {
@@ -1852,37 +1847,45 @@ class GameState:
             return self._body_by_destination_name(parent_name)
         return None
 
-    def _dss_sight_engaged(self) -> bool:
-        """Прицел DSS в полёте: панель SAA или анализ + выпущенные пилоны."""
-        if self.status.gui_focus == GUI_FOCUS_SAA:
-            return True
-        return self.status.flag(FLAG_HUD_ANALYSIS) and self.status.flag(FLAG_HARDPOINTS)
+    def dss_probe_body(self) -> Body | None:
+        """Тело, к которому относится высота в Status.
+
+        Destination может быть другой планетой в системе. Высота и PlanetRadius
+        относятся к телу, у которого корабль сейчас, иначе «Тормози» звучит не там.
+        """
+        st = self.status
+        body = self.system.body(st.body_id) if st.body_id is not None else None
+        if body is None and st.body_name:
+            body = self._body_by_destination_name(st.body_name)
+        if body is None:
+            body = self.dss_target_body()
+        elif is_ring_body(body.name):
+            body = self._planet_for_ring_body(body) or body
+        if body is not None and is_ring_body(body.name):
+            body = self._planet_for_ring_body(body) or body
+        return body
 
     def dss_in_probe_range(self) -> bool:
-        """Зона «тормози под DSS» — подлёт в SC, не когда уже стоишь у пробы.
+        """Суперкруиз и высота уже не больше дистанции запуска проб DSS.
 
-        1) Есть Altitude: только полоса limit < alt ≤ limit·WARN.
-           Уже ≤ limit (зона пробы / «стою и стреляю») — поздно, молчим.
-        2) Нет высоты и нет HasLatLong — DSS-прицел (SAA / анализ+пилоны).
-        3) HasLatLong без высоты — орбита/сброс, для голоса поздно.
+        Без Altitude не говорим: открытый прицел DSS сам по себе не значит,
+        что корабль подошёл к планете.
         """
-        body = self.dss_target_body()
-        if body is None or body.is_star or body.dss_scanned:
-            return False
         if not self.status.supercruise:
+            return False
+        alt = self.status.altitude
+        if alt is None:
+            return False
+        body = self.dss_probe_body()
+        if body is None or body.is_star or body.dss_scanned:
             return False
         radius = self.status.planet_radius or body.radius or 0.0
         limit = dss_probe_altitude_m(radius)
-        warn = limit * _DSS_WARN_MULT
-        alt = self.status.altitude
-        if alt is not None:
-            alt_f = float(alt)
-            if alt_f <= limit:
-                return False
-            return alt_f <= warn
-        if self.status.has_lat_long:
+        alt_f = float(alt)
+        if alt_f > limit:
             return False
-        return self._dss_sight_engaged()
+        floor = min(200_000.0, limit * _DSS_PROBE_FLOOR)
+        return alt_f > floor
 
     # ------------------------------------------------------------- помощники
     def _ensure_body(self, e: dict) -> Body | None:
