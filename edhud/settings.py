@@ -55,7 +55,7 @@ class SettingsDialog:
         self.win = tk.Toplevel(root)
         self.win.title(t("set.title"))
         self.win.attributes("-topmost", True)
-        self.win.resizable(False, False)
+        self.win.resizable(True, True)
         try:
             self.win.transient(root)
         except tk.TclError:
@@ -70,29 +70,78 @@ class SettingsDialog:
     def _arm_live(self) -> None:
         self._live_ready = True
 
+    def _scrollable(self, parent: ttk.Frame) -> ttk.Frame:
+        """Содержимое вкладки с вертикальной прокруткой. Кнопки Save снаружи."""
+        host = ttk.Frame(parent)
+        host.pack(fill="both", expand=True)
+        canvas = tk.Canvas(host, highlightthickness=0, borderwidth=0)
+        scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = ttk.Frame(canvas, padding=8)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def sync(_event=None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, 0, 0))
+            width = max(1, canvas.winfo_width())
+            canvas.itemconfigure(window, width=width)
+
+        def wheel(event) -> None:
+            if event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        inner.bind("<Configure>", sync)
+        canvas.bind("<Configure>", sync)
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        return inner
+
+    def _fit_to_screen(self) -> None:
+        """На 1080p и с панелью задач окно не должно уезжать кнопкой Save за край."""
+        self.win.update_idletasks()
+        need_w = max(self.win.winfo_reqwidth(), 560)
+        need_h = max(self.win.winfo_reqheight(), 360)
+        sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
+        # запас под панель задач / верхнюю панель / DPI
+        max_w = max(480, sw - 40)
+        max_h = max(360, sh - 96)
+        width = min(need_w, max_w)
+        height = min(need_h, max_h)
+        x = max(0, (sw - width) // 2)
+        y = max(0, (sh - height) // 4)
+        self.win.geometry(f"{width}x{height}+{x}+{y}")
+        self.win.minsize(min(520, width), min(360, height))
+
     def _build(self) -> None:
         pad = {"padx": 10, "pady": 4}
+        self.win.columnconfigure(0, weight=1)
+        self.win.rowconfigure(0, weight=1)
         outer = ttk.Frame(self.win, padding=(8, 8, 8, 4))
         outer.grid(row=0, column=0, sticky="nsew")
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
         nb = ttk.Notebook(outer)
         nb.grid(row=0, column=0, sticky="nsew")
-        general = ttk.Frame(nb, padding=8)
-        windows = ttk.Frame(nb, padding=8)
-        look = ttk.Frame(nb, padding=8)
-        nb.add(general, text=t("set.tab_general"))
-        nb.add(windows, text=t("set.tab_windows"))
-        nb.add(look, text=t("set.tab_look"))
+        general_tab = ttk.Frame(nb)
+        windows_tab = ttk.Frame(nb)
+        look_tab = ttk.Frame(nb)
+        nb.add(general_tab, text=t("set.tab_general"))
+        nb.add(windows_tab, text=t("set.tab_windows"))
+        nb.add(look_tab, text=t("set.tab_look"))
+        general = self._scrollable(general_tab)
+        windows = self._scrollable(windows_tab)
+        look = self._scrollable(look_tab)
         self._build_general(general, pad)
         self._build_windows(windows, pad)
         self._build_look(look)
         btns = ttk.Frame(outer)
-        btns.grid(row=1, column=0, sticky="e", pady=(8, 4))
+        btns.grid(row=1, column=0, sticky="ew", pady=(8, 4))
         ttk.Button(btns, text=t("set.cancel"), command=self.win.destroy).pack(side="right", padx=4)
-        ttk.Button(btns, text=t("set.save"), command=self._save).pack(side="right", padx=4)
-        self.win.update_idletasks()
-        w, h = self.win.winfo_width(), self.win.winfo_height()
-        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        self.win.geometry(f"+{(sw - w) // 2}+{max(0, (sh - h) // 3)}")
+        self._save_btn = ttk.Button(btns, text=t("set.save"), command=self._save)
+        self._save_btn.pack(side="right", padx=4)
+        self._fit_to_screen()
 
     def _build_general(self, frm: ttk.Frame, pad: dict) -> None:
 

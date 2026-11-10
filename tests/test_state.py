@@ -2331,6 +2331,36 @@ class AppearanceTests(unittest.TestCase):
             self.assertEqual(dialog.color_vars["text"].get(), light["text"])
             self.assertTrue(hasattr(dialog, "main_x"))
             self.assertTrue(hasattr(dialog, "bio_opacity"))
+            dialog.win.update_idletasks()
+            # Кнопка Save всегда внизу окна; высота не больше экрана с запасом.
+            self.assertLessEqual(dialog.win.winfo_height(), dialog.win.winfo_screenheight() - 40)
+            self.assertEqual(dialog._save_btn.cget("text"), "Сохранить")
+            self.assertIs(dialog._save_btn.winfo_toplevel(), dialog.win)
+            dialog.win.destroy()
+        finally:
+            root.destroy()
+
+    def test_settings_fit_caps_height_on_short_screen(self):
+        import tkinter as tk
+
+        from edhud.config import Config
+        from edhud.settings import SettingsDialog
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dialog = SettingsDialog(root, Config())
+            dialog.win.winfo_screenheight = lambda: 900  # type: ignore[method-assign]
+            dialog.win.winfo_screenwidth = lambda: 1280  # type: ignore[method-assign]
+            dialog.win.winfo_reqheight = lambda: 1400  # type: ignore[method-assign]
+            dialog.win.winfo_reqwidth = lambda: 700  # type: ignore[method-assign]
+            placed: list[str] = []
+            dialog.win.geometry = placed.append  # type: ignore[method-assign]
+            dialog.win.minsize = lambda *_a, **_k: None  # type: ignore[method-assign]
+            dialog._fit_to_screen()
+            self.assertTrue(placed)
+            # 900 - 96 = 804
+            self.assertRegex(placed[-1], r"^700x804\+")
             dialog.win.destroy()
         finally:
             root.destroy()
