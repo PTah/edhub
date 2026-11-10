@@ -154,17 +154,26 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
     return row, (done, total), dots, accent
 
 
+def _body_kind_label(body) -> str:
+    """Префикс строки: ЗВЕЗДА у звезды/прибытия, ТЕЛО у планеты."""
+    if body is None:
+        return t("hud.star_label")
+    if body.is_star or body.star_type:
+        return t("hud.star_label")
+    return t("hud.body")
+
+
 def _body_row(state: GameState, cfg) -> Row:
     row = Row()
     body = state.body_for_status() or state.current_body()
-    row.segments.append(Segment(t("hud.body"), "dim"))
+    row.segments.append(Segment(_body_kind_label(body), "dim"))
     if body is None:
         name = state.system.name or "—"
         count = t("hud.bodies_n", n=state.system.body_count) if state.system.body_count else ""
         row.segments.append(Segment(f"{name}{count}", "muted"))
         return row
 
-    body_class = body.planet_class or (t("hud.star") if body.is_star else "?")
+    body_class = body.planet_class or body.star_type or (t("hud.star") if body.is_star else "?")
     row.segments.append(Segment(body.name, "fg"))
     row.segments.append(Segment(f" · {body_class}", "muted"))
     if body.distance_ls:

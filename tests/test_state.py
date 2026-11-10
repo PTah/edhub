@@ -106,6 +106,23 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertTrue(view.progress[1] > 0)
         self.assertGreaterEqual(len(view.dots), 1)
 
+    def test_hud_star_label_instead_of_body(self):
+        state = GameState()
+        state.system.name = "Blu Thua UJ-K b37-0"
+        state.system.body_count = 16
+        empty = hudmodel.build_view(state, Config()).body_row.text
+        self.assertTrue(empty.startswith("ЗВЕЗДА "))
+        self.assertIn("тел 16", empty)
+        self.assertNotIn("ТЕЛО", empty)
+
+        state.system.bodies[0] = Body(
+            body_id=0, name="Blu Thua UJ-K b37-0", is_star=True, star_type="M"
+        )
+        state.current_body_id = 0
+        star = hudmodel.build_view(state, Config()).body_row.text
+        self.assertTrue(star.startswith("ЗВЕЗДА "))
+        self.assertIn(" · M", star)
+
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SystemStore(Path(tmp))
