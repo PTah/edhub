@@ -847,16 +847,32 @@ class App:
                 return
 
             def restart() -> None:
+                # Подменщик уже ждёт наш выход. Диалог «Ок» держал процесс
+                # живым, а после кнопки окно закрывалось и никто его не поднимал.
                 try:
-                    win.destroy()
+                    label.configure(text=t("update.restarting"))
+                    win.update_idletasks()
                 except tk.TclError:
                     pass
-                messagebox.showinfo("EDHUD", t("update.restarting"), parent=parent)
-                self.request_quit()
+                self._exit_for_update()
 
             self._ui(restart)
 
         threading.Thread(target=work, name="edhud-update-download", daemon=True).start()
+
+    def _exit_for_update(self) -> None:
+        """Отпустить exe сразу. Подменщик сам подменит файлы и запустит EDHUD."""
+        self._stop.set()
+        if self.tray is not None:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
+        try:
+            self.voice.stop()
+        except Exception:
+            pass
+        os._exit(0)
 
     def request_quit(self) -> None:
         """Корректный выход: остановить потоки и закрыть окно tkinter."""
@@ -907,7 +923,10 @@ class App:
             cleanup_staging()
         except Exception:
             pass
-        if str(getattr(self.cfg, "update_check", "auto") or "auto") != "manual":
+        if (
+            str(getattr(self.cfg, "update_check", "auto") or "auto") != "manual"
+            and os.environ.get("EDHUD_SKIP_UPDATE") != "1"
+        ):
             self.overlay.root.after(4000, lambda: self.check_updates(interactive=False))
         try:
             self.overlay.run()

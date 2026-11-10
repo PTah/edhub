@@ -526,19 +526,66 @@ def current_target() -> Path:
     return exe.parent
 
 
-def helper_command(helper: Path, pid: int, source: Path, target: Path, log_path: Path) -> list[str]:
-    return [
-        str(helper),
-        "--apply-update",
-        "--wait-pid",
-        str(int(pid)),
-        "--source",
-        str(source),
-        "--target",
-        str(target),
-        "--log",
-        str(log_path),
-    ]
+def helper_command(
+    helper: Path,
+    pid: int,
+    source: Path,
+    target: Path,
+    log_path: Path,
+    extra_pids: tuple[int, ...] | list[int] = (),
+) -> list[str]:
+    command = [str(helper), "--apply-update"]
+    seen: list[int] = []
+    raw = list(pid) if isinstance(pid, (list, tuple)) else [pid]
+    raw.extend(extra_pids)
+    for item in raw:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in seen:
+            seen.append(number)
+            command.extend(["--wait-pid", str(number)])
+    command.extend(
+        [
+            "--source",
+            str(source),
+            "--target",
+            str(target),
+            "--log",
+            str(log_path),
+        ]
+    )
+    return command
+
+
+def wait_pids_from_argv(argv: list[str]) -> list[int]:
+    found: list[int] = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--wait-pid" and index + 1 < len(argv):
+            try:
+                number = int(argv[index + 1])
+            except ValueError:
+                number = 0
+            if number > 0 and number not in found:
+                found.append(number)
+            index += 2
+            continue
+        index += 1
+    return found
+
+
+def _same_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    return os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right))
+
+
+def _kernel32():
+    import ctypes
+
+    return ctypes.WinDLL("kernel32", use_last_error=True)
 
 
 def process_alive(pid: int) -> bool:
@@ -551,26 +598,128 @@ def process_alive(pid: int) -> bool:
             return False
         return True
     import ctypes
+    from ctypes import wintypes
 
-    kernel = ctypes.windll.kernel32
+    kernel = _kernel32()
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = kernel.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
     if not handle:
-        return False
+        # Процесс есть, но открыть его нельзя (антивирус, чужой integrity).
+        # Считать его мёртвым нельзя: подмена тогда бьётся в занятый exe и выходит.
+        return ctypes.get_last_error() == 5
     try:
-        code = ctypes.c_ulong()
+        code = wintypes.DWORD()
         if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return False
+            return True
         return int(code.value) == STILL_ACTIVE
     finally:
         kernel.CloseHandle(handle)
+
+
+def _process_image(pid: int) -> str:
+    if pid <= 0 or sys.platform != "win32":
+        return ""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = _kernel32()
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(32768)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not kernel.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _parent_pid(pid: int) -> int:
+    """Родитель процесса. 0, если снимок процессов недоступен."""
+    if pid <= 0 or sys.platform != "win32":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_void_p),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel = _kernel32()
+    TH32CS_SNAPPROCESS = 0x00000002
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel.Process32FirstW.restype = wintypes.BOOL
+    kernel.Process32NextW.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    snap = kernel.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    invalid = ctypes.c_void_p(-1).value
+    if not snap or snap == invalid:
+        return 0
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        ok = kernel.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            if int(entry.th32ProcessID) == int(pid):
+                return int(entry.th32ParentProcessID)
+            ok = kernel.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snap)
+    return 0
+
+
+def same_exe_parent(pid: int) -> int:
+    """PID загрузчика onefile, если он держит тот же exe.
+
+    Родителя вроде explorer не возвращаем: его нельзя ни ждать, ни завершать.
+    """
+    parent = _parent_pid(pid)
+    if parent <= 0 or parent == pid:
+        return 0
+    if _same_path(_process_image(pid), _process_image(parent)):
+        return parent
+    return 0
 
 
 def _terminate(pid: int) -> None:
     if pid <= 0 or sys.platform != "win32":
         return
     import ctypes
+    from ctypes import wintypes
 
-    kernel = ctypes.windll.kernel32
+    kernel = _kernel32()
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = kernel.OpenProcess(PROCESS_TERMINATE, False, int(pid))
     if not handle:
         return
@@ -619,6 +768,43 @@ def _replace_file(source: Path, target: Path) -> None:
         old.unlink(missing_ok=True)
 
 
+def _install_tree(source: Path, target: Path, *, attempts: int = 30, pause: float = 0.4) -> None:
+    """Копирует сборку. Повторяет, пока Windows держит exe после выхода процесса."""
+    last: OSError | None = None
+    for _attempt in range(max(1, attempts)):
+        try:
+            if source.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _replace_file(source, target)
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+                _copy_tree(source, target)
+            return
+        except OSError as exc:
+            last = exc
+            if pause:
+                time.sleep(pause)
+    if last is not None:
+        raise last
+
+
+def _wait_until_dead(pids: list[int], log_path: Path | None) -> None:
+    pending = [pid for pid in pids if pid > 0]
+    if not pending:
+        return
+    _note(log_path, "waiting for " + ",".join(str(pid) for pid in pending))
+    deadline = time.time() + 45
+    while pending and time.time() < deadline:
+        pending = [pid for pid in pending if process_alive(pid)]
+        if pending:
+            time.sleep(0.15)
+    for pid in pending:
+        _note(log_path, f"old process still alive, terminating {pid}")
+        _terminate(pid)
+    # Файл exe ещё мгновение отображён в процессе, который уже завершился.
+    time.sleep(0.4)
+
+
 def apply_update(
     wait_pid: int,
     source: Path,
@@ -626,46 +812,76 @@ def apply_update(
     log_path: Path | None = None,
     *,
     restart: bool = True,
+    wait_pids: list[int] | None = None,
 ) -> int:
     """Подмена файлов. restart=False — для теста, без запуска exe."""
     source = Path(source)
     target = Path(target)
-    _note(log_path, f"apply start waitPid={wait_pid} source={source} target={target}")
+    pids: list[int] = []
+    for item in [wait_pid, *(wait_pids or [])]:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in pids:
+            pids.append(number)
+    _note(log_path, f"apply start waitPid={pids} source={source} target={target}")
     if not source.exists() or not str(target):
         _note(log_path, "missing source or target")
         return 2
-    deadline = time.time() + 45
-    while process_alive(wait_pid) and time.time() < deadline:
-        time.sleep(0.15)
-    if process_alive(wait_pid):
-        _note(log_path, "old process still alive, terminating")
-        _terminate(wait_pid)
-        time.sleep(0.8)
+    _wait_until_dead(pids, log_path)
+    restart_exe = target if source.is_file() else target / "EDHUD.exe"
+    replaced = False
     try:
-        if source.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _replace_file(source, target)
-            restart_exe = target
-        else:
-            target.mkdir(parents=True, exist_ok=True)
-            _copy_tree(source, target)
-            restart_exe = target / "EDHUD.exe"
+        _install_tree(source, target)
+        replaced = True
         _note(log_path, "files replaced")
     except OSError as exc:
         _note(log_path, f"copy failed: {exc}")
-        return 1
+        if not restart:
+            return 1
     if not restart:
         return 0
     if not restart_exe.is_file():
         _note(log_path, "FATAL: restart exe missing")
         return 1
+    if not replaced:
+        # Старую сборку всё равно поднимаем, но без немедленной повторной проверки:
+        # иначе неудачная подмена зациклится.
+        os.environ["EDHUD_SKIP_UPDATE"] = "1"
+        _note(log_path, "relaunching previous build")
     started = _start_detached(restart_exe)
     _note(log_path, "relaunched" if started else "FATAL: could not relaunch")
     return 0 if started else 1
 
 
+def _shell_execute(exe: Path) -> bool:
+    """Обычный запуск, как двойной щелчок. Без CREATE_NO_WINDOW, чтобы окно появилось."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    shell.ShellExecuteW.restype = ctypes.c_void_p
+    shell.ShellExecuteW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_int,
+    ]
+    rc = shell.ShellExecuteW(None, "open", str(exe), None, str(exe.parent), 1)
+    return int(rc or 0) > 32
+
+
 def _start_detached(exe: Path) -> bool:
-    flags = SPAWN_FLAGS if sys.platform == "win32" else 0
+    if _shell_execute(exe):
+        return True
+    # Перезапуск GUI не прячем: CREATE_NO_WINDOW оставляет процесс без окна.
+    flags = 0
+    if sys.platform == "win32":
+        flags = CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
     for _attempt in range(3):
         try:
             proc = subprocess.Popen(  # noqa: S603
@@ -696,7 +912,16 @@ def spawn_helper(payload: Path, target: Path | None = None) -> None:
         log_path.unlink()
     except OSError:
         pass
-    command = helper_command(helper, os.getpid(), payload, target, log_path)
+    pid = os.getpid()
+    parent = same_exe_parent(pid)
+    command = helper_command(
+        helper,
+        pid,
+        payload,
+        target,
+        log_path,
+        extra_pids=(parent,) if parent else (),
+    )
     flags = SPAWN_FLAGS if sys.platform == "win32" else 0
     try:
         proc = subprocess.Popen(  # noqa: S603
@@ -718,12 +943,16 @@ def spawn_helper(payload: Path, target: Path | None = None) -> None:
     while time.time() < deadline:
         try:
             if log_path.is_file() and log_path.stat().st_size > 0:
+                if proc.poll() is not None:
+                    raise RuntimeError("updater exited before the app quit")
                 return
         except OSError:
             pass
         if proc.poll() is not None:
             raise RuntimeError("updater exited before it started")
         time.sleep(0.15)
+    if proc.poll() is not None:
+        raise RuntimeError("updater exited before it started")
 
 
 def _arg(argv: list[str], name: str) -> str:
@@ -738,13 +967,10 @@ def _arg(argv: list[str], name: str) -> str:
 def apply_from_argv(argv: list[str]) -> int:
     if "--apply-update" not in argv:
         return 0
-    pid_text = _arg(argv, "--wait-pid")
-    try:
-        wait_pid = int(pid_text or "0")
-    except ValueError:
-        wait_pid = 0
+    pids = wait_pids_from_argv(argv)
+    wait_pid = pids[0] if pids else 0
     source = Path(_arg(argv, "--source"))
     target = Path(_arg(argv, "--target"))
     log_text = _arg(argv, "--log")
     log_path = Path(log_text) if log_text else None
-    return apply_update(wait_pid, source, target, log_path, restart=True)
+    return apply_update(wait_pid, source, target, log_path, restart=True, wait_pids=pids[1:])

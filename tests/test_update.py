@@ -5,15 +5,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import os
+from unittest import mock
+
 from edhud.update import (
     SPAWN_FLAGS,
     CREATE_BREAKAWAY_FROM_JOB,
     CREATE_NO_WINDOW,
     Asset,
+    _install_tree,
+    _replace_file,
+    _same_path,
     apply_update,
     compare_versions,
     helper_command,
     pick_asset,
+    process_alive,
+    same_exe_parent,
+    wait_pids_from_argv,
 )
 
 
@@ -52,6 +61,51 @@ class UpdateTests(unittest.TestCase):
         self.assertNotIn("cmd", joined.split())
         self.assertTrue(SPAWN_FLAGS & CREATE_NO_WINDOW)
         self.assertTrue(SPAWN_FLAGS & CREATE_BREAKAWAY_FROM_JOB)
+        both = helper_command(
+            Path("C:/EDHUD/EDHUD.exe"),
+            12,
+            Path("C:/stage/EDHUD.exe"),
+            Path("C:/EDHUD/EDHUD.exe"),
+            Path("C:/log/apply.log"),
+            extra_pids=[34],
+        )
+        self.assertEqual(both.count("--wait-pid"), 2)
+        self.assertEqual(both[both.index("--wait-pid") + 1], "12")
+        self.assertIn("34", both)
+
+    def test_wait_pids_keep_bootloader(self) -> None:
+        argv = ["EDHUD.exe", "--apply-update", "--wait-pid", "10", "--wait-pid", "11", "--wait-pid", "0"]
+        self.assertEqual(wait_pids_from_argv(argv), [10, 11])
+
+    def test_same_path_ignores_case(self) -> None:
+        self.assertTrue(_same_path(r"C:\EDHUD\EDHUD.exe", r"c:\edhud\edhud.exe"))
+        self.assertFalse(_same_path(r"C:\a.exe", r"C:\b.exe"))
+
+    def test_install_retries_locked_exe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "new.exe"
+            target = root / "EDHUD.exe"
+            source.write_bytes(b"new-build")
+            target.write_bytes(b"old-build")
+            calls = {"n": 0}
+
+            def flaky(src: Path, dst: Path) -> None:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise PermissionError("locked")
+                _replace_file(src, dst)
+
+            with mock.patch("edhud.update._replace_file", flaky):
+                _install_tree(source, target, pause=0)
+            self.assertEqual(target.read_bytes(), b"new-build")
+            self.assertEqual(calls["n"], 2)
+
+    def test_current_process_is_alive(self) -> None:
+        self.assertTrue(process_alive(os.getpid()))
+        self.assertFalse(process_alive(0))
+        parent = same_exe_parent(os.getpid())
+        self.assertNotEqual(parent, os.getpid())
 
     def test_apply_replaces_file_without_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
