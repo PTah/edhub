@@ -489,9 +489,11 @@ class App:
         self._start_tray()
 
     def _start_tray(self) -> None:
+        from . import __version__
+
         self.tray = tray.TrayIcon(
             on_command=self._on_tray_command,
-            tip=t("tray.tip"),
+            tip=t("tray.tip", version=__version__),
             state_provider=self._tray_state,
         )
         self.tray.start()

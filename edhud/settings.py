@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, filedialog, messagebox, ttk
 import tkinter as tk
 
-from . import config
+from . import __version__, config
 from .i18n import t
 from .mainwindow import _geometry_xy
 
@@ -259,6 +259,10 @@ class SettingsDialog:
         ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
         row += 1
         ttk.Label(frm, text=t("set.updates")).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Label(frm, text=t("set.version", version=__version__)).grid(
+            row=row, column=0, sticky="w", **pad
+        )
         row += 1
         ttk.Radiobutton(
             frm, text=t("set.update_auto"), value="auto", variable=self.update_check
