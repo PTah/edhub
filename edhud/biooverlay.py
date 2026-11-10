@@ -156,6 +156,33 @@ class BioPanel:
     def _text_width(self, segments, font) -> int:
         return sum(font.measure(segment.text) for segment in segments if segment.text)
 
+    def _wrap_text(self, text: str, font, max_width: int) -> list[str]:
+        """Перенос длинной подписи радара — иначе панель раздувается в ширину (номад/SRV)."""
+        words = (text or "").split()
+        if not words:
+            return [""]
+        limit = max(40, int(max_width))
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            trial = f"{current} {word}"
+            if font.measure(trial) <= limit:
+                current = trial
+                continue
+            lines.append(current)
+            current = word
+            if font.measure(current) > limit:
+                # сверхдлинное «слово» — режем по символам
+                while font.measure(current) > limit and len(current) > 1:
+                    cut = len(current)
+                    while cut > 1 and font.measure(current[:cut] + "…") > limit:
+                        cut -= 1
+                    lines.append(current[:cut] + ("…" if cut < len(current) else ""))
+                    current = current[cut:]
+        if current:
+            lines.append(current)
+        return lines or [""]
+
     def _draw(self, board: BioBoard) -> None:
         canvas = self.canvas
         cfg = self.cfg
@@ -175,9 +202,14 @@ class BioPanel:
         for text, _style in board.footers:
             content = max(content, font.measure(text))
         if radar is not None:
-            content = max(content, RADAR_SIZE + RADAR_PAD * 2, font.measure(radar.title))
+            # размер круга радара, НЕ длина radar.title — иначе в SRV панель ×2 шире
+            content = max(content, RADAR_SIZE + RADAR_PAD * 2)
         screen_w = self.win.winfo_screenwidth()
         width = min(screen_w - 24, max(280, content + PAD * 2 + 8))
+
+        radar_title_lines: list[str] = []
+        if radar is not None:
+            radar_title_lines = self._wrap_text(radar.title, font, width - PAD * 2)
 
         height = PAD + title_h + 8
         for line in board.lines:
@@ -187,7 +219,7 @@ class BioPanel:
         if board.footers:
             height += 8 + line_h * len(board.footers)
         if radar is not None:
-            height += 10 + line_h + RADAR_SIZE + RADAR_PAD + line_h
+            height += 10 + line_h * max(1, len(radar_title_lines)) + RADAR_SIZE + RADAR_PAD + line_h
         height += PAD
 
         screen_h = self.win.winfo_screenheight()
@@ -226,7 +258,7 @@ class BioPanel:
             y += 6
             canvas.create_line(PAD, y, width - PAD, y, fill=cfg.color("dim"))
             y += 4
-            self._draw_radar(radar, y, width, font, small)
+            self._draw_radar(radar, y, width, font, small, title_lines=radar_title_lines)
 
     def _draw_line(self, line: BioLine, y: int, font, width: int, line_h: int) -> int:
         x = PAD
@@ -285,12 +317,25 @@ class BioPanel:
             )
             cursor += font.measure(text)
 
-    def _draw_radar(self, radar: RadarView, top: int, width: int, font, small) -> None:
+    def _draw_radar(
+        self,
+        radar: RadarView,
+        top: int,
+        width: int,
+        font,
+        small,
+        title_lines: list[str] | None = None,
+    ) -> None:
         canvas = self.canvas
         cfg = self.cfg
         title_style = "ok" if radar.ready else "warn"
-        canvas.create_text(PAD, top, anchor="nw", text=radar.title, fill=cfg.color(title_style), font=font)
-        title_h = font.metrics("linespace")
+        lines = title_lines or self._wrap_text(radar.title, font, width - PAD * 2)
+        y = top
+        line_h = font.metrics("linespace")
+        for text in lines:
+            canvas.create_text(PAD, y, anchor="nw", text=text, fill=cfg.color(title_style), font=font)
+            y += line_h
+        title_h = max(line_h, y - top)
         size = min(RADAR_SIZE, width - PAD * 2)
         cx = width // 2
         cy = top + title_h + RADAR_PAD + size // 2

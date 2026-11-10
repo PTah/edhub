@@ -1900,6 +1900,56 @@ class BioBoardTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_panel_width_ignores_long_radar_title(self):
+        """Длинный radar_empty не должен раздувать панель вдвое (номад/SRV)."""
+        import tkinter as tk
+
+        from edhud.biooverlay import BioPanel, RADAR_SIZE
+        from edhud.config import Config
+        from edhud.hudmodel import BioBoard, BioLine, Segment
+        from edhud.model import RadarView
+
+        short = BioBoard(
+            title="биосигналы ×2",
+            lines=[BioLine(segments=[Segment("1 a  ×2", "text")])],
+            footers=[("итого ≈ 1 000 000", "fg")],
+        )
+        long_radar = BioBoard(
+            title="биосигналы ×2",
+            lines=[BioLine(segments=[Segment("1 a  ×2", "text")])],
+            footers=[("итого ≈ 1 000 000", "fg")],
+            radar=RadarView(
+                title="Bacterium, Stratum · пока не взята первая проба — отметки не видны",
+                range_m=500.0,
+                need_m=0,
+                heading=0.0,
+                ready=False,
+                blips=(),
+            ),
+        )
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            panel = BioPanel(root, Config())
+            panel._draw(short)
+            panel.win.update_idletasks()
+            narrow = panel._width
+            panel._draw(long_radar)
+            panel.win.update_idletasks()
+            with_radar = panel._width
+            # радар даёт квадрат ~RADAR_SIZE, но не ширину всей длинной фразы
+            self.assertLessEqual(with_radar, max(narrow, RADAR_SIZE + 40) + 24)
+            self.assertLess(with_radar, 420)
+            texts = [
+                panel.canvas.itemcget(item, "text")
+                for item in panel.canvas.find_withtag("all")
+                if panel.canvas.type(item) == "text"
+            ]
+            self.assertTrue(any("первая проба" in text or "отметки" in text for text in texts))
+            panel.destroy()
+        finally:
+            root.destroy()
+
 
 class SampleGuideTests(unittest.TestCase):
     def _state(self) -> GameState:
