@@ -1,7 +1,7 @@
 # Created by nc.ai 0.8.8.0 on macbook 2026-10-17 20:02:11
 [project]
 name = "edhud"
-version = "1.3.4"
+version = "1.3.5"
 description = "Оверлей исследователя Elite Dangerous: маршрут, биология, пробы"
 requires-python = ">=3.9"
 dependencies = []
