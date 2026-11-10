@@ -2073,7 +2073,7 @@ class SampleGuideTests(unittest.TestCase):
         self.assertIsNotNone(radar)
         assert radar is not None
         self.assertEqual(radar.blips, ())
-            self.assertIn("пока не взята первая проба", radar.title)
+        self.assertIn("пока не взята первая проба", radar.title)
         self.assertIn("Stratum", radar.title)
 
     def test_dss_probe_range_scales_with_radius(self):
