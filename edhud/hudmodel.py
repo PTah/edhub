@@ -82,16 +82,21 @@ def _meters(value: float) -> str:
     return f"{value:,.0f} {t('unit.m')}".replace(",", " ")
 
 
-def _genuses(body: Body, limit: int = 4) -> str:
+def _genus_name_list(body: Body, limit: int = 4) -> list[str]:
     if not body.genuses:
-        return ""
-    parts = []
-    for key, count in list(body.genuses.items())[:limit]:
+        return []
+    parts: list[str] = []
+    items = list(body.genuses.items())
+    for key, count in items[:limit]:
         name = codex.display_name(key)
         parts.append(f"{name}×{count}" if count > 1 else name)
-    if len(body.genuses) > limit:
-        parts.append(f"+{len(body.genuses) - limit}")
-    return ", ".join(parts)
+    if len(items) > limit:
+        parts.append(f"+{len(items) - limit}")
+    return parts
+
+
+def _genuses(body: Body, limit: int = 4) -> str:
+    return ", ".join(_genus_name_list(body, limit=limit))
 
 
 def _body_value_text(body: Body, odyssey: bool = True) -> tuple[str, str]:
@@ -785,15 +790,15 @@ def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tup
     total_high = 0
     ff_low = 0
     ff_high = 0
-    for body in _own_bio_bodies(state):
-        forecast = bio.forecast_names(body, state.system, limit=4)
+    for body_index, body in enumerate(_own_bio_bodies(state)):
+        forecast = bio.forecast_names(body, state.system, limit=12)
         predicted = False
         if forecast:
-            names = ", ".join(forecast)
+            names = forecast
             # ≈ только до DSS: после DSS виды уже подтверждены родами
             predicted = not bool(body.genuses)
         else:
-            names = _genuses(body, limit=4)
+            names = _genus_name_list(body, limit=12)
         low, high = _body_reward_span(body, state)
         total_low += low
         total_high += high
@@ -808,24 +813,28 @@ def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tup
         highlight = _marked(body, state)
         style = "muted" if done else ("accent" if highlight else "text")
         genus_style = "muted" if done else ("accent" if predicted else "text")
-        segments = [
-            Segment(_short_body(body, state.system), style),
-            Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
-        ]
-        if names:
-            prefix = "  ≈ " if predicted else "  "
-            segments.append(Segment(f"{prefix}{names}", genus_style))
         lines.append(
             BioLine(
-                segments=segments,
+                segments=[
+                    Segment(_short_body(body, state.system), style),
+                    Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
+                ],
                 tail=[
                     Segment(_credit_span(low, high), "muted"),
                     Segment(f"   {_ls(body.distance_ls)}", "dim"),
                 ],
                 bars=_reward_bars(low),
                 bars_max=_reward_bars(high),
+                rule=body_index > 0,
             )
         )
+        for name in names:
+            prefix = "≈ " if predicted else ""
+            lines.append(
+                BioLine(
+                    segments=[Segment(f"  {prefix}{name}", genus_style)],
+                )
+            )
     return lines, (total_low, total_high), (ff_low, ff_high)
 
 

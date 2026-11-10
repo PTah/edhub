@@ -1843,8 +1843,25 @@ class BioBoardTests(unittest.TestCase):
         self.assertIsNotNone(board)
         assert board is not None
         self.assertEqual(board.title, "биосигналы ×3")
-        self.assertEqual(len(board.lines), 2)
+        headers = [line for line in board.lines if "×" in line.text and line.bars]
+        self.assertEqual(len(headers), 2)
         self.assertTrue(any("Bacterium" in line.text for line in board.lines))
+
+    def test_system_bio_board_lists_organisms_vertically(self):
+        """В сводке системы каждое био — отдельная строка, не через запятую вправо."""
+        state = GameState()
+        self._icy(state, 1, 2)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        header = board.lines[0]
+        self.assertIn("×2", header.text)
+        self.assertNotIn("Bacterium", header.text)
+        organism_lines = [line for line in board.lines[1:] if "Bacterium" in line.text]
+        self.assertGreaterEqual(len(organism_lines), 1)
+        for line in organism_lines:
+            self.assertNotIn(", ", line.text)
+            self.assertNotIn("×2", line.text)
 
     def test_jump_hides_the_board(self):
         state = GameState()
