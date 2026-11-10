@@ -1081,11 +1081,16 @@ class GameState:
             self.status.fuel_main = float(e.get("FuelLevel") or 0.0)
         self.current_body_id = None
         self.current_body_name = None
+        self.fsd_target = None
+        self.fsd_target_class = None
 
     def _on_startjump(self, e: dict) -> None:
         """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
         if (e.get("JumpType") or "").lower() == "hyperspace":
             self.view_tab = "route"
+            dest = e.get("StarSystem")
+            if dest:
+                self.fsd_target = str(dest)
 
     def _on_carrierlocation(self, e: dict) -> None:
         self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id

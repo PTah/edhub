@@ -261,6 +261,32 @@ def route_tag(hop_index: int, current_index: int | None) -> str:
     return ""
 
 
+def route_jump_marks(
+    hops,
+    current_index: int | None,
+    dest_name: str | None,
+) -> dict[int, str]:
+    """Квадратная стрелка прыжка: -< текущая, | промежуток, -> цель."""
+    dest = (dest_name or "").strip()
+    if not dest:
+        return {}
+    dest_index = None
+    for index, hop in enumerate(hops):
+        if hop.system == dest:
+            dest_index = index
+            break
+    if dest_index is None:
+        return {}
+    marks: dict[int, str] = {dest_index: "-> "}
+    if current_index is None or current_index == dest_index:
+        return marks
+    marks[current_index] = "-< "
+    lo, hi = sorted((current_index, dest_index))
+    for index in range(lo + 1, hi):
+        marks[index] = "|  "
+    return marks
+
+
 def signal_colors(column: str, count: int | None) -> tuple[str, str] | None:
     """Цвет ненулевого счётчика: био — зелёный, гео — красный, PML — чёрный.
 
@@ -1389,6 +1415,7 @@ class MainWindow:
             state.carrier.jump_from_system,
             state.carrier.jump_dest_system,
             state.carrier.jump_departure,
+            state.fsd_target,
             None if dist is None else round(dist, 1),
             state.view_tab,
             bool(getattr(self.cfg, "show_belt_clusters", True)) if self.cfg is not None else True,
@@ -1576,20 +1603,34 @@ class MainWindow:
             text=t("win.route_info", src=src, lock=lock, extra=extra, jumps=jump_txt)
         )
         here = route.index_of(current)
+        jump_marks = route_jump_marks(route.hops, here, state.fsd_target)
         here_row = None
         widths = self._apply_column_geometry("route")
         for row, hop in enumerate(route.hops):
             dist = hop.distance if hop.distance else None
             ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
             tag = route_tag(row, here)
-            mark = "▶ " if tag == "here" else ""
-            if tag == "done":
-                fg = COLORS["muted"]
+            jump = jump_marks.get(row)
+            if jump:
+                mark = jump
             elif tag == "here":
+                mark = "▶ "
+            else:
+                mark = ""
+            if tag == "done" and jump is None:
+                fg = COLORS["muted"]
+            elif jump == "-> ":
+                fg = COLORS["accent"]
+            elif jump == "-< " or tag == "here":
                 fg = COLORS["ok"]
+            elif jump == "|  ":
+                fg = COLORS["warn"]
             else:
                 fg = COLORS["text"]
-            font = (self._ui_family, self._ui_size + (1 if tag == "here" else 0))
+            font = (
+                self._ui_family,
+                self._ui_size + (1 if tag == "here" or jump in ("-< ", "-> ") else 0),
+            )
             opened = hop.opened_label()
             bodies_txt = _route_bodies_cell(hop, here=(tag == "here"), system=state.system)
             cells = {

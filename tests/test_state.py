@@ -1357,13 +1357,23 @@ class CarrierDistanceTests(unittest.TestCase):
 
 class RouteMarkTests(unittest.TestCase):
     def test_passed_are_gray_and_current_is_larger(self):
-        from edhud.mainwindow import route_tag
+        from edhud.mainwindow import route_jump_marks, route_tag
+        from edhud.route import RouteHop
 
         self.assertEqual(route_tag(0, 2), "done")
         self.assertEqual(route_tag(1, 2), "done")
         self.assertEqual(route_tag(2, 2), "here")
         self.assertEqual(route_tag(3, 2), "")
         self.assertEqual(route_tag(0, None), "")
+        hops = [
+            RouteHop(system="Alpha"),
+            RouteHop(system="Beta"),
+            RouteHop(system="Gamma"),
+            RouteHop(system="Delta"),
+        ]
+        self.assertEqual(route_jump_marks(hops, 1, "Gamma"), {1: "-< ", 2: "-> "})
+        self.assertEqual(route_jump_marks(hops, 0, "Delta"), {0: "-< ", 1: "|  ", 2: "|  ", 3: "-> "})
+        self.assertEqual(route_jump_marks(hops, 1, "Missing"), {})
 
     def test_route_table_marks_current(self):
         import tkinter as tk
@@ -1396,9 +1406,44 @@ class RouteMarkTests(unittest.TestCase):
             self.assertTrue(str(rows[1][columns["system"]][1].cget("text")).startswith("▶ "))
             self.assertEqual(int(rows[0][columns["system"]][0].cget("highlightthickness")), 1)
             self.assertEqual(len(BODY_COLUMNS), len(window._header_labels))
+
+            state.fsd_target = "Gamma"
+            window._last_key = None
+            window.update_state(state)
+            window.win.update_idletasks()
+            rows = {}
+            for box in window._route_inner.winfo_children():
+                info = box.grid_info()
+                label = box.winfo_children()[0] if box.winfo_children() else box
+                rows.setdefault(int(info["row"]), {})[int(info["column"])] = (box, label)
+            self.assertTrue(str(rows[1][columns["system"]][1].cget("text")).startswith("-< "))
+            self.assertTrue(str(rows[2][columns["system"]][1].cget("text")).startswith("-> "))
+            self.assertEqual(rows[2][columns["system"]][1].cget("fg"), COLORS["accent"])
             window.destroy()
         finally:
             root.destroy()
+
+    def test_fsd_jump_clears_target(self):
+        state = GameState()
+        state.apply(
+            {
+                "event": "FSDTarget",
+                "Name": "NextSys",
+                "StarClass": "K",
+                "RemainingJumpsInRoute": 3,
+            }
+        )
+        self.assertEqual(state.fsd_target, "NextSys")
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "NextSys",
+                "SystemAddress": 1,
+                "StarPos": [0, 0, 0],
+                "JumpDist": 12.0,
+            }
+        )
+        self.assertIsNone(state.fsd_target)
 
     def test_bodies_table_updates_in_place_during_fss(self):
         """Новый скан не должен destroy+rebuild всей таблицы — иначе мигание при FSS."""
