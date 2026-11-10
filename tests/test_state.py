@@ -251,7 +251,8 @@ class JournalPipelineTests(unittest.TestCase):
         state.current_body_id = 2
         view = hudmodel.build_view(state, Config())
         self.assertIn("[spansh]", view.body_row.text)  # тело добавлено из Spansh
-        self.assertIn("звезда", view.body_row.text)
+        self.assertTrue(view.body_row.text.startswith("ЗВЕЗДА "))
+        self.assertIn(" · K", view.body_row.text)
         star = state.system.body(2)
         assert star is not None
         self.assertTrue(star.remote)
