@@ -936,6 +936,9 @@ class GameState:
     _was_in_supercruise: bool = False
     fsd_target: str | None = None
     fsd_target_class: str | None = None
+    # система текущего гиперпрыжка (StartJump). FSDTarget по маршруту приходит
+    # в середине отсчёта уже на СЛЕДУЮЩУЮ систему — стрелку он подменять не должен.
+    jump_dest: str | None = None
     jumps_in_route: int | None = None
     # журнал прислал NavRoute без списка — надо перечитать NavRoute.json
     navroute_stale: bool = False
@@ -1083,6 +1086,7 @@ class GameState:
         self.current_body_name = None
         self.fsd_target = None
         self.fsd_target_class = None
+        self.jump_dest = None
 
     def _on_startjump(self, e: dict) -> None:
         """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
@@ -1090,7 +1094,8 @@ class GameState:
             self.view_tab = "route"
             dest = e.get("StarSystem")
             if dest:
-                self.fsd_target = str(dest)
+                self.jump_dest = str(dest)
+                self.fsd_target = self.jump_dest
 
     def _on_carrierlocation(self, e: dict) -> None:
         self.carrier.carrier_id = e.get("CarrierID") or self.carrier.carrier_id
@@ -1249,9 +1254,18 @@ class GameState:
             self.route = Route()
 
     def _on_fsdtarget(self, e: dict) -> None:
+        # По построенному маршруту игра пишет FSDTarget через несколько секунд
+        # после StartJump уже на систему ПОСЛЕ текущей. Пока прыжок идёт,
+        # стрелка держится на StarSystem из StartJump.
+        if self.jump_dest and self._hyperspace_jump_active():
+            return
+        self.jump_dest = None
         self.fsd_target = e.get("Name")
         self.fsd_target_class = e.get("StarClass")
         self.jumps_in_route = e.get("RemainingJumpsInRoute")
+
+    def _hyperspace_jump_active(self) -> bool:
+        return self.status.fsd_charging or self.status.flag(FLAG_FSD_JUMP)
 
     # --- тела и биология
     def _on_scan(self, e: dict) -> None:

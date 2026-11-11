@@ -266,7 +266,7 @@ def route_jump_marks(
     current_index: int | None,
     dest_name: str | None,
 ) -> dict[int, str]:
-    """Квадратная стрелка прыжка: -< текущая, | промежуток, -> цель."""
+    """Квадратная стрелка прыжка: -< откуда, | промежуток, -> куда прыгает корабль."""
     dest = (dest_name or "").strip()
     if not dest:
         return {}
@@ -1416,6 +1416,7 @@ class MainWindow:
             state.carrier.jump_dest_system,
             state.carrier.jump_departure,
             state.fsd_target,
+            state.jump_dest,
             None if dist is None else round(dist, 1),
             state.view_tab,
             bool(getattr(self.cfg, "show_belt_clusters", True)) if self.cfg is not None else True,
@@ -1603,7 +1604,7 @@ class MainWindow:
             text=t("win.route_info", src=src, lock=lock, extra=extra, jumps=jump_txt)
         )
         here = route.index_of(current)
-        jump_marks = route_jump_marks(route.hops, here, state.fsd_target)
+        jump_marks = route_jump_marks(route.hops, here, state.jump_dest or state.fsd_target)
         here_row = None
         widths = self._apply_column_geometry("route")
         for row, hop in enumerate(route.hops):

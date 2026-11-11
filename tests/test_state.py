@@ -1434,6 +1434,7 @@ class RouteMarkTests(unittest.TestCase):
             }
         )
         self.assertEqual(state.fsd_target, "NextSys")
+        self.assertIsNone(state.jump_dest)
         state.apply(
             {
                 "event": "FSDJump",
@@ -1444,6 +1445,56 @@ class RouteMarkTests(unittest.TestCase):
             }
         )
         self.assertIsNone(state.fsd_target)
+        self.assertIsNone(state.jump_dest)
+
+    def test_jump_arrow_ignores_following_fsd_target(self):
+        """В отсчёте FSDTarget называет систему после цели. Стрелка — на этот прыжок."""
+        from edhud.mainwindow import route_jump_marks
+        from edhud.model import FLAG_FSD_CHARGING
+        from edhud.route import Route, RouteHop
+
+        state = GameState()
+        state.system.name = "Alpha"
+        state.route = Route(
+            hops=[
+                RouteHop(system="Alpha"),
+                RouteHop(system="Beta"),
+                RouteHop(system="Gamma"),
+            ]
+        )
+        state.apply({"event": "FSDTarget", "Name": "Beta", "StarClass": "K", "RemainingJumpsInRoute": 2})
+        self.assertEqual(route_jump_marks(state.route.hops, 0, state.jump_dest or state.fsd_target), {0: "-< ", 1: "-> "})
+
+        state.status.flags = FLAG_FSD_CHARGING
+        state.apply({"event": "StartJump", "JumpType": "Hyperspace", "StarSystem": "Beta"})
+        state.apply({"event": "FSDTarget", "Name": "Gamma", "StarClass": "M", "RemainingJumpsInRoute": 1})
+        self.assertEqual(state.jump_dest, "Beta")
+        self.assertEqual(state.fsd_target, "Beta")
+        here = state.route.index_of(state.system.name)
+        self.assertEqual(
+            route_jump_marks(state.route.hops, here, state.jump_dest or state.fsd_target),
+            {0: "-< ", 1: "-> "},
+        )
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Beta",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 10],
+                "JumpDist": 10,
+            }
+        )
+        self.assertEqual(state.system.name, "Beta")
+        self.assertIsNone(state.jump_dest)
+        self.assertIsNone(state.fsd_target)
+
+    def test_fsd_target_outside_jump_is_the_next_hop(self):
+        state = GameState()
+        state.jump_dest = "Beta"
+        state.fsd_target = "Beta"
+        state.apply({"event": "FSDTarget", "Name": "Gamma", "StarClass": "M", "RemainingJumpsInRoute": 1})
+        self.assertIsNone(state.jump_dest)
+        self.assertEqual(state.fsd_target, "Gamma")
 
     def test_bodies_table_updates_in_place_during_fss(self):
         """Новый скан не должен destroy+rebuild всей таблицы — иначе мигание при FSS."""
