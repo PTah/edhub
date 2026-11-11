@@ -939,6 +939,8 @@ class GameState:
     # система текущего гиперпрыжка (StartJump). FSDTarget по маршруту приходит
     # в середине отсчёта уже на СЛЕДУЮЩУЮ систему — стрелку он подменять не должен.
     jump_dest: str | None = None
+    # сколько опросов Status подряд прыжок уже не идёт — чтобы снять стрелку после отмены
+    _jump_idle_polls: int = 0
     # окно био закрыто с начала прыжка, пока в новой системе не будет своего FSS
     bio_hidden_until_fss: bool = False
     jumps_in_route: int | None = None
@@ -1090,6 +1092,7 @@ class GameState:
         self.fsd_target = None
         self.fsd_target_class = None
         self.jump_dest = None
+        self._jump_idle_polls = 0
         self.bio_hidden_until_fss = True
 
     def _on_startjump(self, e: dict) -> None:
@@ -1785,6 +1788,7 @@ class GameState:
             self.current_body_name = self.status.body_name
         self._sync_atmosphere()
         self._sync_travel_tab()
+        self._sync_jump_arrow()
         if self.status.supercruise:
             self._was_in_supercruise = True
         elif not self.status.fsd_charging:
@@ -1821,6 +1825,57 @@ class GameState:
             self._jump_tab_latched = True
         if not self.status.fsd_charging:
             self._jump_tab_latched = False
+
+    def _sync_jump_arrow(self) -> None:
+        """Стрелка с первого опроса Status, не дожидаясь StartJump/FSDTarget.
+
+        Журнал иногда пишет цель только через несколько секунд после кнопки,
+        и тогда это уже следующая система маршрута. Адрес в Status — сразу.
+        """
+        in_jump = self._hyperspace_spool() or self.status.flag(FLAG_FSD_JUMP)
+        if in_jump:
+            self._jump_idle_polls = 0
+            if not self.jump_dest:
+                name = self.route_destination_name()
+                if name:
+                    self.jump_dest = name
+            return
+        if not self.jump_dest:
+            self._jump_idle_polls = 0
+            return
+        self._jump_idle_polls += 1
+        if self._jump_idle_polls >= 3:
+            self.jump_dest = None
+            self._jump_idle_polls = 0
+
+    def route_destination_name(self) -> str | None:
+        """Система маршрута, совпадающая с Destination из Status.json."""
+        address = self.status.destination_system
+        label = (self.status.destination_name or "").strip().lower()
+        if isinstance(address, int):
+            for hop in self.route.hops:
+                if hop.address is not None and int(hop.address) == int(address):
+                    return hop.system
+        if not label:
+            return None
+        for hop in self.route.hops:
+            if hop.system.lower() == label:
+                return hop.system
+        for hop in self.route.hops:
+            if label.startswith(hop.system.lower() + " "):
+                return hop.system
+        return None
+
+    def jump_arrow_system(self) -> str | None:
+        """Куда рисовать стрелку: текущий прыжок, иначе заранее выбранная цель."""
+        if self.jump_dest:
+            return self.jump_dest
+        if self._hyperspace_spool() or self.status.flag(FLAG_FSD_JUMP):
+            found = self.route_destination_name()
+            if found:
+                return found
+        target = (self.fsd_target or "").strip()
+        return target or None
 
     def _hyperspace_spool(self) -> bool:
         """Charging FSD к другой системе → вкладка Route (и из обычного космоса)."""

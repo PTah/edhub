@@ -267,12 +267,12 @@ def route_jump_marks(
     dest_name: str | None,
 ) -> dict[int, str]:
     """Квадратная стрелка прыжка: -< откуда, | промежуток, -> куда прыгает корабль."""
-    dest = (dest_name or "").strip()
+    dest = (dest_name or "").strip().lower()
     if not dest:
         return {}
     dest_index = None
     for index, hop in enumerate(hops):
-        if hop.system == dest:
+        if hop.system.lower() == dest:
             dest_index = index
             break
     if dest_index is None:
@@ -1604,7 +1604,7 @@ class MainWindow:
             text=t("win.route_info", src=src, lock=lock, extra=extra, jumps=jump_txt)
         )
         here = route.index_of(current)
-        jump_marks = route_jump_marks(route.hops, here, state.jump_dest or state.fsd_target)
+        jump_marks = route_jump_marks(route.hops, here, state.jump_arrow_system())
         here_row = None
         widths = self._apply_column_geometry("route")
         for row, hop in enumerate(route.hops):

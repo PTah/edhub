@@ -1496,6 +1496,39 @@ class RouteMarkTests(unittest.TestCase):
         self.assertIsNone(state.jump_dest)
         self.assertEqual(state.fsd_target, "Gamma")
 
+    def test_charge_shows_arrow_before_journal(self):
+        """Кнопка прыжка сразу даёт стрелку по адресу из Status, журнал опаздывает."""
+        from edhud.mainwindow import route_jump_marks
+        from edhud.route import Route, RouteHop
+
+        state = GameState()
+        state.system.name = "Alpha"
+        state.system.address = 1
+        state.route = Route(
+            hops=[
+                RouteHop(system="Alpha", address=1),
+                RouteHop(system="Beta", address=2),
+                RouteHop(system="Gamma", address=3),
+            ]
+        )
+        state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 2, "Body": 0, "Name": "Beta A"},
+            }
+        )
+        self.assertEqual(state.jump_dest, "Beta")
+        self.assertEqual(
+            route_jump_marks(state.route.hops, 0, state.jump_arrow_system()),
+            {0: "-< ", 1: "-> "},
+        )
+        state.apply({"event": "FSDTarget", "Name": "Gamma", "StarClass": "M", "RemainingJumpsInRoute": 1})
+        self.assertEqual(state.jump_arrow_system(), "Beta")
+
+        for _ in range(3):
+            state.apply_status({"Flags": 0, "Destination": {"System": 1, "Body": 0, "Name": "Alpha"}})
+        self.assertIsNone(state.jump_dest)
+
     def test_bodies_table_updates_in_place_during_fss(self):
         """Новый скан не должен destroy+rebuild всей таблицы — иначе мигание при FSS."""
         import tkinter as tk
