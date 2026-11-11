@@ -939,6 +939,8 @@ class GameState:
     # система текущего гиперпрыжка (StartJump). FSDTarget по маршруту приходит
     # в середине отсчёта уже на СЛЕДУЮЩУЮ систему — стрелку он подменять не должен.
     jump_dest: str | None = None
+    # окно био закрыто с начала прыжка, пока в новой системе не будет своего FSS
+    bio_hidden_until_fss: bool = False
     jumps_in_route: int | None = None
     # журнал прислал NavRoute без списка — надо перечитать NavRoute.json
     navroute_stale: bool = False
@@ -1066,6 +1068,7 @@ class GameState:
             return
         if not own and station != callsign and not e.get("CarrierID"):
             return
+        self.bio_hidden_until_fss = True
         self._clear_carrier_jump()
         self._move_carrier(e.get("StarSystem"), e.get("SystemAddress"), e.get("BodyID"), e.get("StarPos"))
 
@@ -1087,11 +1090,13 @@ class GameState:
         self.fsd_target = None
         self.fsd_target_class = None
         self.jump_dest = None
+        self.bio_hidden_until_fss = True
 
     def _on_startjump(self, e: dict) -> None:
         """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
         if (e.get("JumpType") or "").lower() == "hyperspace":
             self.view_tab = "route"
+            self.bio_hidden_until_fss = True
             dest = e.get("StarSystem")
             if dest:
                 self.jump_dest = str(dest)
@@ -1259,6 +1264,9 @@ class GameState:
         # стрелка держится на StarSystem из StartJump.
         if self.jump_dest and self._hyperspace_jump_active():
             return
+        if self.jump_dest:
+            # отсчёт сняли, система не сменилась — био снова можно показать
+            self.bio_hidden_until_fss = False
         self.jump_dest = None
         self.fsd_target = e.get("Name")
         self.fsd_target_class = e.get("StarClass")
@@ -1502,6 +1510,7 @@ class GameState:
         _apply_signal_counts(target, e.get("Signals") or [])
         target.signals_known = True
         target.signals_local = True
+        self._note_local_bio(target)
         if target is not body and is_ring_body(body.name):
             body.signals_known = True
             body.signals_local = True
@@ -1569,7 +1578,21 @@ class GameState:
                     if genus:
                         body.genuses[str(genus)] = int(item.get("Count") or 1)
         self.last_fss_body_id = target.body_id
+        self._note_local_bio(target)
         self._account_scan(body.body_id, mapped=True)
+
+    def _note_local_bio(self, body: Body) -> None:
+        """Свой FSS/DSS с биологией снова открывает окно био после прыжка."""
+        if (body.bio_signals or 0) > 0 or body.genuses:
+            self.bio_hidden_until_fss = False
+
+    def bio_panel_suppressed(self) -> bool:
+        """Прыжок в другую систему прячет окно био до нового FSS."""
+        if self.bio_hidden_until_fss or self.jump_dest:
+            return True
+        if self.status.flag(FLAG_FSD_JUMP):
+            return True
+        return self._hyperspace_spool()
 
     def _on_saascancomplete(self, e: dict) -> None:
         body = self._ensure_body(e)

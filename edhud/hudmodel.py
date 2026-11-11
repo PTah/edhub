@@ -856,7 +856,13 @@ def _footers(low: int, high: int, ff_low: int, ff_high: int, with_bonus: bool) -
 
 
 def build_bio_board(state: GameState) -> BioBoard | None:
-    """Левый дашборд биологии. Пусто, пока командир сам не снял биосигналы."""
+    """Левый дашборд биологии. Пусто, пока командир сам не снял биосигналы.
+
+    На прыжке в другую систему окно закрывается и снова появляется после FSS,
+    если в новой системе есть биология.
+    """
+    if state.bio_panel_suppressed():
+        return None
     bodies = _own_bio_bodies(state)
     if not bodies:
         return None

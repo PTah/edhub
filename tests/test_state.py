@@ -1846,6 +1846,78 @@ class BioBoardTests(unittest.TestCase):
         self.assertIn("3", board.lines[0].text)
         self.assertIn("×2", board.lines[0].text)
 
+    def test_jump_closes_bio_until_fss(self):
+        """Прыжок прячет окно био. Кэш старых сигналов его не открывает — только новый FSS."""
+        from edhud.model import FLAG_FSD_CHARGING
+
+        state = GameState()
+        state.system.name = "Alpha"
+        state.system.address = 1
+        state.system.bodies[1] = Body(
+            body_id=1, name="Alpha 1", bio_signals=2, signals_known=True, signals_local=True
+        )
+        self.assertIsNotNone(hudmodel.build_bio_board(state))
+
+        state.status.flags = FLAG_FSD_CHARGING
+        state.status.destination_system = 2
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+        state.apply({"event": "StartJump", "JumpType": "Hyperspace", "StarSystem": "Beta"})
+        state.status.flags = 0
+        self.assertTrue(state.bio_hidden_until_fss)
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Beta",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 10],
+                "JumpDist": 10,
+            }
+        )
+        state.system.bodies[3] = Body(
+            body_id=3, name="Beta 1", bio_signals=4, signals_known=True, signals_local=True
+        )
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+        state.apply(
+            {
+                "event": "FSSBodySignals",
+                "BodyID": 4,
+                "BodyName": "Beta 2",
+                "Signals": [{"Type": "Geological", "Count": 1}],
+            }
+        )
+        self.assertTrue(state.bio_hidden_until_fss)
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+        state.apply(
+            {
+                "event": "FSSBodySignals",
+                "BodyID": 3,
+                "BodyName": "Beta 1",
+                "Signals": [{"Type": "Biological", "Count": 4}],
+            }
+        )
+        self.assertFalse(state.bio_hidden_until_fss)
+        self.assertIsNotNone(hudmodel.build_bio_board(state))
+
+    def test_aborted_jump_shows_bio_again(self):
+        state = GameState()
+        state.system.name = "Alpha"
+        state.system.address = 1
+        state.system.bodies[1] = Body(
+            body_id=1, name="Alpha 1", bio_signals=2, signals_known=True, signals_local=True
+        )
+        state.status.flags = 1 << 17
+        state.apply({"event": "StartJump", "JumpType": "Hyperspace", "StarSystem": "Beta"})
+        state.status.flags = 0
+        state.apply({"event": "FSDTarget", "Name": "Beta", "StarClass": "M"})
+        self.assertFalse(state.bio_hidden_until_fss)
+        self.assertIsNone(state.jump_dest)
+        self.assertIsNotNone(hudmodel.build_bio_board(state))
+
     def test_fss_body_card_names_possible_organisms(self):
         state = GameState()
         body = self._icy(state)
