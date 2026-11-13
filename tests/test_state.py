@@ -245,8 +245,14 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertEqual(added, 1)
         state.current_body_id = 1
         view = hudmodel.build_view(state, Config())
-        self.assertIn("БИО 2", view.body_row.text)  # сигналы пришли от других командиров
+        # чужие сигналы в таблице есть, на HUD по умолчанию спрятаны
+        self.assertNotIn("БИО 2", view.body_row.text)
+        self.assertIn("БИО ?", view.body_row.text)
         self.assertEqual(state.system.body(1).bio_signals, 2)
+        shown = Config()
+        shown.show_remote_bio = True
+        view = hudmodel.build_view(state, shown)
+        self.assertIn("БИО 2", view.body_row.text)
 
         state.current_body_id = 2
         view = hudmodel.build_view(state, Config())
@@ -257,6 +263,42 @@ class JournalPipelineTests(unittest.TestCase):
         assert star is not None
         self.assertTrue(star.remote)
         self.assertTrue(star.is_star)
+
+    def test_hud_hides_other_commanders_bio_list(self):
+        """Список «био в системе» на верхнем HUD — только свои сигналы, пока настройка выкл."""
+        state = GameState()
+        state.system = System(address=9, name="List")
+        state.system.bodies[1] = Body(
+            body_id=1,
+            name="List 1",
+            bio_signals=1,
+            signals_known=True,
+            signals_local=True,
+            distance_ls=10,
+        )
+        state.system.bodies[2] = Body(
+            body_id=2,
+            name="List 2",
+            bio_signals=4,
+            signals_known=True,
+            signals_local=False,
+            remote=True,
+            source="EDSM",
+            distance_ls=40,
+        )
+        state.current_body_id = 1
+        hidden_view = hudmodel.build_view(state, Config(), expanded=True)
+        self.assertIn("БИО 1", hidden_view.body_row.text)
+        hidden = "\n".join(row.text for row in hidden_view.detail)
+        self.assertNotIn("List 2", hidden)
+        self.assertNotIn("био в системе", hidden)
+
+        cfg = Config()
+        cfg.show_remote_bio = True
+        shown = "\n".join(row.text for row in hudmodel.build_view(state, cfg, expanded=True).detail)
+        self.assertIn("био в системе", shown)
+        self.assertIn("List 2", shown)
+        self.assertIn("4 сигн.", shown)
 
     def test_first_logged_payout(self):
         body = self.state.system.body(1)

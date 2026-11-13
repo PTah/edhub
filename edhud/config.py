@@ -143,6 +143,8 @@ class Config:
     max_predictions: int = 6
     # таблица Bodies: показывать Belt Cluster (астероидные поля)
     show_belt_clusters: bool = True
+    # верхний HUD: био, которое до вас нашли другие (EDSM/Spansh/EDDN)
+    show_remote_bio: bool = False
     hide_delay_sec: float = 0.0
     overlay_x: int | None = None
     overlay_y: int | None = None

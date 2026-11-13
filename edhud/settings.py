@@ -178,6 +178,7 @@ class SettingsDialog:
             value=str(int(getattr(self.cfg, "expensive_planet_credits", 2_500_000) or 2_500_000))
         )
         self.show_belt_clusters = BooleanVar(value=bool(getattr(self.cfg, "show_belt_clusters", True)))
+        self.show_remote_bio = BooleanVar(value=bool(getattr(self.cfg, "show_remote_bio", False)))
         self.voice_rate = IntVar(value=int(self.cfg.voice_rate or 0))
         mode = str(getattr(self.cfg, "update_check", "auto") or "auto")
         self.update_check = StringVar(value=mode if mode in ("auto", "manual") else "auto")
@@ -308,6 +309,12 @@ class SettingsDialog:
             frm,
             text=t("set.belts"),
             variable=self.show_belt_clusters,
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm,
+            text=t("set.remote_bio"),
+            variable=self.show_remote_bio,
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
         wrow = ttk.Frame(frm)
@@ -668,6 +675,7 @@ class SettingsDialog:
             )
             return
         self.cfg.show_belt_clusters = bool(self.show_belt_clusters.get())
+        self.cfg.show_remote_bio = bool(self.show_remote_bio.get())
         mode = self.update_check.get()
         self.cfg.update_check = mode if mode in ("auto", "manual") else "auto"
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))

@@ -185,7 +185,9 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment(f" · {_ls(body.distance_ls)}", "muted"))
 
     row.segments.append(Segment(t("hud.bio"), "dim"))
-    if body.bio_signals is None and not body.signals_known:
+    # Чужой счётчик (EDSM/Spansh/EDDN) на HUD не показываем, пока не включена настройка.
+    # Свои сигналы журнала и таблица Bodies от этого не зависят.
+    if not _bio_visible_on_hud(body, cfg) or (body.bio_signals is None and not body.signals_known):
         row.segments.append(Segment("?", "muted"))
     elif not body.bio_signals:
         row.segments.append(Segment("0", "muted"))
@@ -394,7 +396,9 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
                     row.segments.append(Segment(f"  {values.credits(prediction.reward)}", "muted"))
                 rows.append(row)
 
-    system_bio = [b for b in state.system.bio_bodies if b is not body]
+    system_bio = [
+        b for b in state.system.bio_bodies if b is not body and _bio_visible_on_hud(b, cfg)
+    ]
     if system_bio:
         head = Row([Segment(t("hud.bio_in_system"), "dim")])
         head.segments.append(Segment(f"{len(system_bio)}", "ok"))
@@ -634,6 +638,13 @@ def _credit_span(low: int, high: int) -> str:
     if not high or low == high:
         return values.credits(low or high)
     return f"{values.credits(low)}–{values.credits(high)}"
+
+
+def _bio_visible_on_hud(body: Body, cfg) -> bool:
+    """Био на верхнем HUD: своё из журнала всегда, чужое — только по настройке."""
+    if body.signals_local or body.organisms:
+        return True
+    return bool(getattr(cfg, "show_remote_bio", False))
 
 
 def _own_bio_bodies(state: GameState) -> list[Body]:
