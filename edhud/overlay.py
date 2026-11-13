@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:05
+# Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:07
 """Оверлей в верхней части экрана (стиль SrvSurvey) на tkinter.
 
 Свойства, которые нам нужны от окна:
@@ -14,7 +15,7 @@ from __future__ import annotations
 import queue
 import webbrowser
 
-from . import winapi
+from . import icon, winapi
 from .biooverlay import BioPanel
 from .hudmodel import BioBoard, HudView
 
@@ -71,6 +72,7 @@ class Overlay:
 
         self.root = tk.Tk()
         self.root.title("EDHUD")
+        icon.apply_icon(self.root)
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.protocol("WM_DELETE_WINDOW", self._request_quit)

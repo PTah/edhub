@@ -32,6 +32,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onefile --name EDHUD-port
   --workpath build\portable ^
   --specpath build ^
   --add-data "%DATA_SRC%;data" ^
+  --icon "%DATA_SRC%\edhud.ico" ^
   --hidden-import tkinter ^
   --exclude-module numpy ^
   --exclude-module pytest ^
@@ -48,6 +49,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir --name EDHUD ^
   --workpath build\onedir ^
   --specpath build ^
   --add-data "%DATA_SRC%;data" ^
+  --icon "%DATA_SRC%\edhud.ico" ^
   --hidden-import tkinter ^
   --exclude-module numpy ^
   --exclude-module pytest ^

@@ -1,4 +1,5 @@
 <!-- Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:15:49 -->
+<!-- Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:27 -->
 # EDHUD — один оверлей из трёх программ
 
 Оверлей-полоса в верхней части экрана (как у SrvSurvey), которая показывает
@@ -251,6 +252,7 @@ python tools/debug_bio.py Bacterium      # трассировка критери
 python tools/render_test.py              # отрисовка оверлея без игры (canvas -> postscript)
 python tools/eddn_probe.py               # что идёт в живом фиде EDDN (нужен pyzmq)
 python tools/check_imports.py            # неиспользуемые импорты
+python tools/make_icon.py                # data/edhud.ico и .png из data/edhud-icon.svg
 ```
 
 ## Данные, лицензии, благодарности

@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:15:33
+# Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:27
 """EDHUD — единый оверлей исследователя Elite Dangerous.
 
 Собрано по мотивам:
@@ -10,7 +11,7 @@
     биологии, ценность проб.
 """
 
-__version__ = "1.3.14"
+__version__ = "1.3.15"
 __all__ = [
     "config",
     "journal",

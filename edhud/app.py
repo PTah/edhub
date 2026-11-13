@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:24
+# Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:12
 """Связка: журналы -> состояние -> HUD (tkinter-оверлей или терминал)."""
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import demo, eddn, edsm_upload, galaxy, hudmodel, remote, spansh, tray
+from . import demo, eddn, edsm_upload, galaxy, hudmodel, icon, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -808,6 +809,7 @@ class App:
 
         win = tk.Toplevel(parent)
         win.title(t("update.title"))
+        icon.apply_icon(win)
         win.attributes("-topmost", True)
         win.resizable(False, False)
         label = ttk.Label(win, text=t("update.downloading", name=info.asset_name), padding=16)

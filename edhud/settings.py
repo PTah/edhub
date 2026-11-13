@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:10
 """Окно настроек EDHUD (tkinter)."""
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ from pathlib import Path
 from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, filedialog, messagebox, ttk
 import tkinter as tk
 
-from . import __version__, config
+from . import __version__, config, icon
 from .i18n import t
 from .mainwindow import _geometry_xy
 
@@ -54,6 +55,7 @@ class SettingsDialog:
         self.on_check_updates = on_check_updates
         self.win = tk.Toplevel(root)
         self.win.title(t("set.title"))
+        icon.apply_icon(self.win)
         self.win.attributes("-topmost", True)
         self.win.resizable(True, True)
         # transient к свёрнутому оверлею (F10/withdraw) прячет и это окно на Windows.

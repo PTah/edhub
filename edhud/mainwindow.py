@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:03
 """Основное окно EDHUD (стиль EDEB): вкладки Route, Bodies и Пояса."""
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from . import bio, codex, values, winapi
+from . import bio, codex, icon, values, winapi
 from .belts import BeltStore, SavedBelt
 from .i18n import t
 from .mining import format_hotspots, format_hotspots_tip
@@ -407,6 +408,7 @@ class MainWindow:
         self._system_name: str | None = None
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD")
+        icon.apply_icon(self.win)
         geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
         self.win.geometry(geometry or "980x520")
         self.win.minsize(720, 360)
