@@ -375,7 +375,10 @@ class App:
         self._carrier_lookup_at = now
 
         def work() -> None:
-            pos = remote.system_coordinates(name, address=address)
+            try:
+                pos = remote.system_coordinates(name, address=address)
+            except Exception:  # сеть недоступна — повторим по таймауту, не штормом
+                pos = None
 
             def apply() -> None:
                 current = (self.state.carrier.system or "").lower()
@@ -389,8 +392,10 @@ class App:
                     self._carrier_lookup = None
                     return
                 if not pos:
-                    # сброс ключа — повторим поиск позже
-                    self._carrier_lookup = None
+                    # ключ НЕ сбрасываем: иначе следующий тик (5 раз в секунду)
+                    # снова стартует поток с сетевым запросом — шторм потоков.
+                    # Повтор будет через 45 с по гейту выше.
+                    self._carrier_lookup_at = time.time()
                     return
                 self.state.carrier.star_pos = pos
                 self.state.carrier_pos_pending = False
