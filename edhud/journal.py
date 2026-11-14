@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 19:52:08
 """Чтение журналов Elite Dangerous: Journal*.log, Status.json, NavRoute.json.
 
 Подход тот же, что в EDMarketConnector/monitor.py: находим самый свежий файл
@@ -10,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -45,6 +47,7 @@ class JournalWatcher(threading.Thread):
         on_status: Callable[[], None] | None = None,
         on_catchup_done: Callable[[], None] | None = None,
         replay: bool = True,
+        error_log: Path | None = None,
     ) -> None:
         super().__init__(name="edhud-journal", daemon=True)
         self.folder = Path(folder)
@@ -62,6 +65,7 @@ class JournalWatcher(threading.Thread):
         self._navroute_mtime = 0.0
         self._partial = ""
         self._catchup_pending = bool(replay)
+        self.error_log = error_log
         self.errors: list[str] = []
 
     # ------------------------------------------------------------------ API
@@ -125,13 +129,37 @@ class JournalWatcher(threading.Thread):
                 continue
             try:
                 event = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                self._record_error({"event": "?"}, exc)
                 continue
-            self.state.apply(event)
+            # Построчные try/except: одно плохое событие не должно съедать
+            # остаток файла (offset уже сдвинут на весь прочитанный кусок).
+            try:
+                self.state.apply(event)
+            except Exception as exc:  # noqa: BLE001 — журнал важнее одной ошибки
+                self._record_error(event, exc)
+                continue
             if self.on_event:
-                self.on_event(event)
+                try:
+                    self.on_event(event)
+                except Exception as exc:  # noqa: BLE001 — колбэк не должен ломать чтение
+                    self._record_error(event, exc)
         if self._offset >= size and not self._partial:
             self._finish_catchup()
+
+    def _record_error(self, event: dict, exc: BaseException) -> None:
+        name = event.get("event") if isinstance(event, dict) else "?"
+        text = f"{name}: {type(exc).__name__}: {exc}"
+        self.errors.append(text)
+        del self.errors[:-50]
+        if self.error_log is None:
+            return
+        try:
+            self.error_log.parent.mkdir(parents=True, exist_ok=True)
+            with self.error_log.open("a", encoding="utf-8") as handle:
+                handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
+        except OSError:
+            pass
 
     def _finish_catchup(self) -> None:
         if not self._catchup_pending:

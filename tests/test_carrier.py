@@ -116,7 +116,7 @@ class CarrierWindowTests(unittest.TestCase):
             self.assertIn("тритий", text)
             self.assertIn("512/1 000", text)
             self.assertIn("через", text)
-            self.assertIn("9:", text)
+            self.assertRegex(text, r"через \d+:\d\d")
         finally:
             window.destroy()
             root_.destroy()

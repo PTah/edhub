@@ -143,6 +143,7 @@ class App:
             on_event=self._on_event,
             on_status=self._on_status,
             on_catchup_done=self._on_journal_catchup,
+            error_log=config_mod.app_dir() / "edhud.log",
         )
         self.watcher.start()
         if self.cfg.voice_enabled:
@@ -188,6 +189,23 @@ class App:
         self.state.persist_needed = False
         self._save_system_now()
         self.edsm.enable_live(self.journal_dir)
+        errors = len(getattr(self.watcher, "errors", []) or [])
+        self._log(
+            f"старт: система {self.state.system.name or '—'} "
+            f"({self.state.system.address or '—'}), тел {len(self.state.system.bodies)}, "
+            f"файл {getattr(self.watcher, '_file', None) and self.watcher._file.name}, "
+            f"ошибок чтения {errors}"
+        )
+
+    def _log(self, text: str) -> None:
+        """Строка в edhud.log — чтобы «застрявшая» система была видна постфактум."""
+        try:
+            path = config_mod.app_dir() / "edhud.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
+        except OSError:
+            pass
 
     def _on_alert(self, alert: Alert) -> None:
         if alert.overlay:
@@ -741,6 +759,7 @@ class App:
                     poll_status=self.cfg.status_poll_sec,
                     on_event=self._on_event,
                     on_catchup_done=self._on_journal_catchup,
+                    error_log=config_mod.app_dir() / "edhud.log",
                 )
                 self.watcher.start()
         self.alerts.configure(self.cfg)
