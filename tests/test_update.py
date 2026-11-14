@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 16:56:33
 """Проверка версий и подмена файлов обновления без сети и без PowerShell."""
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import os
+import re
 from unittest import mock
 
 from edhud.update import (
@@ -133,3 +135,21 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual((target / "EDHUD.exe").read_bytes(), b"exe")
             self.assertEqual((target / "_internal" / "python.dll").read_bytes(), b"dll")
+
+
+class VersionSyncTests(unittest.TestCase):
+    """Номер версии в коде и в pyproject.toml не должен расходиться.
+
+    pyproject задаёт имена артефактов сборки (build_windows.bat), а
+    edhud.__version__ — то, что показывает апдейтер. Если они разъедутся,
+    соберётся релиз со старым номером и обновление не придёт.
+    """
+
+    def test_init_matches_pyproject(self) -> None:
+        import edhud
+
+        root = Path(__file__).resolve().parent.parent
+        text = (root / "pyproject.toml").read_text(encoding="utf-8")
+        match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+        self.assertIsNotNone(match, "в pyproject.toml нет version")
+        self.assertEqual(match.group(1), edhud.__version__)
