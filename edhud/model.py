@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:16:06
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:45:12
 """Состояние игры: система, тела, биология, статус, маршрут.
 
 Модель собирается из событий журнала (как это делает EDMarketConnector в
@@ -1392,6 +1393,13 @@ class GameState:
         elif key not in self._systems_by_me:
             self._discoverers[key] = who
         self.sync_route_discoverers()
+
+    def discoverer_of(self, system: str) -> str | None:
+        """Имя первооткрывателя системы по EDSM (или сам командир)."""
+        key = system.lower()
+        if key in self._systems_by_me:
+            return self.cmdr or None
+        return self._discoverers.get(key)
 
     def sync_route_discoverers(self) -> None:
         for hop in self.route.hops:

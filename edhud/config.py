@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:17
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:42:54
 """Конфигурация приложения и пути к данным/журналам.
 
 Логика поиска каталога журналов повторяет то, что делает EDMarketConnector
@@ -165,6 +166,11 @@ class Config:
     # EDSM: без ключа читаем публичные тела; с ключом ещё отправляем журнал
     edsm_api_key: str = ""
     edsm_commander: str = ""
+    # EDDN: слушаем live-фид; отдельно умеем отправлять туда свои события
+    eddn_upload: bool = False
+    # INARA: personal API key + имя командира (travel-лог, системы)
+    inara_api_key: str = ""
+    inara_commander: str = ""
     # голос (Windows SAPI: русский или английский — по языку Windows)
     # обновления: auto — проверка релиза GitHub при запуске, manual — только из настроек
     update_check: str = "auto"

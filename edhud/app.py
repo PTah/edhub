@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:24
 # Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:12
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:43:00
 """Связка: журналы -> состояние -> HUD (tkinter-оверлей или терминал)."""
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import demo, eddn, edsm_upload, galaxy, hudmodel, icon, remote, spansh, tray
+from . import demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -76,6 +77,8 @@ class App:
         from . import __version__
 
         self.edsm = edsm_upload.EdsmUploader(lambda: self.cfg, __version__)
+        self.eddn_upload = eddn_upload.EddnUploader(lambda: self.cfg, __version__)
+        self.inara = inara_upload.InaraUploader(lambda: self.cfg, __version__)
         self._eddn_filter = eddn.SetFilter()
         self._eddn_messages: queue.Queue = queue.Queue(maxsize=512)
         self._cached_for: int | None = None
@@ -203,6 +206,8 @@ class App:
     def _on_event(self, event: dict) -> None:
         self.alerts.handle(event, self.state)
         self.edsm.note(event, self.state)
+        self.eddn_upload.note(event, self.state)
+        self.inara.note(event, self.state)
         if self.state.persist_needed:
             self.state.persist_needed = False
             self._save_system_now()

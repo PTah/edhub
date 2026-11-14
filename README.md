@@ -42,7 +42,7 @@
   ПКМ по полоске. Окно удерживается поверх всех каждые 2 секунды,
   DPI-awareness (Per-Monitor v2), не забирает фокус у игры.
 * **Настройки** (трей → Настройки): каталог журналов, сеть, EDSM/Spansh/EDDN,
-  необязательный EDSM API key, голос, прозрачность/ширина оверлея. Файл:
+  необязательные EDSM и INARA API key, голос, прозрачность/ширина оверлея. Файл:
   `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
 * **Окно EDHUD** (трей → «Окно EDHUD»): вкладки Route и Bodies — список тел
   системы (тип, атмосфера, био/гео, DSS, оценка Cr, первооткрытие, дистанция).
@@ -67,6 +67,14 @@
   pyzmq не обязателен (если установлен — используется он). Тела из чужих данных
   помечаются `[EDSM]` / `[spansh]` / `[EDDN]`, тела без данных — «?» (как в EDEB).
   Кэш на диск, работа офлайн по кэшу, флаги `--offline`, `--no-remote`, `--no-eddn`.
+* **Отправка своих данных**:
+  - **EDSM** — `api-journal-v1`: прыжки с координатами и сканы (нужны Commander + API key).
+  - **EDDN** — `https://eddn.edcd.io:4430/upload/`: `Scan`/`FSDJump`/`SAASignalsFound` →
+    `journal/1`, `FSSBodySignals` → `fssbodysignals/1`, `CodexEntry` → `codexentry/1`.
+    Без ключа; отсюда данные разбирают Spansh, EDSM, INARA, edastro.
+  - **INARA** — `https://inara.cz/inapi/v1/`: `FSDJump`/`Location`/`CarrierJump`/`Touchdown`
+    (нужны Commander + персональный API key). Сканы тел INARA берёт из EDDN, а не из своего API.
+  - **Spansh** публичного API записи не даёт — получает данные из EDDN.
 * **Стоимость**: скан и скан+DSS для каждого тела, множители первооткрывателя
   (×2.6) и картографии (×3.33/×8.1/×3.7 + бонус Odyssey и +25 % за эффективный
   DSS), итоги по системе, суммы за сессию, реальные выплаты из

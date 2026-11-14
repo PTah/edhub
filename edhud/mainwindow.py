@@ -1520,6 +1520,10 @@ class MainWindow:
         total = state.system.body_count or known
         bio = sum(1 for b in state.system.bodies.values() if (b.bio_signals or 0) > 0)
         opened = t("win.opened") if state.system.discovered_by_me else ""
+        if not opened and state.system.name:
+            who = state.discoverer_of(state.system.name)
+            if who and who.lower() != (self.cfg.edsm_commander or state.cmdr or "").lower():
+                opened = t("win.discovered_by", name=who)
         self.lbl_system.configure(text=t("win.system", name=name, opened=opened))
         self.lbl_status.configure(
             text=t("win.status", known=known, total=total, bio=bio)

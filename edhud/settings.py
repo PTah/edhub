@@ -1,4 +1,5 @@
 # Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:10
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:42:34
 """Окно настроек EDHUD (tkinter)."""
 from __future__ import annotations
 
@@ -167,6 +168,9 @@ class SettingsDialog:
         self.click_through = BooleanVar(value=bool(self.cfg.click_through))
         self.edsm_api_key = StringVar(value=self.cfg.edsm_api_key or "")
         self.edsm_commander = StringVar(value=self.cfg.edsm_commander or "")
+        self.eddn_upload = BooleanVar(value=bool(getattr(self.cfg, "eddn_upload", False)))
+        self.inara_api_key = StringVar(value=getattr(self.cfg, "inara_api_key", "") or "")
+        self.inara_commander = StringVar(value=getattr(self.cfg, "inara_commander", "") or "")
         self.voice_enabled = BooleanVar(value=bool(self.cfg.voice_enabled))
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
@@ -214,6 +218,10 @@ class SettingsDialog:
             row=row, column=0, sticky="w", **pad
         )
         row += 1
+        ttk.Checkbutton(frm, text=t("set.eddn_send"), variable=self.eddn_upload).grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
         ttk.Checkbutton(
             frm, text=t("set.nebulae"), variable=self.nebulae_enabled
         ).grid(row=row, column=0, sticky="w", **pad)
@@ -248,6 +256,29 @@ class SettingsDialog:
         ttk.Button(link, text=t("set.spansh"), command=lambda: webbrowser.open("https://spansh.co.uk/")).pack(
             side="left", padx=6
         )
+        row += 1
+
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
+        row += 1
+        ttk.Label(frm, text=t("set.inara")).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Label(frm, text=t("set.inara_cmdr")).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Entry(frm, textvariable=self.inara_commander, width=40).grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
+        ttk.Label(frm, text=t("set.inara_api")).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Entry(frm, textvariable=self.inara_api_key, width=56, show="•").grid(
+            row=row, column=0, columnspan=2, sticky="ew", **pad
+        )
+        row += 1
+        ttk.Button(
+            frm,
+            text=t("set.open_inara_api"),
+            command=lambda: webbrowser.open("https://inara.cz/elite/inara-api/"),
+        ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
 
         ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
@@ -659,6 +690,9 @@ class SettingsDialog:
         self.cfg.click_through = bool(self.click_through.get())
         self.cfg.edsm_api_key = self.edsm_api_key.get().strip()
         self.cfg.edsm_commander = self.edsm_commander.get().strip()
+        self.cfg.eddn_upload = bool(self.eddn_upload.get())
+        self.cfg.inara_api_key = self.inara_api_key.get().strip()
+        self.cfg.inara_commander = self.inara_commander.get().strip()
         self.cfg.voice_enabled = bool(self.voice_enabled.get())
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
