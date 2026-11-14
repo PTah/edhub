@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 14:35:25
 """Русский и английский интерфейс.
 
 Русский — если язык Windows русский (язык интерфейса или региональные
@@ -41,8 +42,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "jump.many": "прыжков",
         "jump.short": "прыж.",
         "voice.brake": "Тормози",
-        "voice.bio": "Биологический сигнал найден на {short}. Сигналов: {count}.{possible}",
-        "voice.possible": " Возможно: {names}.",
+        "voice.bio": "Биологический сигнал найден на {short}.",
         "voice.body": "тело",
         "voice.system": "система",
         "voice.planet": "планета",
@@ -330,8 +330,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "jump.many": "jumps",
         "jump.short": "jumps",
         "voice.brake": "Slow down",
-        "voice.bio": "Biological signal found on {short}. Signals: {count}.{possible}",
-        "voice.possible": " Possible: {names}.",
+        "voice.bio": "Biological signal found on {short}.",
         "voice.body": "body",
         "voice.system": "system",
         "voice.planet": "planet",

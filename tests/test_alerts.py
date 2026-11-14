@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 14:35:30
 """Тесты детектора голосовых алертов (без реального TTS)."""
 from __future__ import annotations
 
@@ -60,11 +61,11 @@ class AlertEngineTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "bio")
         self.assertIn("Биологический", alerts[0].text)
-        self.assertIn("Сигналов: 2", alerts[0].text)
         self.assertIn("на 3", alerts[0].text)
-        self.assertIn("×2", alerts[0].overlay or "")
+        self.assertNotIn("Сигналов", alerts[0].text)
+        self.assertIn("Test System 3", alerts[0].overlay or "")
 
-    def test_bio_voice_names_possible_organisms(self) -> None:
+    def test_bio_voice_without_species_and_counts(self) -> None:
         from edhud.model import Body
 
         self.engine.arm()
@@ -94,8 +95,12 @@ class AlertEngineTests(unittest.TestCase):
         }
         alerts = self.engine.handle(event, self.state)
         self.assertEqual(len(alerts), 1)
-        self.assertIn("Возможно:", alerts[0].text)
-        self.assertIn("Bacterium", alerts[0].text)
+        # только факт находки: ни видов, ни счётчика сигналов
+        self.assertNotIn("Возможно:", alerts[0].text)
+        self.assertNotIn("Bacterium", alerts[0].text)
+        self.assertNotIn("Сигналов", alerts[0].text)
+        self.assertIn("Test System 3", alerts[0].overlay or "")
+        self.assertNotIn("Bacterium", alerts[0].overlay or "")
         # дубль
         self.assertEqual(self.engine.handle(event, self.state), [])
 

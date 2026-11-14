@@ -1,10 +1,10 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 14:35:25
 """Детектор голосовых событий: био-сигнал, первое открытие, зона DSS."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import bio
 from . import values
 from .i18n import t
 from .model import GameState, format_dss_range
@@ -115,12 +115,9 @@ class AlertEngine:
         body = state.system.bodies.get(body_id)
         body_name = (body.name if body else None) or event.get("BodyName") or t("voice.body")
         short = body_name.split()[-1] if body_name else t("voice.body")
-        forecast = bio.forecast_names(body, state.system, limit=3) if body is not None else []
-        possible = t("voice.possible", names=", ".join(forecast)) if forecast else ""
-        text = t("voice.bio", short=short, count=count, possible=possible)
-        overlay = f"{t('col.bio').lower()} ×{count}: {body_name}"
-        if forecast:
-            overlay += " · " + ", ".join(forecast)
+        # Оповещаем только о факте находки: без перечисления видов и без счётчика.
+        text = t("voice.bio", short=short)
+        overlay = f"{t('col.bio').lower()}: {body_name}"
         return Alert(kind="bio", text=text, overlay=overlay)
 
     def _check_discovery(self, event: dict, state: GameState) -> Alert | None:
