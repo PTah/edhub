@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:56
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 19:10:31
 """Тесты конвейера: журнал -> состояние -> HUD, кэш систем, залоченный маршрут."""
 from __future__ import annotations
 
@@ -2278,6 +2279,48 @@ class SampleGuideTests(unittest.TestCase):
         assert board is not None
         self.assertIsNotNone(board.radar)
         self.assertTrue(any(line.startswith("radar:") for line in board.plain()))
+
+    def test_radar_ignores_stale_samples_and_says_step_away(self):
+        """Старые пробы в километрах не должны лезть на обод, а текст — говорить, куда идти."""
+        state = GameState()
+        state.system.address = 1
+        state.system.name = "Test"
+        body = Body(
+            body_id=4,
+            name="Test 1 a",
+            radius=6_000_000.0,
+            landable=True,
+            bio_signals=1,
+            signals_local=True,
+        )
+        organic = Organic(
+            key="stratum",
+            genus="$Codex_Ent_Stratum_Genus_Name;",
+            species="$Codex_Ent_Stratum_07_Name;",
+            genus_local="Stratum",
+            samples=1,
+            sample_pos=[(0.00191, 0.0), (0.09, 0.0), (0.18, 0.0)],  # 200 м, 10 км, 20 км
+        )
+        body.organisms[organic.key] = organic
+        state.system.bodies[4] = body
+        state.apply_status(
+            {
+                "Latitude": 0.0,
+                "Longitude": 0.0,
+                "Heading": 0.0,
+                "PlanetRadius": 6_000_000.0,
+                "BodyID": 4,
+                "Flags": 1 << 19,
+            }
+        )
+        radar = state.radar_view()
+        assert radar is not None
+        samples = [blip for blip in radar.blips if blip.kind == "sample"]
+        self.assertEqual(len(samples), 1)
+        self.assertAlmostEqual(samples[0].distance_m, 200, delta=20)
+        self.assertIn("отойди ещё", radar.title)
+        self.assertIn("300", radar.title)
+        self.assertTrue(any(blip.kind == "away" for blip in radar.blips))
 
     def test_radar_lists_any_spots_before_first_sample(self):
         state = GameState()

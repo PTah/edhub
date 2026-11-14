@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 19:07:27
 """Второй оверлей слева: текущие био-находки, как PlotBioSystem у SrvSurvey.
 
 Окно без рамки, поверх игры и сквозное для мыши вместе с основным дашбордом.
@@ -10,6 +11,7 @@ import math
 
 from . import winapi
 from .hudmodel import BioBoard, BioLine
+from .i18n import t
 from .model import RadarBlip, RadarView
 
 PAD = 10
@@ -355,7 +357,7 @@ class BioPanel:
                 cx + need_r + 2,
                 cy - need_r,
                 anchor="sw",
-                text=f"{radar.need_m} м",
+                text=f"{radar.need_m} {t('hud.unit_m')}",
                 fill=ring,
                 font=small,
             )
@@ -377,14 +379,31 @@ class BioPanel:
         for blip in radar.blips:
             self._draw_blip(blip, cx, cy, r, scale, small)
 
+        # «С» на ободе: радар развёрнут по курсу, север вверху только без курса
+        north_turn = (0.0 - float(radar.heading)) % 360.0 if radar.heading is not None else 0.0
+        nrad = math.radians(north_turn)
+        canvas.create_text(
+            cx + int(math.sin(nrad) * (r - 9)),
+            cy - int(math.cos(nrad) * (r - 9)),
+            text=t("hud.north"),
+            fill=cfg.color("muted"),
+            font=small,
+        )
+
         canvas.create_text(
             cx,
             cy + r + 2,
             anchor="n",
-            text=f"шкала {radar.range_m:,.0f} м".replace(",", " "),
+            text=t("hud.scale", dist=self._fmt_distance(radar.range_m)),
             fill=cfg.color("muted"),
             font=small,
         )
+
+    @staticmethod
+    def _fmt_distance(meters: float) -> str:
+        if meters >= 1000:
+            return f"{meters / 1000:.1f} {t('hud.unit_km')}".replace(".", ",")
+        return f"{meters:.0f} {t('hud.unit_m')}"
 
     def _draw_blip(self, blip: RadarBlip, cx: int, cy: int, r: int, scale: float, font) -> None:
         canvas = self.canvas
@@ -399,6 +418,13 @@ class BioPanel:
             px = cx + int(math.sin(rad) * (r - 2))
             py = cy - int(math.cos(rad) * (r - 2))
             self._draw_away_arrow(px, py, turn, cfg.color("warn"))
+            canvas.create_text(
+                px,
+                py - 14,
+                text=f"+{self._fmt_distance(blip.distance_m)}",
+                fill=cfg.color("warn"),
+                font=font,
+            )
             return
         if dist * scale > r - 6:
             dist = (r - 6) / scale
@@ -422,6 +448,16 @@ class BioPanel:
             canvas.create_oval(px - s, py - s, px + s, py + s, fill=color, outline="")
         if on_rim:
             canvas.create_oval(px - 7, py - 7, px + 7, py + 7, outline=color)
+        # подпись расстояния: без неё точка читается как «неизвестно что»
+        anchor = "e" if px > cx else "w"
+        canvas.create_text(
+            px - 9 if anchor == "e" else px + 9,
+            py,
+            anchor=anchor,
+            text=self._fmt_distance(blip.distance_m),
+            fill=cfg.color("muted"),
+            font=font,
+        )
 
     def _draw_away_arrow(self, x: int, y: int, turn: float, color: str) -> None:
         rad = math.radians(turn)

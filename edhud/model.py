@@ -2190,10 +2190,17 @@ class GameState:
 
         if organic is not None and organic.sample_pos:
             need = codex.sample_range(organic.genus)
+            gaps = [
+                (index, surface_distance(lat, lon, slat, slon, radius), surface_bearing(lat, lon, slat, slon))
+                for index, (slat, slon) in enumerate(organic.sample_pos, start=1)
+            ]
+            nearest_index = min(gaps, key=lambda item: item[1])[0] if gaps else None
             closest_gap: tuple[float, float] | None = None
-            for index, (slat, slon) in enumerate(organic.sample_pos, start=1):
-                dist = surface_distance(lat, lon, slat, slon, radius)
-                bearing = surface_bearing(lat, lon, slat, slon)
+            for index, dist, bearing in gaps:
+                # Дальние пробы для интервала не важны и только прижимались
+                # к ободу: оставляем ближайшую, остальные — если в пределах need.
+                if dist > need and index != nearest_index:
+                    continue
                 blips.append(
                     RadarBlip(
                         kind="sample",
@@ -2257,8 +2264,16 @@ class GameState:
             ready = all(b.ready for b in blips if b.kind == "sample")
             span = max((b.distance_m for b in blips if b.kind != "away"), default=float(need))
             range_m = min(5000.0, max(float(need) * 1.35, span * 1.15, 250.0))
+            title = t("hud.radar", genus=organic.genus_en, scans=organic.scans_text, need=need)
+            closest = min((b.distance_m for b in blips if b.kind == "sample"), default=None)
+            if closest is not None and closest < need:
+                title += t(
+                    "hud.radar_away", dist=f"{need - closest:,.0f}".replace(",", " ")
+                )
+            if heading is None:
+                title += t("hud.radar_no_heading")
             return RadarView(
-                title=t("hud.radar", genus=organic.genus_en, scans=organic.scans_text, need=need),
+                title=title,
                 range_m=range_m,
                 need_m=need,
                 heading=heading,
