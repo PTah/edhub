@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 19:17:49
 """Маршрут: NavRoute.json игры, заблокированный/импортированный маршрут, прогресс.
 
 Идея как в EDEB (Exploration Buddy): маршрут берётся из игры, но его можно
@@ -49,10 +50,13 @@ class RouteHop:
             "edsm_missing": self.edsm_missing,
         }
 
-    def opened_label(self) -> str:
+    def opened_label(self, cmdr: str | None = None) -> str:
         from .i18n import t
 
         if self.discovered_by_me:
+            name = (cmdr or self.discovered_by or "").strip()
+            if name:
+                return t("route.your_discovery_named", name=name)
             return t("route.your_discovery")
         if self.discovered_by:
             return self.discovered_by

@@ -502,7 +502,9 @@ def _system_row(state: GameState) -> Row:
         row.segments.append(Segment(system.name, "fg"))
         row.segments.append(Segment(" · ", "muted"))
     if system.discovered_by_me:
-        row.segments.append(Segment(t("hud.opened_by_you"), "ok"))
+        name = (getattr(state, "cmdr", None) or "").strip()
+        label = t("route.your_discovery_named", name=name) if name else t("hud.opened_by_you")
+        row.segments.append(Segment(label, "gold"))
         row.segments.append(Segment(" · ", "muted"))
     row.segments.append(Segment(t("hud.n_bodies", n=len(system.bodies)), "text"))
     if scan_sum:

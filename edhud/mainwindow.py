@@ -24,6 +24,7 @@ COLORS = {
     "muted": "#8a8a8a",
     "ok": "#7ddb6a",
     "warn": "#ffd24a",
+    "gold": "#ffd700",
     "bad": "#ff5f56",
     "row": "#161616",
     "sel": "#2a1a0a",
@@ -1740,9 +1741,10 @@ class MainWindow:
             hop.star_class or "—",
             ly_text,
             _route_bodies_cell(hop, here=(tag == "here"), system=state.system),
-            hop.opened_label(),
+            hop.opened_label(state.cmdr or getattr(self.cfg, "edsm_commander", None)),
         ]
-        fgs = [fg, fg, fg, fg, fg, COLORS["ok"] if hop.discovered_by_me else fg]
+        opened_fg = COLORS["gold"] if hop.discovered_by_me else fg
+        fgs = [fg, fg, fg, fg, fg, opened_fg]
         return cells, fgs, font
 
     def _route_apply_row(self, row: int, data: dict) -> bool:
@@ -1858,7 +1860,9 @@ class MainWindow:
                 tips[key] = None
                 continue
             paint = signal_colors(key, counts.get(key))
-            if key == "guess" and guess_color:
+            if key == "first" and first == "✔":
+                styles[key] = (COLORS["gold"], COLORS["row"])
+            elif key == "guess" and guess_color:
                 styles[key] = (COLORS[guess_color], COLORS["row"])
             else:
                 styles[key] = paint if paint else (COLORS["text"], COLORS["row"])
