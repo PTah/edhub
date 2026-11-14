@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:17:04
 """Справочник кодекса: имена родов/видов и «ценность» в Vista Genomics.
 
 GENUS_NAMES / GENUS_RANGE повторяют таблицы SrvSurvey
@@ -180,8 +181,10 @@ def reward_for(genus_en: str | None, species_en: str | None, variant_en: str | N
     if not genus_en or not species_en:
         return 0
     index = _by_english()
-    # локализованное имя вида уже содержит род: "Fungoida Setisis"
-    if species_en.lower().startswith(genus_en.lower()):
+    # локализованное имя вида уже содержит род: "Fungoida Setisis",
+    # "Roseum Brain Tree" при роде "Brain Trees"
+    stem = genus_en.lower().rstrip("s")
+    if species_en.lower().startswith(genus_en.lower()) or (stem and stem in species_en.lower()):
         base = species_en
     else:
         base = f"{genus_en} {species_en}"

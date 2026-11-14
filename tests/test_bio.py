@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:19:03
 """Тесты движка биологии и регионов."""
 from __future__ import annotations
 
@@ -111,6 +112,64 @@ class PredictionTests(unittest.TestCase):
         self.assertEqual(body.atmosphere_type, "CarbonDioxide")
         body.atmosphere = "no atmosphere"
         self.assertIsNone(body.atmosphere_type)
+
+    def _airless_body(self, system: System) -> Body:
+        """Безвоздушное тело: атмо-строка пустая, hint «None» (как в журнале)."""
+        body = Body(
+            body_id=2,
+            name="Test 2 a",
+            planet_class="Rocky body",
+            radius=3e5,
+            surface_gravity=9.59,
+            surface_temp=472.5,
+            surface_pressure=0.0,
+            atmosphere="",
+            atmosphere_type_hint="None",
+            volcanism="major silicate vapour geysers volcanism",
+            materials={"Iron": 20.0, "Sulphur": 17.8, "Nickel": 15.2},
+            landable=True,
+            distance_ls=1694.0,
+            parent_ids=[0],
+        )
+        system.bodies[2] = body
+        return body
+
+    def test_airless_props_report_none_atmosphere_type(self):
+        """В критериях безвоздушное тело — atmosType «None», а не отсутствие данных."""
+        system = self._system()
+        system.star_pos = (820.03, 2.72, -259.37)  # регион 18, Guardian-пузырь
+        body = self._airless_body(system)
+        props = bio.build_props(body, system, guardian=True)
+        assert props is not None
+        self.assertEqual(props["AtmosphereType"], "None")
+        clause = bio.Clause.parse("atmosType [None]")
+        self.assertTrue(bio._clause_ok(clause, props))
+
+    def test_unscanned_body_does_not_claim_no_atmosphere(self):
+        """Тело без Scan не должно притворяться безвоздушным."""
+        system = self._system()
+        body = self._airless_body(system)
+        body.atmosphere = None
+        props = bio.build_props(body, system, guardian=True)
+        assert props is not None
+        self.assertIsNone(props["AtmosphereType"])
+
+    def test_airless_brain_trees_predicted(self):
+        """Brain Trees на безвоздушном теле: вид без варианта всё равно предсказывается."""
+        system = self._system()
+        system.star_pos = (820.03, 2.72, -259.37)
+        body = self._airless_body(system)
+        body.bio_signals = 1
+        body.genuses = {"$Codex_Ent_Brancae_Name;": 1}  # кодекс: «Brain Tree»
+        predictions = bio.predict_for_body(body, system)
+        self.assertTrue(predictions, "род из кодекса не совпал с критериями «Brain Trees»")
+        self.assertTrue(all(p.variant == "" for p in predictions))
+        self.assertGreater(predictions[0].reward, 0)
+        names = bio.forecast_names(body, system, limit=8)
+        self.assertTrue(any("Brain Tree" in name for name in names), names)
+        for name in names:
+            self.assertFalse(name.endswith(" - "), name)
+            self.assertNotIn("Brain Trees Brain", name, name)
 
     def test_icy_neon_predicts_bacterium(self):
         system = self._system()

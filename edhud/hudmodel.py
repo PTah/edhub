@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:22:52
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:19:46
 """Модель отображения HUD: из GameState в строки/сегменты для рендера.
 
 Чистый слой без зависимостей от UI — его используют и tkinter-оверлей, и
@@ -757,12 +758,13 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
             continue
         low, high = _genus_span(species_rows)
         for index, (species, variants, reward) in enumerate(species_rows):
+            phrase = bio.species_label(genus, species)
             if len(variants) == 1:
-                text = f"{genus} {species} - {variants[0]}"
+                text = f"{phrase} - {variants[0]}"
             elif variants:
-                text = f"{genus} {species}: {', '.join(variants)}"
+                text = f"{phrase}: {', '.join(variants)}"
             else:
-                text = f"{genus} {species}"
+                text = phrase
             lines.append(
                 BioLine(
                     segments=[

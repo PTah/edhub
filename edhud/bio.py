@@ -1,4 +1,5 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:14:01
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:16:35
 """Предсказание биологии (порт движка SrvSurvey BioCriteria/BioPredictor).
 
 Данные критериев — data/bio-criteria/*.json (SrvSurvey, GPLv3). Формат:
@@ -159,6 +160,20 @@ def load_criteria() -> tuple[Criteria, ...]:
     return tuple(nodes)
 
 
+def _species_phrase(genus: str, species: str) -> str:
+    """Вид без дублирования рода: 'Brain Trees' + 'Roseum Brain Tree'."""
+    stem = genus.lower().rstrip("s")
+    if stem and stem in species.lower():
+        return species
+    return f"{genus} {species}"
+
+
+def species_label(genus: str, species: str, variant: str = "") -> str:
+    """Подпись организма: вид (без дубля рода) и вариант через « - »."""
+    phrase = _species_phrase(genus, species)
+    return f"{phrase} - {variant}" if variant else phrase
+
+
 @dataclass(frozen=True)
 class Prediction:
     genus: str
@@ -167,11 +182,11 @@ class Prediction:
 
     @property
     def label(self) -> str:
-        return f"{self.genus} {self.species} - {self.variant}"
+        return species_label(self.genus, self.species, self.variant)
 
     @property
     def short(self) -> str:
-        return f"{self.genus} {self.species}"
+        return _species_phrase(self.genus, self.species)
 
     @property
     def reward(self) -> int:
@@ -292,12 +307,15 @@ def _walk(
 
     if not _query_ok(node.query, props):
         return
-    if genus and species and variant:
-        prediction = Prediction(genus=genus, species=species, variant=variant)
+    children = common if node.use_common_children else node.children
+    # Лист без варианта тоже даёт предсказание: в критериях у части родов
+    # (Brain Trees, Anemone, Bark Mounds…) `variant: ""`, и раньше такой
+    # вид отбрасывался — безвоздушные тела оставались «не расшифрованы».
+    if genus and species and (variant or not children):
+        prediction = Prediction(genus=genus, species=species, variant=variant or "")
         if prediction not in out:
             out.append(prediction)
 
-    children = common if node.use_common_children else node.children
     for child in children or []:
         _walk(child, props, genus, species, variant, common, out)
 
@@ -312,8 +330,10 @@ def predict(props: dict, known_genuses: set[str] | None = None) -> list[Predicti
     for node in load_criteria():
         _walk(node, props, None, None, None, [], out)
     if known_genuses:
-        lowered = {g.lower() for g in known_genuses}
-        return [p for p in out if p.genus.lower() in lowered]
+        # «Brain Trees» в критериях и «Brain Tree» в кодексе — один род:
+        # сравниваем без хвостового «s», иначе DSS-фильтр выкидывает всё
+        lowered = {g.lower().rstrip("s") for g in known_genuses}
+        return [p for p in out if p.genus.lower().rstrip("s") in lowered]
     return out
 
 
@@ -388,12 +408,17 @@ def build_props(body, system, nebulae: float | None = None, guardian: bool = Fal
     pos = system.star_pos
     region = regions.region_id(pos[0], pos[2]) if pos else None
     atmosphere = (body.atmosphere or "").replace(" atmosphere", "")
+    # В критериях безвоздушное тело — это atmosType [None] (строка), а не
+    # «нет данных». Различаем: атмосфера пустая строка — просканировано и её нет,
+    # None — тело ещё не сканировали, ничего не утверждаем.
+    atmos_type = body.atmosphere_type
+    if atmos_type is None and body.atmosphere is not None:
+        atmos_type = "None"
     composition = dict(body.atmosphere_composition or {})
     # как в SrvSurvey: один газ → 100%; иначе доминирующий газ = AtmosphereType → 100%
     if len(composition) == 1:
         composition[next(iter(composition))] = 100.0
     else:
-        atmos_type = body.atmosphere_type
         if atmos_type and composition:
             dominant = max(composition.items(), key=lambda item: item[1])
             if dominant[0].lower() == atmos_type.lower() and dominant[1] >= 50.0:
@@ -404,7 +429,7 @@ def build_props(body, system, nebulae: float | None = None, guardian: bool = Fal
         "SurfaceTemperature": body.surface_temp,
         "SurfacePressure": (body.surface_pressure or 0.0) / 100000.0,
         "Atmosphere": atmosphere,
-        "AtmosphereType": body.atmosphere_type,
+        "AtmosphereType": atmos_type,
         "AtmosphereComposition": composition,
         "DistanceFromArrivalLS": body.distance_ls,
         "Volcanism": body.volcanism or "None",
@@ -448,10 +473,11 @@ def forecast_names(body, system, limit: int = 4) -> list[str]:
         # после DSS (или один вид у рода) — пишем вид и цвет, не голый род
         if after_dss or len(species_map) == 1:
             for species, variants in species_map.items():
+                phrase = _species_phrase(genus, species)
                 if len(variants) == 1:
-                    names.append(f"{genus} {species} - {variants[0]}")
+                    names.append(f"{phrase} - {variants[0]}")
                 else:
-                    names.append(f"{genus} {species}")
+                    names.append(phrase)
                 if len(names) >= limit:
                     return names
         else:
