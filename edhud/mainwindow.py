@@ -1,4 +1,5 @@
 # Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:03
+# Edited by nc.ai 1.2.11 on Papasha 2026-11-14 16:44:56
 """Основное окно EDHUD (стиль EDEB): вкладки Route, Bodies и Пояса."""
 from __future__ import annotations
 
@@ -437,6 +438,18 @@ class MainWindow:
         self._body_rows: dict[int, dict] = {}
         self._bodies_order: list[int] = []
         self._bodies_address = None
+        # инкрементальная + виртуализированная таблица Route: материализуем
+        # только видимые строки, остальные держим разматериализованными.
+        self._route_rows: dict[int, dict] = {}
+        self._route_materialized: set[int] = set()
+        self._route_hops_total = 0
+        self._route_systems: tuple | None = None
+        self._route_here: int | None = None
+        self._route_col_px: list[int] = []
+        self._route_hops: list = []
+        self._route_jump_marks: dict = {}
+        self._route_state: GameState | None = None
+        self._last_route_key: tuple | None = None
         self.win.after(80, self._enable_layout_persist)
         self.win.bind("<Configure>", self._on_window_configure, add="+")
 
@@ -772,7 +785,14 @@ class MainWindow:
         canvas = tk.Canvas(host, bg=COLORS["row"], highlightthickness=0, bd=0)
         scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
         xscroll = ttk.Scrollbar(host, orient="horizontal", command=lambda *a: self._xview(table, *a))
-        canvas.configure(yscrollcommand=scroll.set, xscrollcommand=xscroll.set)
+        if table == "route":
+            # при прокрутке виртуализированной таблицы дозаполняем видимые строки
+            canvas.configure(
+                yscrollcommand=lambda *a: (scroll.set(*a), self._route_materialize())
+            )
+        else:
+            canvas.configure(yscrollcommand=scroll.set)
+        canvas.configure(xscrollcommand=xscroll.set)
         canvas.grid(row=1, column=0, sticky="nsew")
         scroll.grid(row=1, column=1, sticky="ns")
         xscroll.grid(row=2, column=0, sticky="ew")
@@ -793,6 +813,8 @@ class MainWindow:
             canvas.itemconfigure(window, width=max(total, int(event.width) or total))
             header.configure(width=total)
             self._sync_header_x(table)
+            if table == "route":
+                self._route_materialize()
 
         def _scrollregion(_event) -> None:
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -1356,8 +1378,34 @@ class MainWindow:
             return
         self._last_key = key
         self._update_header(state)
-        self._update_route(state)
+        route_key = self._route_key(state)
+        if route_key != self._last_route_key:
+            self._last_route_key = route_key
+            self._update_route(state)
         self._update_bodies(state)
+
+    def _route_key(self, state: GameState) -> tuple:
+        route = tuple(
+            (
+                h.system,
+                h.star_class,
+                h.discovered_by,
+                h.discovered_by_me,
+                h.edsm_stars,
+                h.edsm_planets,
+                h.edsm_bodies,
+                h.edsm_missing,
+            )
+            for h in state.route.hops
+        )
+        return (
+            route,
+            state.route.locked,
+            state.system.name,
+            state.system.address,
+            state.fsd_target,
+            state.jump_dest,
+        )
 
     def _snapshot_key(self, state: GameState) -> tuple:
         sys = state.system
@@ -1590,9 +1638,14 @@ class MainWindow:
     def _update_route(self, state: GameState) -> None:
         route = state.route
         current = state.system.name
-        for child in self._route_inner.winfo_children():
-            child.destroy()
+        self._route_state = state
         if not route.hops:
+            self._clear_route_rows()
+            self._route_hops_total = 0
+            self._route_systems = None
+            self._route_here = None
+            self._route_col_px = []
+            self._route_inner.configure(height=1)
             self.route_info.configure(text=t("win.route_empty"))
             self._route_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
@@ -1605,72 +1658,141 @@ class MainWindow:
         self.route_info.configure(
             text=t("win.route_info", src=src, lock=lock, extra=extra, jumps=jump_txt)
         )
-        here = route.index_of(current)
-        jump_marks = route_jump_marks(route.hops, here, state.jump_arrow_system())
-        here_row = None
-        widths = self._apply_column_geometry("route")
-        for row, hop in enumerate(route.hops):
-            dist = hop.distance if hop.distance else None
-            ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
-            tag = route_tag(row, here)
-            jump = jump_marks.get(row)
-            if jump:
-                mark = jump
-            elif tag == "here":
-                mark = "▶ "
-            else:
-                mark = ""
-            if tag == "done" and jump is None:
-                fg = COLORS["muted"]
-            elif jump == "-> ":
-                fg = COLORS["accent"]
-            elif jump == "-< " or tag == "here":
-                fg = COLORS["ok"]
-            elif jump == "|  ":
-                fg = COLORS["warn"]
-            else:
-                fg = COLORS["text"]
-            font = (
-                self._ui_family,
-                self._ui_size + (1 if tag == "here" or jump in ("-< ", "-> ") else 0),
-            )
-            opened = hop.opened_label()
-            bodies_txt = _route_bodies_cell(hop, here=(tag == "here"), system=state.system)
-            cells = {
-                "idx": str(row + 1),
-                "system": f"{mark}{hop.system}",
-                "star": hop.star_class or "—",
-                "ly": ly_text,
-                "bodies": bodies_txt,
-                "opened": opened,
-            }
-            for col, (key, _title, _width, anchor) in enumerate(ROUTE_COLUMNS):
-                cell_fg = COLORS["ok"] if key == "opened" and hop.discovered_by_me else fg
-                self._put_cell(
-                    "route",
-                    row,
-                    col,
-                    widths[col],
-                    text=cells[key],
-                    fg=cell_fg,
-                    anchor=anchor,
-                    font=font,
-                    copy_text=hop.system if key == "system" else None,
-                )
-            if tag == "here":
-                here_row = row
-        self._route_inner.update_idletasks()
-        total_w = sum(widths)
+        # Строки переиспользуем, пока не сменился набор систем маршрута.
+        systems = tuple(h.system for h in route.hops)
+        if self._route_systems != systems:
+            self._clear_route_rows()
+            self._route_systems = systems
+        self._route_hops = route.hops
+        self._route_here = route.index_of(current)
+        self._route_hops_total = len(route.hops)
+        self._route_jump_marks = route_jump_marks(
+            route.hops, self._route_here, state.jump_arrow_system()
+        )
+        self._route_col_px = self._apply_column_geometry("route")
+        row_h = _row_height(self._ui_size)
+        total_w = sum(self._route_col_px)
+        total_h = self._route_hops_total * row_h
+        # Фиксированная высота внутреннего полотна = все строки маршрута;
+        # реальные виджеты создаём только для видимого окна (виртуализация).
+        self._route_inner.configure(height=max(1, total_h))
+        self._route_inner.grid_propagate(False)
         self._route_canvas.itemconfigure(self._route_window, width=total_w)
-        self._route_canvas.configure(scrollregion=self._route_canvas.bbox("all") or (0, 0, total_w, 0))
+        self._route_canvas.configure(scrollregion=(0, 0, total_w, total_h))
         self._sync_header_x("route")
-        if here_row is not None:
-            self._route_inner.update_idletasks()
-            row_widgets = self._route_inner.grid_slaves(row=here_row)
-            if row_widgets:
-                y = row_widgets[0].winfo_y()
-                total = max(1, self._route_inner.winfo_height())
-                self._route_canvas.yview_moveto(max(0.0, y / total))
+        self._route_materialize()
+        self._route_scroll_to_here()
+
+    def _clear_route_rows(self) -> None:
+        for child in self._route_inner.winfo_children():
+            child.destroy()
+        self._route_rows.clear()
+        self._route_materialized.clear()
+
+    def _make_route_row(self, row: int) -> dict:
+        widths = self._route_col_px
+        labels: list[tk.Label] = []
+        for col, (key, _title, _width, anchor) in enumerate(ROUTE_COLUMNS):
+            label = self._put_cell(
+                "route",
+                row,
+                col,
+                widths[col],
+                anchor=anchor,
+                copy_text=self._route_hops[row].system if key == "system" else None,
+            )
+            labels.append(label)
+        data = {"labels": labels, "sig": None}
+        self._route_rows[row] = data
+        return data
+
+    def _route_cell_data(self, row: int) -> tuple[list[str], list[str], tuple]:
+        hop = self._route_hops[row]
+        here = self._route_here
+        state = self._route_state
+        jump_marks = self._route_jump_marks
+        dist = hop.distance if hop.distance else None
+        ly_text = f"{dist:,.1f}".replace(",", " ") if dist else "—"
+        tag = route_tag(row, here)
+        jump = jump_marks.get(row)
+        mark = jump if jump else ("▶ " if tag == "here" else "")
+        if tag == "done" and jump is None:
+            fg = COLORS["muted"]
+        elif jump == "-> ":
+            fg = COLORS["accent"]
+        elif jump == "-< " or tag == "here":
+            fg = COLORS["ok"]
+        elif jump == "|  ":
+            fg = COLORS["warn"]
+        else:
+            fg = COLORS["text"]
+        font = (
+            self._ui_family,
+            self._ui_size + (1 if tag == "here" or jump in ("-< ", "-> ") else 0),
+        )
+        cells = [
+            str(row + 1),
+            f"{mark}{hop.system}",
+            hop.star_class or "—",
+            ly_text,
+            _route_bodies_cell(hop, here=(tag == "here"), system=state.system),
+            hop.opened_label(),
+        ]
+        fgs = [fg, fg, fg, fg, fg, COLORS["ok"] if hop.discovered_by_me else fg]
+        return cells, fgs, font
+
+    def _route_apply_row(self, row: int, data: dict) -> bool:
+        cells, fgs, font = self._route_cell_data(row)
+        sig = (tuple(cells), tuple(fgs), font)
+        if sig == data["sig"]:
+            return False
+        for label, text, fg in zip(data["labels"], cells, fgs):
+            label.configure(text=text, fg=fg, font=font)
+        data["sig"] = sig
+        return True
+
+    def _route_materialize(self, _event=None) -> None:
+        total = self._route_hops_total
+        if total <= 0:
+            return
+        row_h = _row_height(self._ui_size)
+        try:
+            top = int(self._route_canvas.canvasy(0))
+            view_h = max(1, int(self._route_canvas.winfo_height()))
+        except tk.TclError:
+            return
+        margin = 12
+        first = max(0, top // row_h - margin)
+        last = min(total - 1, (top + view_h) // row_h + margin)
+        wanted = set(range(first, last + 1))
+        # Разматериализуем то, что ушло за пределы окна (виджеты остаются для reuse).
+        for row in list(self._route_materialized):
+            if row not in wanted:
+                data = self._route_rows.get(row)
+                if data:
+                    for label in data["labels"]:
+                        label.master.grid_forget()
+                self._route_materialized.discard(row)
+        widths = self._route_col_px
+        for row in range(first, last + 1):
+            data = self._route_rows.get(row)
+            if data is None:
+                data = self._make_route_row(row)
+            self._route_apply_row(row, data)
+            for col, label in enumerate(data["labels"]):
+                box = label.master
+                box.configure(width=widths[col])
+                if not box.grid_info():
+                    box.grid(row=row, column=col, sticky="nsew")
+            self._route_materialized.add(row)
+
+    def _route_scroll_to_here(self) -> None:
+        here = self._route_here
+        if here is None or self._route_hops_total <= 0:
+            return
+        row_h = _row_height(self._ui_size)
+        total_h = self._route_hops_total * row_h
+        self._route_canvas.yview_moveto(max(0.0, (here * row_h) / max(1, total_h)))
 
     def _body_row_data(self, body: Body, state: GameState) -> tuple[dict, dict, dict, tuple]:
         """Тексты/цвета/тултипы строки Bodies и сигнатура для пропуска лишних configure."""
