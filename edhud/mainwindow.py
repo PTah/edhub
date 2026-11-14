@@ -369,6 +369,16 @@ def _row_height(font_size: int) -> int:
     return max(22, int(font_size) + 14)
 
 
+def _fmt_clock(seconds: float) -> str:
+    """Секунды → «12:34» (или «1:02:03»)."""
+    total = max(0, int(round(seconds)))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def _geometry_xy(geometry: str) -> tuple[int, int]:
     """Разобрать X/Y из строки geometry tk («980x520+12+40», «800x600-10+20»)."""
     import re
@@ -452,6 +462,7 @@ class MainWindow:
         self._route_state: GameState | None = None
         self._last_route_key: tuple | None = None
         self.win.after(80, self._enable_layout_persist)
+        self.win.after(1000, self._tick_carrier)
         self.win.bind("<Configure>", self._on_window_configure, add="+")
 
     def _style(self) -> None:
@@ -502,6 +513,17 @@ class MainWindow:
         self.lbl_carrier.pack(side="left")
         self.lbl_carrier.bind("<Double-Button-1>", self._on_carrier_double)
         self._carrier_links: list[tk.Label] = []
+        # «через 12:34 · тритий 512/1000 т» — обновляется раз в секунду
+        self.lbl_carrier_info = tk.Label(
+            self.frm_carrier,
+            text="",
+            bg=COLORS["bg"],
+            fg=COLORS["warn"],
+            font=(self._ui_family, self._ui_size),
+            padx=4,
+        )
+        self.lbl_carrier_info.pack(side="left")
+        self._carrier_snapshot = None
         self.lbl_carrier_hint = ttk.Label(
             top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
         )
@@ -1535,6 +1557,8 @@ class MainWindow:
             self._clear_carrier_links()
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
+            self._carrier_snapshot = None
+            self.lbl_carrier_info.configure(text="")
             return
         from .hudmodel import _carrier_who
 
@@ -1544,6 +1568,8 @@ class MainWindow:
             to = state.carrier.jump_dest_system
             self._show_carrier_jump(frm, to)
             self.lbl_carrier_hint.configure(text="")
+            self._carrier_snapshot = state.carrier
+            self._refresh_carrier_info()
             return
         self._clear_carrier_links()
         self.lbl_carrier.configure(cursor="hand2", font=(self._ui_family, self._ui_size, "underline"))
@@ -1561,9 +1587,43 @@ class MainWindow:
                 text = t("win.carrier_dist", prefix=prefix, system=self._carrier_system, ly=ly)
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
             self.lbl_carrier_hint.configure(text="")
+            self._carrier_snapshot = state.carrier
+            self._refresh_carrier_info()
         else:
             self.lbl_carrier.configure(text="")
             self.lbl_carrier_hint.configure(text="")
+            self._carrier_snapshot = state.carrier if state.carrier.known else None
+            self._refresh_carrier_info()
+
+    def _refresh_carrier_info(self) -> None:
+        """Остаток до прыжка и тритий — отдельной подписью, тикает раз в секунду."""
+        carrier = self._carrier_snapshot
+        if carrier is None:
+            self.lbl_carrier_info.configure(text="")
+            return
+        parts: list[str] = []
+        left = carrier.jump_remaining()
+        if left is not None:
+            parts.append(t("win.carrier_countdown", time=_fmt_clock(left)))
+        if carrier.fuel_level is not None:
+            level = f"{carrier.fuel_level:,.0f}".replace(",", " ")
+            if carrier.fuel_capacity:
+                cap = f"{carrier.fuel_capacity:,.0f}".replace(",", " ")
+                parts.append(t("win.carrier_fuel", level=level, cap=cap))
+            else:
+                parts.append(t("win.carrier_fuel_nocap", level=level))
+        self.lbl_carrier_info.configure(
+            text=(" · ".join(parts)) if parts else "",
+            fg=COLORS["warn"] if left is not None else COLORS["muted"],
+        )
+
+    def _tick_carrier(self) -> None:
+        try:
+            if self._carrier_snapshot is not None:
+                self._refresh_carrier_info()
+            self.win.after(1000, self._tick_carrier)
+        except tk.TclError:
+            return
 
     def _clear_carrier_links(self) -> None:
         for label in self._carrier_links:

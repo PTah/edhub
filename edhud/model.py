@@ -587,6 +587,9 @@ class Carrier:
     jump_dest_address: int | None = None
     jump_dest_body_id: int | None = None
     jump_departure: float | None = None
+    # тритий в топливном отсеке носителя (CarrierStats/CarrierDepositFuel), тонн
+    fuel_level: float | None = None
+    fuel_capacity: float | None = None
 
     @property
     def known(self) -> bool:
@@ -596,6 +599,13 @@ class Carrier:
     def jump_pending(self) -> bool:
         """Заложен прыжок (CarrierJumpRequest), ещё не ушёл."""
         return bool(self.jump_dest_system)
+
+    def jump_remaining(self, now: float | None = None) -> float | None:
+        """Секунд до прыжка (0 — вот-вот); None — прыжок не заложен."""
+        if not self.jump_pending or self.jump_departure is None:
+            return None
+        left = float(self.jump_departure) - (time.time() if now is None else now)
+        return max(0.0, left)
 
 
 @dataclass
@@ -1194,6 +1204,15 @@ class GameState:
             self.carrier.callsign = e.get("Callsign")
         if e.get("Name"):
             self.carrier.name = e.get("Name")
+        if e.get("FuelLevel") is not None:
+            self.carrier.fuel_level = float(e.get("FuelLevel") or 0.0)
+        if e.get("FuelCapacity") is not None:
+            self.carrier.fuel_capacity = float(e.get("FuelCapacity") or 0.0)
+
+    def _on_carrierdepositfuel(self, e: dict) -> None:
+        """Дозалив трития в отсек: Total — сколько стало после дозалива."""
+        if e.get("Total") is not None:
+            self.carrier.fuel_level = float(e.get("Total") or 0.0)
 
     def _remember_star(
         self,
