@@ -171,6 +171,7 @@ class SettingsDialog:
         self.eddn_upload = BooleanVar(value=bool(getattr(self.cfg, "eddn_upload", False)))
         self.inara_api_key = StringVar(value=getattr(self.cfg, "inara_api_key", "") or "")
         self.inara_commander = StringVar(value=getattr(self.cfg, "inara_commander", "") or "")
+        self.canonn_radar = BooleanVar(value=bool(getattr(self.cfg, "canonn_radar", True)))
         self.voice_enabled = BooleanVar(value=bool(self.cfg.voice_enabled))
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
@@ -219,6 +220,10 @@ class SettingsDialog:
         )
         row += 1
         ttk.Checkbutton(frm, text=t("set.eddn_send"), variable=self.eddn_upload).grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
+        ttk.Checkbutton(frm, text=t("set.canonn_radar"), variable=self.canonn_radar).grid(
             row=row, column=0, sticky="w", **pad
         )
         row += 1
@@ -693,6 +698,7 @@ class SettingsDialog:
         self.cfg.eddn_upload = bool(self.eddn_upload.get())
         self.cfg.inara_api_key = self.inara_api_key.get().strip()
         self.cfg.inara_commander = self.inara_commander.get().strip()
+        self.cfg.canonn_radar = bool(self.canonn_radar.get())
         self.cfg.voice_enabled = bool(self.voice_enabled.get())
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())

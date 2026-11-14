@@ -442,6 +442,21 @@ class BioPanel:
             color = cfg.color("accent")
             s = 5
             canvas.create_polygon(px, py - s, px + s, py + s, px - s, py + s, fill=color, outline="")
+        elif blip.kind == "prior":
+            # чужая точка Canonn: ромб + название вида рядом
+            color = cfg.color("gold")
+            s = 5
+            canvas.create_polygon(px, py - s, px + s, py, px, py + s, px - s, py, fill=color, outline="")
+            if blip.label:
+                anchor = "e" if px > cx else "w"
+                canvas.create_text(
+                    px - 10 if anchor == "e" else px + 10,
+                    py - 11,
+                    anchor=anchor,
+                    text=str(blip.label)[:28],
+                    fill=cfg.color("gold"),
+                    font=font,
+                )
         else:
             color = cfg.color("muted")
             s = 3

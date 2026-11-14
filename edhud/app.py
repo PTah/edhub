@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, remote, spansh, tray
+from . import canonn, demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -208,6 +208,26 @@ class App:
         self.edsm.note(event, self.state)
         self.eddn_upload.note(event, self.state)
         self.inara.note(event, self.state)
+        if event.get("event") in ("FSDJump", "Location", "CarrierJump"):
+            self._load_canonn(event.get("StarSystem") or self.state.system.name)
+
+    def _load_canonn(self, system: str | None) -> None:
+        """Чужие био-точки Canonn (prior scans) для радара — в фоне."""
+        if not system or not getattr(self.cfg, "canonn_radar", True):
+            return
+        if not getattr(self.cfg, "allow_network", True):
+            return
+        if getattr(self, "_canonn_for", None) == system:
+            return
+        self._canonn_for = system
+
+        def run() -> None:
+            payload = canonn.fetch_system_poi(system, getattr(self.cfg, "edsm_commander", "") or "")
+            points = canonn.parse_bio_points(payload)
+            if points or payload is not None:
+                self.state.set_canonn_bio(points)
+
+        threading.Thread(target=run, name="edhud-canonn", daemon=True).start()
         if self.state.persist_needed:
             self.state.persist_needed = False
             self._save_system_now()

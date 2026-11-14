@@ -173,6 +173,8 @@ class Config:
     # INARA: personal API key + имя командира (travel-лог, системы)
     inara_api_key: str = ""
     inara_commander: str = ""
+    # радар био: показывать чужие точки из Canonn POI (prior scans)
+    canonn_radar: bool = True
     # голос (Windows SAPI: русский или английский — по языку Windows)
     # обновления: auto — проверка релиза GitHub при запуске, manual — только из настроек
     update_check: str = "auto"

@@ -976,6 +976,8 @@ class GameState:
     # кто открыл систему (имя lower → командир; None = в базе нет имени)
     _discoverers: dict[str, str | None] = field(default_factory=dict)
     _systems_by_me: set[str] = field(default_factory=set)
+    # чужие био-точки Canonn: [(короткое имя тела, lat, lon, подпись)]
+    canonn_bio: list[tuple[str, float, float, str]] = field(default_factory=list)
     # имя системы → (stars, planets, bodies, missing) из EDSM для Route
     _body_stats: dict[str, tuple[int | None, int | None, int | None, bool]] = field(
         default_factory=dict
@@ -2175,6 +2177,47 @@ class GameState:
             and not self.status.docked
         )
 
+    def set_canonn_bio(self, points) -> None:
+        """Чужие био-точки от Canonn: [(короткое имя тела, lat, lon, подпись)]."""
+        self.canonn_bio = list(points or ())
+
+    def _add_prior_blips(self, body, blips, lat, lon, radius, heading) -> None:
+        """Точки, нанесённые другими командирами (Canonn) — «prior scans».
+
+        Игра координат образцов не публикует, поэтому единственный способ
+        показать «где искать» — чужая карта. Берём только рядом (1.5 км),
+        иначе радар уезжает в километровый масштаб и теряет смысл.
+        """
+        points = getattr(self, "canonn_bio", None)
+        if not points:
+            return
+        prefix = f"{self.system.name} " if self.system.name else ""
+        found: list[tuple[float, RadarBlip]] = []
+        for body_short, plat, plon, label in points:
+            if body.name not in (f"{prefix}{body_short}", body_short) and not body.name.endswith(
+                f" {body_short}"
+            ):
+                continue
+            dist = surface_distance(lat, lon, plat, plon, radius)
+            if dist > 1500.0:
+                continue
+            bearing = surface_bearing(lat, lon, plat, plon)
+            found.append(
+                (
+                    dist,
+                    RadarBlip(
+                        kind="prior",
+                        label=label,
+                        distance_m=dist,
+                        bearing=bearing,
+                        turn=turn_deg(bearing, heading),
+                        ready=True,
+                    ),
+                )
+            )
+        found.sort(key=lambda item: item[0])
+        blips.extend(blip for _dist, blip in found[:6])
+
     def radar_view(self) -> RadarView | None:
         """Радар ближайших биоточек: свой род после первой пробы, иначе любые."""
         if not self.near_surface():
@@ -2261,6 +2304,7 @@ class GameState:
                         ready=False,
                     )
                 )
+            self._add_prior_blips(body, blips, lat, lon, radius, heading)
             ready = all(b.ready for b in blips if b.kind == "sample")
             span = max((b.distance_m for b in blips if b.kind != "away"), default=float(need))
             range_m = min(5000.0, max(float(need) * 1.35, span * 1.15, 250.0))
@@ -2272,6 +2316,9 @@ class GameState:
                 )
             if heading is None:
                 title += t("hud.radar_no_heading")
+            priors = sum(1 for b in blips if b.kind == "prior")
+            if priors:
+                title += t("hud.radar_canonn", n=priors)
             return RadarView(
                 title=title,
                 range_m=range_m,
@@ -2298,6 +2345,7 @@ class GameState:
             )
         blips.sort(key=lambda item: item.distance_m)
         blips = blips[:8]
+        self._add_prior_blips(body, blips, lat, lon, radius, heading)
         if not blips:
             # радар всё равно показываем: иначе кажется, что «пропал» после глида
             if organic is not None and organic.samples_done > 0:
@@ -2322,8 +2370,12 @@ class GameState:
             )
         span = blips[-1].distance_m if blips else 300.0
         range_m = min(5000.0, max(span * 1.2, 300.0))
+        priors = sum(1 for b in blips if b.kind == "prior")
+        title = t("hud.radar_near")
+        if priors:
+            title += t("hud.radar_canonn", n=priors)
         return RadarView(
-            title=t("hud.radar_near"),
+            title=title,
             range_m=range_m,
             need_m=0,
             heading=heading,
