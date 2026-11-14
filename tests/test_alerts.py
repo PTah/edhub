@@ -61,7 +61,7 @@ class AlertEngineTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].kind, "bio")
         self.assertIn("Биологический", alerts[0].text)
-        self.assertIn("на 3", alerts[0].text)
+        self.assertIn("на System 3", alerts[0].text)
         self.assertNotIn("Сигналов", alerts[0].text)
         self.assertIn("Test System 3", alerts[0].overlay or "")
 

@@ -114,7 +114,9 @@ class AlertEngine:
             return None
         body = state.system.bodies.get(body_id)
         body_name = (body.name if body else None) or event.get("BodyName") or t("voice.body")
-        short = body_name.split()[-1] if body_name else t("voice.body")
+        # «Smojai AB-C d1 4 a» → «4 a»: последний токен («a») сам по себе неинформативен
+        tokens = body_name.split()
+        short = " ".join(tokens[-2:]) if tokens else t("voice.body")
         # Оповещаем только о факте находки: без перечисления видов и без счётчика.
         text = t("voice.bio", short=short)
         overlay = f"{t('col.bio').lower()}: {body_name}"
