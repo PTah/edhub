@@ -308,7 +308,7 @@ class App:
                 # на станции/авианосце HUD и био-панель не мешают
                 self.overlay.set_docked(self.state.status.docked)
                 # открыто меню игры (карта, Carrier Management) — панели почти невидимы
-                self.overlay.set_gui_focus(self.state.status.gui_focus)
+                self.overlay.set_gui_focus(self.state.status.gui_focus, self.state.music_track)
             if self.mainwindow is not None:
                 self.mainwindow.update_state(self.state)
         except Exception:

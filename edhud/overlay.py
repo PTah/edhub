@@ -109,9 +109,9 @@ class Overlay:
         except Exception:
             pass
 
-    def set_gui_focus(self, gui_focus: int | None) -> None:
-        """В игре открыли меню (в т.ч. Carrier Management) — панели почти прозрачны."""
-        want = menu_open(gui_focus)
+    def set_gui_focus(self, gui_focus: int | None, music_track: str | None = None) -> None:
+        """В игре открыли экран-меню (Carrier Management, карта) — панели почти прозрачны."""
+        want = menu_open(gui_focus, music_track)
         if want == self._menu_dim:
             return
         self._menu_dim = want

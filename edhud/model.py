@@ -167,9 +167,32 @@ GUI_FOCUS = {
 # DSS/SAA (10) — исключение: там карточка био и радар как раз нужны.
 GUI_FOCUS_KEEP = (0, 9, 10)
 
+# Треки музыки (событие Music), которые игра звучит на экранах-меню: карта
+# галактики/системы, управление авианосцем, кодекс, эскадрильи, стартовое меню,
+# сервисы станции. Названия — ровно как в журнале (у Frontier «Managment»).
+MENU_TRACKS = frozenset(
+    {
+        "FleetCarrier_Managment",
+        "GalaxyMap",
+        "SystemMap",
+        "Codex",
+        "Squadrons",
+        "GalacticPowers",
+        "MainMenu",
+        "Starport",
+    }
+)
 
-def menu_open(gui_focus: int | None) -> bool:
-    """True — в игре открыто меню/панель: карта, сервисы станции, управление авианосцем."""
+
+def menu_open(gui_focus: int | None, music_track: str | None = None) -> bool:
+    """True — в игре открыт экран-меню: карта, Carrier Management, сервисы станции.
+
+    `GuiFocus` для части экранов (например управления авианосцем) игра держит
+    нулём, поэтому второй сигнал — текущий музыкальный трек из журнала.
+    """
+    track = (music_track or "").strip()
+    if track in MENU_TRACKS:
+        return True
     try:
         focus = int(gui_focus or 0)
     except (TypeError, ValueError):
@@ -1008,6 +1031,8 @@ class GameState:
     session_started: float = field(default_factory=time.time)
     last_event_ts: float = 0.0
     last_event: str | None = None
+    # текущий трек из события Music: по нему видно, открыт ли экран-меню игры
+    music_track: str = ""
     game_running: bool = False
     # Legacy (Elite Dangerous 3.8, Horizons/Beyond) — без Odyssey-бонусов и био-прогноза
     legacy: bool = False
@@ -1058,6 +1083,7 @@ class GameState:
         self.ship_name = e.get("ShipName")
         self.game_mode = e.get("GameMode")
         self.game_running = True
+        self.music_track = ""  # новый вход в игру — экранов-меню ещё нет
         self._apply_version(e)
         if e.get("Fuel") is not None:
             self.status.fuel_main = float(e.get("Fuel") or 0.0)
@@ -1083,6 +1109,14 @@ class GameState:
 
     def _on_shutdown(self, _e: dict) -> None:
         self.game_running = False
+        # после выхода из игры трек не должен держать панели приглушёнными
+        self.music_track = ""
+
+    def _on_music(self, e: dict) -> None:
+        """Трек музыки: по нему узнаём открытые экраны (Carrier Management, карты)."""
+        track = e.get("MusicTrack")
+        if isinstance(track, str) and track:
+            self.music_track = track
 
     def _set_system(self, e: dict) -> None:
         pos = e.get("StarPos")

@@ -41,6 +41,11 @@
   скрыть/показать, `F12` — выход; при выключенном сквозном режиме — кнопка × и
   ПКМ по полоске. Окно удерживается поверх всех каждые 2 секунды,
   DPI-awareness (Per-Monitor v2), не забирает фокус у игры.
+  Прозрачность: в атмосфере 0.12–0.28, на станции/авианосце HUD скрыт полностью,
+  а под меню игры — карта, Carrier Management, кодекс, эскадрильи, сервисы
+  станции — панели уходят в alpha 0.10, чтобы не закрывать менюшки. Открытые
+  экраны определяются по `GuiFocus` в `Status.json` и по треку `Music` в журнале
+  (для Carrier Management `GuiFocus` остаётся нулём).
 * **Настройки** (трей → Настройки): каталог журналов, сеть, EDSM/Spansh/EDDN,
   необязательные EDSM и INARA API key, голос, прозрачность/ширина оверлея,
   **вкладка «Статистика»** — по каждому входу в игру (файл журнала) и суммарная:
@@ -325,9 +330,9 @@ PING/PONG): EDDN отдаёт zlib-сжатый JSON, поэтому pyzmq не 
 ## Тесты и разработка
 
 ```bash
-python -m unittest discover -s tests     # 242 теста: критерии, регионы, стоимость,
+python -m unittest discover -s tests     # 247 тестов: критерии, регионы, стоимость,
                                          # EDSM/Spansh, EDDN/ZMTP, Legacy, хотспоты,
-                                         # статистика сессий, вкладки
+                                         # статистика сессий, вкладки, приглушение панелей
 python tools/inspect_bio.py              # свойства тела и предсказания по журналу
 python tools/inspect_remote.py "HIP 36601"  # предсказания по чужим данным
 python tools/debug_bio.py Bacterium      # трассировка критериев
@@ -362,6 +367,12 @@ python tools/make_icon.py                # data/edhud.ico и .png из data/edhu
   для чтения тел **не нужен** (поле в настройках — для личных API EDSM).
 * Вкладки Surroundings / History (как в EDEB) пока нет — Route, Bodies, Пояса и
   Добыча. Статистика — в настройках, отдельной вкладкой окна.
+* Приглушение панелей держится на двух сигналах: `GuiFocus` из `Status.json` и
+  трек `Music` из журнала (`FleetCarrier_Managment`, `GalaxyMap`, `SystemMap`,
+  `Codex`, `Squadrons`, `GalacticPowers`, `MainMenu`, `Starport`). Для части
+  экранов (Carrier Management) игра держит `GuiFocus` нулём, поэтому одного
+  `Status.json` не хватало. FSS/DSS (`SystemAndSurfaceScanner`, focus 9/10)
+  намеренно не приглушаются.
 * **Состав колец по чужим данным недоступен**: в `bodies/search` у Spansh и в
   `api-system-v1/bodies` у EDSM кольцо — это только тип/масса/радиус, хотспотов
   там нет (проверено запросами; фильтры по ним Spansh игнорирует). Поэтому
