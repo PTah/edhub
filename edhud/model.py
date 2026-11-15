@@ -18,6 +18,7 @@ from .i18n import t
 
 from . import codex
 from .mining import format_hotspots, format_hotspots_tip  # noqa: F401 — re-export
+from .mining import ring_density as mining_ring_density
 from .route import Route
 from .values import body_values
 
@@ -143,6 +144,20 @@ def _ring_type_names(rings: list) -> list[str]:
         if kind and kind not in kinds:
             kinds.append(kind)
     return kinds
+
+
+def _best_ring_density(rings: list) -> float | None:
+    """Плотность самого плотного кольца тела (журнальные Mass/InnerRad/OuterRad)."""
+    best: float | None = None
+    for ring in rings or []:
+        if not isinstance(ring, dict):
+            continue
+        value = mining_ring_density(ring.get("Mass"), ring.get("InnerRad"), ring.get("OuterRad"))
+        if value is None:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
 
 
 # Vista Genomics: бонус "First Logged" — пробу ещё никто не сдавал, платят ×5
@@ -441,6 +456,8 @@ class Body:
     ring_types: list[str] = field(default_factory=list)
     # запас кольца из Scan: Pristine / Major / Common / Low / Depleted
     reserve_level: str | None = None
+    # плотность кольца (формула edtools): чем выше, тем плотнее камень
+    ring_density: float | None = None
     was_discovered: bool = False
     was_mapped: bool = False
     was_footfalled: bool = False
@@ -550,6 +567,8 @@ class Body:
             self.has_rings = True
         if other.reserve_level and not self.reserve_level:
             self.reserve_level = other.reserve_level
+        if other.ring_density and not self.ring_density:
+            self.ring_density = other.ring_density
         for kind in other.ring_types:
             if kind not in self.ring_types:
                 self.ring_types.append(kind)
@@ -1444,6 +1463,7 @@ class GameState:
         elif isinstance(rings, list):
             body.has_rings = _mineable_belt(rings, body.name)
             body.ring_types = _ring_type_names(rings)
+            body.ring_density = _best_ring_density(rings)
         elif is_belt_body(body.name):
             body.has_rings = True
         reserve = e.get("ReserveLevel")

@@ -194,3 +194,202 @@ def ring_revenue(hotspots: dict[str, int] | None, capacity: int) -> int:
         return 0
     return int(rows[0][2]) * int(capacity)
 
+
+# ---------------------------------------------------- что копать в кольце
+# Списки минералов по типу кольца — внутриигровые данные (та же таблица, что в
+# гайдах и в EliteMining `ring_guide_tab.py`; оттуда же и раскладка по способу).
+#   core  — глубокое ядро: нужны seismic charges;
+#   laser — лазерная/подповерхностная добыча теми же камнями;
+#   high  — дорогие (стоит лететь), low — дешёвые (берут только попутно).
+RING_MINERALS: dict[str, dict[str, tuple[str, ...]]] = {
+    "Icy": {
+        "core_high": ("Alexandrite", "Grandidierite", "Low Temperature Diamonds", "Void Opals"),
+        "core_low": ("Bromellite",),
+        "laser_high": ("Low Temperature Diamonds",),
+        "laser_low": (
+            "Bromellite",
+            "Hydrogen Peroxide",
+            "Liquid Oxygen",
+            "Lithium Hydroxide",
+            "Methane Clathrate",
+            "Methanol Monohydrate Crystals",
+            "Tritium",
+            "Water",
+        ),
+    },
+    "Metallic": {
+        "core_high": ("Monazite", "Rhodplumsite", "Serendibite"),
+        "core_low": ("Painite", "Platinum"),
+        "laser_high": ("Osmium", "Painite", "Platinum"),
+        "laser_low": (
+            "Bertrandite",
+            "Gold",
+            "Indite",
+            "Palladium",
+            "Praseodymium",
+            "Samarium",
+            "Silver",
+        ),
+    },
+    "Metal-Rich": {
+        "core_high": ("Alexandrite", "Benitoite", "Monazite", "Rhodplumsite", "Serendibite"),
+        "core_low": ("Painite", "Platinum"),
+        "laser_high": ("Osmium",),
+        "laser_low": (
+            "Bertrandite",
+            "Coltan",
+            "Gallite",
+            "Gold",
+            "Indite",
+            "Lepidolite",
+            "Praseodymium",
+            "Samarium",
+            "Silver",
+            "Uraninite",
+        ),
+    },
+    "Rocky": {
+        "core_high": ("Alexandrite", "Benitoite", "Monazite", "Musgravite", "Serendibite"),
+        "core_low": (),
+        "laser_high": (),
+        "laser_low": (
+            "Bauxite",
+            "Cobalt",
+            "Coltan",
+            "Gallite",
+            "Indite",
+            "Lepidolite",
+            "Rutile",
+            "Samarium",
+            "Uraninite",
+        ),
+    },
+}
+
+# как игра зовёт типы колец в журнале (`RingClass`) и как — в наших данных
+RING_KIND_ALIASES: dict[str, str] = {
+    "icy": "Icy",
+    "eringclass_icy": "Icy",
+    "metallic": "Metallic",
+    "eringclass_metallic": "Metallic",
+    "metal rich": "Metal-Rich",
+    "metal-rich": "Metal-Rich",
+    "eringclass_metalrich": "Metal-Rich",
+    "rocky": "Rocky",
+    "eringclass_rocky": "Rocky",
+}
+
+METHOD_CORE = "core"
+METHOD_LASER = "laser"
+
+
+def normalize_ring_kind(kind: str | None) -> str | None:
+    """`eRingClass_Icy` / `ICY` / `Metal Rich` → каноническое `Icy` / `Metal-Rich`."""
+    if not kind:
+        return None
+    return RING_KIND_ALIASES.get(str(kind).strip().lower())
+
+
+def ring_kinds(ring_types) -> list[str]:
+    """Канонические типы колец без дублей: ["Icy"], ["Metallic", "Rocky"]."""
+    kinds: list[str] = []
+    for kind in ring_types or []:
+        name = normalize_ring_kind(kind)
+        if name and name not in kinds:
+            kinds.append(name)
+    return kinds
+
+
+def ring_minerals(ring_types, *, high_only: bool = False) -> dict[str, list[str]]:
+    """Что водится в кольце такого типа: {"core": [...], "laser": [...]} — дорогое вперёд."""
+    out: dict[str, list[str]] = {METHOD_CORE: [], METHOD_LASER: []}
+    for kind in ring_kinds(ring_types):
+        table = RING_MINERALS.get(kind) or {}
+        for group, method in (
+            ("core_high", METHOD_CORE),
+            ("core_low", METHOD_CORE),
+            ("laser_high", METHOD_LASER),
+            ("laser_low", METHOD_LASER),
+        ):
+            if high_only and not group.endswith("_high"):
+                continue
+            for name in table.get(group, ()):
+                if name not in out[method]:
+                    out[method].append(name)
+    for method, names in out.items():
+        names.sort(key=lambda item: -hotspot_avg_price(item))
+    return out
+
+
+def mineral_method(name: str | None) -> str | None:
+    """Как добывают минерал в кольце: core (ядро), laser, либо None (не из колец)."""
+    want = str(name or "").strip().lower()
+    if not want:
+        return None
+    for table in RING_MINERALS.values():
+        for group, method in (
+            ("core_high", METHOD_CORE),
+            ("core_low", METHOD_CORE),
+            ("laser_high", METHOD_LASER),
+            ("laser_low", METHOD_LASER),
+        ):
+            if any(item.lower() == want for item in table.get(group, ())):
+                return method
+    return None
+
+
+def is_high_value(name: str | None) -> bool:
+    """Минерал из «дорогой» половины таблицы — за ним стоит лететь."""
+    want = str(name or "").strip().lower()
+    for table in RING_MINERALS.values():
+        for group in ("core_high", "laser_high"):
+            if any(item.lower() == want for item in table.get(group, ())):
+                return True
+    return False
+
+
+def ring_density(mass: float | None, inner_rad: float | None, outer_rad: float | None) -> float | None:
+    """Плотность кольца по формуле edtools: M[MT] / π(Rout² − Rin²) [км²].
+
+    В журнале `Scan` масса кольца в кг, радиусы в метрах — приводим к MT и км.
+    Величина нужна для сравнения колец между собой: чем больше, тем плотнее
+    камень в кольце (и тем выгоднее копать).
+    """
+    try:
+        mass = float(mass or 0.0)
+        inner_rad = float(inner_rad or 0.0)
+        outer_rad = float(outer_rad or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if mass <= 0 or outer_rad <= inner_rad:
+        return None
+    mass_mt = mass / 1e9
+    inner_km = inner_rad / 1000.0
+    outer_km = outer_rad / 1000.0
+    area = 3.141592653589793 * (outer_km * outer_km - inner_km * inner_km)
+    if area <= 0:
+        return None
+    return round(mass_mt / area, 6)
+
+
+def hotspot_count(hotspots: dict[str, int] | None, mineral: str | None) -> int:
+    """Сколько хотспотов этого минерала в кольце (2+ — уже наложение искать)."""
+    if not hotspots or not mineral:
+        return 0
+    want = str(mineral).strip().lower()
+    for name, count in hotspots.items():
+        if name.lower() == want:
+            return int(count or 0)
+    return 0
+
+
+def overlap_label(count: int) -> str:
+    """Подпись к количеству хотспотов: 'double'/'triple' (переводит UI)."""
+    count = int(count or 0)
+    if count >= 3:
+        return "triple"
+    if count == 2:
+        return "double"
+    return ""
+
+

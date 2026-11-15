@@ -32,6 +32,7 @@ class RingHotspots:
     star_pos: list[float] | None = None
     distance_ls: float | None = None
     reserve_level: str | None = None
+    density: float | None = None
     updated_at: float = 0.0
 
     def key(self) -> str:
@@ -94,6 +95,7 @@ class RingHotspots:
             star_pos=star_pos,
             distance_ls=distance_ls,
             reserve_level=(str(data["reserve_level"]) if data.get("reserve_level") else None),
+            density=_as_float(data.get("density")),
             updated_at=float(data.get("updated_at") or 0.0),
         )
 
@@ -257,6 +259,7 @@ class HotspotStore:
                 star_pos=[float(pos[0]), float(pos[1]), float(pos[2])] if pos and len(pos) == 3 else None,
                 distance_ls=_as_float(getattr(body, "distance_ls", None)),
                 reserve_level=(getattr(body, "reserve_level", None) or None),
+                density=getattr(body, "ring_density", None),
             )
             old = self._items.get(ring.key())
             if old is not None and old.signature() == ring.signature():

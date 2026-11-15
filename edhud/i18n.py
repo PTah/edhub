@@ -23,6 +23,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "col.guess": "Возможно",
         "col.geo": "Гео",
         "col.minerals": "Минералы",
+        "col.density": "Плотн.",
         "col.value": "Цена картографии",
         "col.first": "1-е",
         "col.dist": "ls",
@@ -368,6 +369,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "mining.filter_status": "текущая система: строк по «{material}» — {n}",
         "mining.any_material": "любой минерал",
         "mining.spansh_note": "(состав колец Spansh не отдаёт — только тип)",
+        "mining.method_core": "ядро",
+        "mining.method_laser": "лазер",
+        "mining.density_short": "плотн. {value}",
+        "mining.best_sell": "лучший сбыт: {where} — {price} cr",
     },
     "en": {
         "col.name": "Name",
@@ -378,6 +383,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "col.guess": "Possible",
         "col.geo": "Geo",
         "col.minerals": "Minerals",
+        "col.density": "Density",
         "col.value": "Map value",
         "col.first": "1st",
         "col.dist": "ls",
@@ -723,6 +729,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "mining.filter_status": "current system: rows for «{material}» — {n}",
         "mining.any_material": "any mineral",
         "mining.spansh_note": "(Spansh does not report ring contents, only type)",
+        "mining.method_core": "core",
+        "mining.method_laser": "laser",
+        "mining.density_short": "density {value}",
+        "mining.best_sell": "best sale: {where} — {price} cr",
     },
 }
 
