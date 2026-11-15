@@ -14,11 +14,12 @@
 from __future__ import annotations
 
 import threading
+import time
 import tkinter as tk
 from dataclasses import dataclass, field
 from tkinter import ttk
 
-from . import mining, miningsearch
+from . import hotspots, mining, miningsearch
 from .i18n import t
 
 COLUMNS: tuple[tuple[str, str, int, str], ...] = (
@@ -30,7 +31,7 @@ COLUMNS: tuple[tuple[str, str, int, str], ...] = (
     ("share", "col.share", 70, "e"),
     ("ly", "col.ly_short", 70, "e"),
     ("ls", "col.dist", 80, "e"),
-    ("rings", "col.rings", 130, "w"),
+    ("minerals", "col.minerals", 210, "w"),
     ("price", "col.price", 110, "e"),
 )
 
@@ -54,6 +55,7 @@ class MiningRow:
     body_id: int | None = None
     address: int | None = None
     planet_class: str | None = None
+    origin: str = "here"  # here | db | spansh
 
     def sort_key(self, column: str):
         if column == "share":
@@ -100,49 +102,96 @@ MATERIAL_CHOICES: tuple[str, ...] = tuple(
 )
 
 
-def rows_from_state(state, price_index=None) -> list[MiningRow]:
+def _sites_label(count: int, reserve: str | None = None) -> str:
+    """«хотспоты ×3 · Pristine» — сколько и насколько богатое кольцо."""
+    label = t("mining.ring_sites", n=count)
+    return f"{label} · {reserve}" if reserve else label
+
+
+def rows_from_state(state, price_index=None, material: str | None = None) -> list[MiningRow]:
     """Тела текущей системы: точки добычи на поверхности и кольца с хотспотами."""
     rows: list[MiningRow] = []
     system = state.system.name or ""
+    want = (material or "").strip()
     for body in (state.system.bodies or {}).values():
         if getattr(body, "is_star", False):
             continue
         share_of: dict[str, float] = dict(getattr(body, "materials", {}) or {})
-        hotspots: dict[str, int] = dict(getattr(body, "hotspots", {}) or {})
+        body_hotspots: dict[str, int] = dict(getattr(body, "hotspots", {}) or {})
         geo = getattr(body, "geo_signals", None)
-        if geo:
+        if geo and (not want or want in share_of):
             rows.append(
                 MiningRow(
                     system=system,
                     body=body.name,
                     subtype=getattr(body, "planet_class", None) or "",
                     sites=f"{t('mining.geological')} ×{int(geo)}",
-                    material=_best_material_name(share_of),
-                    share=_best_material_share(share_of),
+                    material=want or _best_material_name(share_of),
+                    share=float(share_of.get(want) or 0.0) if want else _best_material_share(share_of),
                     distance_ls=getattr(body, "distance_ls", None),
                     body_id=getattr(body, "body_id", None),
                     planet_class=getattr(body, "planet_class", None),
                 )
             )
-        if hotspots:
-            top_name, top_price, exact = _best_hotspot(hotspots, price_index)
+        if body_hotspots and (not want or want in body_hotspots):
+            top_name, top_price, exact = (
+                _material_quote(want, price_index) if want else _best_hotspot(body_hotspots, price_index)
+            )
             rows.append(
                 MiningRow(
                     system=system,
                     body=body.name,
-                    subtype=getattr(body, "planet_class", None) or "",
-                    sites=t("mining.ring_sites", n=sum(hotspots.values())),
+                    subtype=" · ".join(getattr(body, "ring_types", None) or [])
+                    or (getattr(body, "planet_class", None) or ""),
+                    sites=_sites_label(sum(body_hotspots.values()), getattr(body, "reserve_level", None)),
                     material=top_name,
                     distance_ls=getattr(body, "distance_ls", None),
-                    rings=t("mining.ring") if getattr(body, "has_rings", False) else "",
+                    rings=mining.format_hotspots(body_hotspots),
                     price=top_price,
                     price_exact=exact,
-                    hotspots=hotspots,
+                    hotspots=body_hotspots,
                     body_id=getattr(body, "body_id", None),
                     planet_class=getattr(body, "planet_class", None),
                 )
             )
     rows.sort(key=lambda row: (row.system.lower(), row.body.lower()))
+    return rows
+
+
+def rows_from_hotspots(
+    near: list[hotspots.NearRing],
+    price_index=None,
+    material: str | None = None,
+) -> list[MiningRow]:
+    """Строки из своей базы хотспотов: кольца с известным составом и расстоянием."""
+    rows: list[MiningRow] = []
+    want = (material or "").strip()
+    for hit in near:
+        ring = hit.ring
+        if want and want not in ring.hotspots:
+            continue
+        name, price, exact = (
+            _material_quote(want, price_index) if want else _best_hotspot(ring.hotspots, price_index)
+        )
+        rows.append(
+            MiningRow(
+                system=ring.system,
+                body=ring.body_name,
+                subtype=" · ".join(ring.ring_types) or (ring.planet_class or ""),
+                sites=_sites_label(sum(ring.hotspots.values()), ring.reserve_level),
+                material=name,
+                distance_ly=hit.distance_ly,
+                distance_ls=ring.distance_ls,
+                rings=mining.format_hotspots(ring.hotspots),
+                price=price,
+                price_exact=exact,
+                hotspots=dict(ring.hotspots),
+                body_id=ring.body_id,
+                address=ring.address,
+                planet_class=ring.planet_class,
+                origin="db",
+            )
+        )
     return rows
 
 
@@ -180,16 +229,17 @@ def rows_from_remote(bodies: list[miningsearch.RemoteBody], material: str | None
                 MiningRow(
                     system=body.system,
                     body=body.name,
-                    subtype=body.subtype or "",
+                    subtype=" · ".join(body.ring_types),
                     sites=t("mining.rings_n", n=len(body.ring_types)),
                     material=name,
                     distance_ly=body.distance_ly,
                     distance_ls=body.distance_ls,
-                    rings=" · ".join(body.ring_types),
+                    rings="—",  # Spansh состав колец не отдаёт
                     price=price,
                     price_exact=exact,
                     body_id=body.body_id,
                     address=body.address,
+                    origin="spansh",
                 )
             )
     return rows
@@ -203,6 +253,14 @@ def _best_material_name(materials: dict[str, float]) -> str:
 def _best_material_share(materials: dict[str, float]) -> float:
     rows = mining.material_rows(materials)
     return float(rows[0][1]) if rows else 0.0
+
+
+def _material_quote(name: str, price_index) -> tuple[str, int, bool]:
+    """Цена конкретного минерала: живой индекс цен, иначе средняя (≈)."""
+    quote = price_index.best(name) if price_index is not None else None
+    if quote is not None and int(quote.price) > 0:
+        return name, int(quote.price), True
+    return name, mining.hotspot_avg_price(name), False
 
 
 def _best_hotspot(hotspots: dict[str, int], price_index) -> tuple[str, int, bool]:
@@ -233,6 +291,7 @@ class MiningTab:
         ui_size: int,
         price_index=None,
         belt_store=None,
+        hotspot_store=None,
         on_copy_system=None,
         on_status=None,
         default_radius: float = 25.0,
@@ -242,11 +301,16 @@ class MiningTab:
         self.ui_size = ui_size
         self.price_index = price_index
         self.belt_store = belt_store
+        self.hotspot_store = hotspot_store
         self.on_copy_system = on_copy_system
         self.on_status = on_status or (lambda _text: None)
         self.frame = ttk.Frame(parent, style="ED.TFrame", padding=8)
         self._state = None
         self._rows: list[MiningRow] = []
+        self._source = "here"  # here | db | spansh
+        self._remote_bodies: list = []
+        self._signature: tuple | None = None
+        self._last_auto = 0.0
         self._sort_column = "ly"
         self._sort_desc = False
         self._searching = False
@@ -297,6 +361,7 @@ class MiningTab:
             state="readonly",
         )
         self.material_combo.pack(side="left", padx=(4, 10))
+        self.material_combo.bind("<<ComboboxSelected>>", self._on_material_change)
 
         self.search_button = tk.Button(
             bar,
@@ -324,6 +389,19 @@ class MiningTab:
             font=(self.ui_family, self.ui_size),
         )
         self.local_button.pack(side="left", padx=(0, 6))
+        self.db_button = tk.Button(
+            bar,
+            text=t("mining.db_search"),
+            command=self.search_db,
+            bg=self.colors["panel"],
+            fg=self.colors["fg"],
+            activebackground=self.colors["accent"],
+            activeforeground=self.colors["bg"],
+            relief="flat",
+            padx=10,
+            font=(self.ui_family, self.ui_size),
+        )
+        self.db_button.pack(side="left", padx=(0, 6))
         self.save_button = tk.Button(
             bar,
             text=t("mining.save_belt"),
@@ -392,20 +470,98 @@ class MiningTab:
 
     # --------------------------------------------------------------- данные
     def set_state(self, state) -> None:
+        """Каждый тик: если просканировали новое кольцо — таблица обновится сама."""
         self._state = state
+        if self._source != "here":
+            return
+        signature = self._local_signature(state)
+        if signature == self._signature:
+            return
+        now = time.monotonic()
+        if now - self._last_auto < 0.5:
+            return  # подождём следующего тика, чтобы не дёргать таблицу зря
+        self._last_auto = now
+        self._signature = signature
+        self.refresh(quiet=True)
+
+    def _local_signature(self, state) -> tuple:
+        """Что показывает текущая система: тела, геология, минералы колец."""
+        bodies = getattr(getattr(state, "system", None), "bodies", None) or {}
+        return (
+            getattr(getattr(state, "system", None), "name", "") or "",
+            tuple(
+                sorted(
+                    (
+                        int(getattr(body, "body_id", 0) or 0),
+                        int(getattr(body, "geo_signals", 0) or 0),
+                        tuple(sorted((getattr(body, "hotspots", None) or {}).items())),
+                    )
+                    for body in bodies.values()
+                    if getattr(body, "geo_signals", None) or getattr(body, "hotspots", None)
+                )
+            ),
+        )
 
     def on_show(self) -> None:
         """Вкладку выбрали — показываем локальные данные, если ещё пусто."""
         if not self._rows:
             self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, *, quiet: bool = False) -> None:
         """Перечитать текущую систему из журнала."""
         if self._state is None:
             return
-        self._rows = rows_from_state(self._state, self.price_index)
+        material = self._material_now()
+        self._source = "here"
+        self._rows = rows_from_state(self._state, self.price_index, material)
         self._render()
-        self._status.set(t("mining.local_status", n=len(self._rows)))
+        if not quiet or not self._rows:
+            self._status.set(
+                t("mining.local_status", n=len(self._rows))
+                if not material
+                else t("mining.filter_status", n=len(self._rows), material=material)
+            )
+
+    def search_db(self) -> None:
+        """Поиск по своей базе хотспотов: минерал + радиус от текущей системы."""
+        if self.hotspot_store is None:
+            return
+        material = self._material_now()
+        radius = self._radius_now()
+        origin = getattr(getattr(self._state, "system", None), "star_pos", None)
+        near = self.hotspot_store.search(origin, radius_ly=radius, mineral=material or None)
+        self._source = "db"
+        self._rows = rows_from_hotspots(near, self.price_index, material)
+        self._render()
+        self._status.set(
+            t(
+                "mining.db_status",
+                n=len(self._rows),
+                total=len(self.hotspot_store),
+                radius=int(radius),
+                material=material or t("mining.any_material"),
+            )
+        )
+
+    def _on_material_change(self, _event=None) -> None:
+        """Сменили минерал — перестраиваем то, что уже показано."""
+        if self._source == "db":
+            self.search_db()
+        elif self._source == "spansh":
+            self._rows = rows_from_remote(self._remote_bodies, self._material_now() or None, self.price_index)
+            self._render()
+            self._status.set(t("mining.found", n=len(self._rows)))
+        else:
+            self.refresh()
+
+    def _material_now(self) -> str:
+        return (self._material.get() or "").strip()
+
+    def _radius_now(self) -> float:
+        try:
+            return float(self._radius.get() or 25)
+        except ValueError:
+            return 25.0
 
     def search(self) -> None:
         """Поиск у Spansh в фоне: тела в радиусе с точками добычи."""
@@ -417,11 +573,8 @@ class MiningTab:
         if not system:
             self._status.set(t("mining.no_system"))
             return
-        try:
-            radius = float(self._radius.get() or 25)
-        except ValueError:
-            radius = 25.0
-        material = (self._material.get() or "").strip() or None
+        radius = self._radius_now()
+        material = self._material_now() or None
         self._searching = True
         self.search_button.configure(state="disabled")
         self._status.set(t("mining.searching", system=system, radius=int(radius)))
@@ -438,24 +591,26 @@ class MiningTab:
                 )
                 rows = rows_from_remote(bodies, material, self.price_index)
             except Exception as exc:  # noqa: BLE001 — показываем текст ошибки
-                self._ui(lambda: self._finish_search(None, str(exc)))
+                self._ui(lambda: self._finish_search(None, str(exc), bodies=None))
                 return
-            self._ui(lambda: self._finish_search(rows, None))
+            self._ui(lambda: self._finish_search(rows, None, bodies=bodies))
 
         threading.Thread(target=work, name="edhud-mining-search", daemon=True).start()
 
     def _status_from_thread(self, text: str) -> None:
         self._ui(lambda: self._status.set(text))
 
-    def _finish_search(self, rows: list[MiningRow] | None, error: str | None) -> None:
+    def _finish_search(self, rows: list[MiningRow] | None, error: str | None, bodies=None) -> None:
         self._searching = False
         self.search_button.configure(state="normal")
         if error:
             self._status.set(t("mining.error", error=error))
             return
+        self._source = "spansh"
+        self._remote_bodies = list(bodies or [])
         self._rows = rows or []
         self._render()
-        self._status.set(t("mining.found", n=len(self._rows)))
+        self._status.set(t("mining.found", n=len(self._rows)) + " " + t("mining.spansh_note"))
 
     def _ui(self, callback) -> None:
         try:

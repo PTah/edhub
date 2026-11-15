@@ -21,6 +21,7 @@ from .journal import JournalWatcher
 from .model import GameState
 from .route import Route
 from .belts import BeltStore
+from .hotspots import HotspotStore
 from .store import SystemStore
 from .tui import run_tui
 from .i18n import t
@@ -61,6 +62,7 @@ class App:
         self.state = GameState()
         self.store = SystemStore()
         self.belt_store = BeltStore()
+        self.hotspot_store = HotspotStore()
         self.prices = prices.MarketIndex()
         self.price_feed: prices.PriceFeed | None = None
         self.remote_client = self._make_remote_client()
@@ -284,6 +286,8 @@ class App:
             self.sync_system()
             self.collect_remote()
             self.collect_eddn()
+            # кольца, которые просканировали, — в свою базу хотспотов
+            self.hotspot_store.harvest(self.state)
             self._lookup_carrier_pos()
             self._lookup_route_discoverers()
             self.autosave()
@@ -554,6 +558,7 @@ class App:
             self.overlay.root,
             cfg=self.cfg,
             belt_store=self.belt_store,
+            hotspot_store=self.hotspot_store,
             price_index=self.prices,
             on_copy_system=self.copy_system_name,
             on_copy_carrier=self.copy_system_name,

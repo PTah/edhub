@@ -130,6 +130,21 @@ def _mineable_belt(rings: list, name: str | None = None) -> bool:
             return True
     return False
 
+
+def _ring_type_names(rings: list) -> list[str]:
+    """Типы колец в человеческом виде: eRingClass_Icy → «Icy»."""
+    kinds: list[str] = []
+    for ring in rings or []:
+        if not isinstance(ring, dict):
+            continue
+        kind = str(ring.get("RingClass") or ring.get("Type") or "")
+        if kind.startswith("eRingClass_"):
+            kind = kind[len("eRingClass_"):]
+        if kind and kind not in kinds:
+            kinds.append(kind)
+    return kinds
+
+
 # Vista Genomics: бонус "First Logged" — пробу ещё никто не сдавал, платят ×5
 FIRST_LOGGED_MULTIPLIER = 5
 
@@ -399,6 +414,10 @@ class Body:
     parent_ids: list[int] = field(default_factory=list)
     terraform_state: str | None = None
     has_rings: bool = False  # ледяной/каменный/металлический пояс — там можно добывать
+    # типы колец из Scan: ["Icy"], ["Metallic", "Rocky"] — подсказка для добычи
+    ring_types: list[str] = field(default_factory=list)
+    # запас кольца из Scan: Pristine / Major / Common / Low / Depleted
+    reserve_level: str | None = None
     was_discovered: bool = False
     was_mapped: bool = False
     was_footfalled: bool = False
@@ -506,6 +525,11 @@ class Body:
             self.landable = True
         if other.has_rings:
             self.has_rings = True
+        if other.reserve_level and not self.reserve_level:
+            self.reserve_level = other.reserve_level
+        for kind in other.ring_types:
+            if kind not in self.ring_types:
+                self.ring_types.append(kind)
         if other.dss_scanned:
             self.dss_scanned = True
         if other.rings_mapped:
@@ -1374,8 +1398,12 @@ class GameState:
             body.has_rings = False
         elif isinstance(rings, list):
             body.has_rings = _mineable_belt(rings, body.name)
+            body.ring_types = _ring_type_names(rings)
         elif is_belt_body(body.name):
             body.has_rings = True
+        reserve = e.get("ReserveLevel")
+        if isinstance(reserve, str) and reserve:
+            body.reserve_level = reserve[len("eReserveLevel_"):] if reserve.startswith("eReserveLevel_") else reserve
         if e.get("WasDiscovered") is not None:
             body.was_discovered = bool(e.get("WasDiscovered"))
         self._note_first_discovery(e)

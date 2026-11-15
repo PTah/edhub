@@ -406,6 +406,7 @@ class MainWindow:
         on_close: Callable[[], None] | None = None,
         cfg=None,
         belt_store: BeltStore | None = None,
+        hotspot_store=None,
         on_copy_system: Callable[[str], None] | None = None,
         on_copy_carrier: Callable[[str], None] | None = None,
         on_plot_to_carrier: Callable[[], None] | None = None,
@@ -414,6 +415,7 @@ class MainWindow:
         self.on_close = on_close
         self.cfg = cfg
         self.belt_store = belt_store if belt_store is not None else BeltStore()
+        self.hotspot_store = hotspot_store
         self.price_index = price_index
         self.on_copy_system = on_copy_system
         self.on_copy_carrier = on_copy_carrier
@@ -576,8 +578,9 @@ class MainWindow:
             ui_size=self._ui_size,
             price_index=self.price_index,
             belt_store=self.belt_store,
+            hotspot_store=self.hotspot_store,
             on_copy_system=self._copy_belt_system,
-            on_status=lambda text: None,
+            on_status=self._flash_status,
             default_radius=radius,
         )
         self.mining_tab.frame.pack(fill="both", expand=True)

@@ -349,6 +349,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "mining.empty": "пока пусто",
         "mining.no_hotspots": "у выбранного тела нет хотспотов — сохранять нечего",
         "mining.saved": "пояс сохранён: {body}",
+        "mining.db_search": "Мои кольца",
+        "mining.db_status": "своя база: колец по фильтру — {n}, в радиусе {radius} ly ({material}), всего в базе {total}",
+        "mining.filter_status": "текущая система: строк по «{material}» — {n}",
+        "mining.any_material": "любой минерал",
+        "mining.spansh_note": "(состав колец Spansh не отдаёт — только тип)",
     },
     "en": {
         "col.name": "Name",
@@ -685,6 +690,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "mining.empty": "nothing yet",
         "mining.no_hotspots": "the selected body has no hotspots to save",
         "mining.saved": "belt saved: {body}",
+        "mining.db_search": "My rings",
+        "mining.db_status": "own database: {n} rings matching ({material}) within {radius} ly, {total} in total",
+        "mining.filter_status": "current system: rows for «{material}» — {n}",
+        "mining.any_material": "any mineral",
+        "mining.spansh_note": "(Spansh does not report ring contents, only type)",
     },
 }
 
