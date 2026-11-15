@@ -31,6 +31,39 @@ from .voice import Voice
 
 SAVE_INTERVAL = 20.0
 GAME_ALIVE_SEC = 180.0  # Status.json пишется каждую секунду, пока игра запущена
+UPDATE_STALL_SEC = 15.0  # столько молчания сервера — уже повод сказать «висит»
+
+
+def _place_update_window(win, parent) -> None:
+    """Поставить окно загрузки на экран целиком: не за краем, поверх родителя."""
+    try:
+        win.update_idletasks()
+        width = max(win.winfo_reqwidth(), 430)
+        height = max(win.winfo_reqheight(), 180)
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        x = y = None
+        if parent is not None:
+            try:
+                if parent.winfo_viewable():
+                    x = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
+                    y = parent.winfo_rooty() + (parent.winfo_height() - height) // 3
+            except Exception:
+                x = y = None
+        if x is None or y is None:
+            x = (screen_w - width) // 2
+            y = (screen_h - height) // 3
+        x = max(0, min(int(x), max(0, screen_w - width - 8)))
+        y = max(0, min(int(y), max(0, screen_h - height - 72)))
+        win.geometry(f"{width}x{height}+{x}+{y}")
+        win.deiconify()
+        win.lift()
+        try:
+            win.focus_force()
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _system_discoverer_from_remote(result) -> str | None:
@@ -914,15 +947,59 @@ class App:
         from . import update as upd
 
         win = tk.Toplevel(parent)
-        win.title(t("update.title"))
+        win.title(f"{t('update.title')} — {info.asset_name or 'EDHUD'}")
         icon.apply_icon(win)
+        # окно обычное: с заголовком, рамкой, его можно тянуть и увеличивать
+        try:
+            win.overrideredirect(False)
+            win.attributes("-toolwindow", False)
+        except tk.TclError:
+            pass
+        win.resizable(True, True)
+        win.minsize(430, 180)
         win.attributes("-topmost", True)
-        win.resizable(False, False)
-        label = ttk.Label(win, text=t("update.downloading", name=info.asset_name), padding=16)
-        label.pack()
+        if parent is not None:
+            try:
+                win.transient(parent)
+            except tk.TclError:
+                pass
 
-        def progress(done: int, total: int) -> None:
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body, text=t("update.downloading", name=info.asset_name or "EDHUD"), justify="left"
+        ).pack(anchor="w")
+        bar = ttk.Progressbar(body, mode="indeterminate", maximum=100)
+        bar.pack(fill="x", pady=(10, 8))
+        bar.start(14)
+        detail = ttk.Label(body, text=t("update.starting"), justify="left")
+        detail.pack(anchor="w")
+        warn = ttk.Label(body, text="", foreground="#c04000", wraplength=400, justify="left")
+        warn.pack(anchor="w", pady=(8, 0))
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(12, 0))
+        self._update_state = {
+            "done": 0,
+            "total": 0,
+            "started": time.monotonic(),
+            "last": time.monotonic(),
+            "cancel": False,
+            "finished": False,
+        }
+        state = self._update_state
+        cancel_button = ttk.Button(buttons, text=t("update.cancel"), command=lambda: ask_cancel())
+        cancel_button.pack(side="right")
+
+        def paint() -> None:
+            done = int(state["done"])
+            total = int(state["total"])
+            elapsed = max(0.0, time.monotonic() - float(state["started"]))
+            speed = upd.speed_bps(done, elapsed)
             if total:
+                if str(bar.cget("mode")) != "determinate":
+                    bar.stop()
+                    bar.configure(mode="determinate")
+                bar["value"] = min(100.0, done * 100.0 / total)
                 text = t(
                     "update.progress_total",
                     done=upd.format_bytes(done),
@@ -930,25 +1007,75 @@ class App:
                 )
             else:
                 text = t("update.progress", done=upd.format_bytes(done))
+            if speed:
+                text += " · " + t("update.speed", speed=upd.format_bytes(int(speed)))
+            text += " · " + t("update.elapsed", sec=int(elapsed))
+            try:
+                detail.configure(text=text)
+            except tk.TclError:
+                pass
 
-            def paint() -> None:
-                try:
-                    label.configure(text=text)
-                except tk.TclError:
-                    pass
-
+        def progress(done: int, total: int) -> None:
+            state["done"] = done
+            state["total"] = total or 0
+            state["last"] = time.monotonic()
             self._ui(paint)
+
+        def step(key: str) -> None:
+            text = t(f"update.step_{key}") if key else ""
+            self._ui(lambda: warn.configure(text=text))
+
+        def tick() -> None:
+            """Раз в секунду: если данные не приходят — пишем, что сервер молчит."""
+            if state["finished"]:
+                return
+            idle = time.monotonic() - float(state["last"])
+            if not state["cancel"]:
+                if idle >= 15:
+                    warn.configure(text=t("update.stalled", sec=int(idle)))
+                elif warn.cget("text"):
+                    warn.configure(text="")
+            try:
+                win.after(1000, tick)
+            except tk.TclError:
+                pass
+
+        def ask_cancel() -> None:
+            if state["finished"]:
+                return
+            if not messagebox.askyesno("EDHUD", t("update.cancel_ask"), parent=win):
+                return
+            state["cancel"] = True
+            cancel_button.configure(state="disabled")
+            warn.configure(text=t("update.cancelling"))
+
+        def finish() -> None:
+            state["finished"] = True
+            try:
+                bar.stop()
+                win.destroy()
+            except tk.TclError:
+                pass
 
         def work() -> None:
             try:
-                payload = upd.stage_update(info, progress=progress)
+                payload = upd.stage_update(
+                    info,
+                    progress=progress,
+                    cancel=lambda: bool(state["cancel"]),
+                    status=step,
+                )
                 upd.spawn_helper(payload)
+            except upd.UpdateCancelled:
+                def cancelled() -> None:
+                    finish()
+                    messagebox.showinfo("EDHUD", t("update.cancelled"), parent=parent)
+
+                self._ui(cancelled)
+                return
             except Exception as exc:
                 def fail() -> None:
-                    try:
-                        win.destroy()
-                    except tk.TclError:
-                        pass
+                    finish()
                     messagebox.showerror("EDHUD", t("update.failed", error=exc), parent=parent)
 
                 self._ui(fail)
@@ -958,7 +1085,8 @@ class App:
                 # Подменщик уже ждёт наш выход. Диалог «Ок» держал процесс
                 # живым, а после кнопки окно закрывалось и никто его не поднимал.
                 try:
-                    label.configure(text=t("update.restarting"))
+                    warn.configure(text="")
+                    detail.configure(text=t("update.restarting"))
                     win.update_idletasks()
                 except tk.TclError:
                     pass
@@ -966,6 +1094,9 @@ class App:
 
             self._ui(restart)
 
+        win.protocol("WM_DELETE_WINDOW", ask_cancel)
+        _place_update_window(win, parent)
+        win.after(1000, tick)
         threading.Thread(target=work, name="edhud-update-download", daemon=True).start()
 
     def _exit_for_update(self) -> None:

@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.15 on Papasha 2026-11-15 19:59:50
 """Проверка и установка обновлений EDHUD с GitHub.
 
 Как в nc.ai: никакого PowerShell, cmd и временных .ps1 — на эту связку
@@ -442,7 +443,19 @@ def format_bytes(value: int) -> str:
     return f"{value} B"
 
 
-def download(url: str, dest: Path, progress=None) -> None:
+class UpdateCancelled(Exception):
+    """Пользователь отменил загрузку обновления."""
+
+
+def speed_bps(done: int, elapsed: float) -> float:
+    """Скорость загрузки, байт/с (0, пока не прошло хотя бы полсекунды)."""
+    if elapsed < 0.5 or done <= 0:
+        return 0.0
+    return done / elapsed
+
+
+def download(url: str, dest: Path, progress=None, cancel=None) -> None:
+    """Скачать файл. `cancel` — функция-флаг: True → прервать (UpdateCancelled)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     if sys.platform == "win32":
@@ -450,13 +463,19 @@ def download(url: str, dest: Path, progress=None) -> None:
 
         def take(piece: bytes, total: int) -> None:
             nonlocal done
+            if cancel is not None and cancel():
+                raise UpdateCancelled("cancelled")
             handle.write(piece)
             done += len(piece)
             if progress is not None:
                 progress(done, total)
 
-        with tmp.open("wb") as handle:
-            status, _location, total = _winhttp_get(url, 120, on_chunk=take)
+        try:
+            with tmp.open("wb") as handle:
+                status, _location, total = _winhttp_get(url, 120, on_chunk=take)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         if status >= 300:
             tmp.unlink(missing_ok=True)
             raise OSError(f"download HTTP {status}")
@@ -466,20 +485,26 @@ def download(url: str, dest: Path, progress=None) -> None:
         tmp.replace(dest)
         return
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=120) as response:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        with tmp.open("wb") as handle:
-            while True:
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                done += len(chunk)
-                if done > MAX_ASSET_BYTES:
-                    raise OSError("update file is too large")
-                if progress is not None:
-                    progress(done, total)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            with tmp.open("wb") as handle:
+                while True:
+                    if cancel is not None and cancel():
+                        raise UpdateCancelled("cancelled")
+                    chunk = response.read(256 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if done > MAX_ASSET_BYTES:
+                        raise OSError("update file is too large")
+                    if progress is not None:
+                        progress(done, total)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     if total and done < total:
         tmp.unlink(missing_ok=True)
         raise OSError(f"downloaded {done} of {total} bytes")
@@ -506,13 +531,15 @@ def find_payload(root: Path, kind: str) -> Path:
     return exes[0].parent
 
 
-def stage_update(info: UpdateInfo, progress=None) -> Path:
+def stage_update(info: UpdateInfo, progress=None, cancel=None, status=None) -> Path:
     if not info.asset_url:
         raise FileNotFoundError(info.asset_name or "asset")
     incoming = _updates_dir() / "incoming"
     incoming.mkdir(parents=True, exist_ok=True)
     archive = incoming / (info.asset_name or "EDHUD-update.zip")
-    download(info.asset_url, archive, progress=progress)
+    download(info.asset_url, archive, progress=progress, cancel=cancel)
+    if status is not None:
+        status("extract")
     staging = _updates_dir() / "staging"
     _extract(archive, staging)
     kind = "onefile" if install_kind() == "onefile" else "onedir"
