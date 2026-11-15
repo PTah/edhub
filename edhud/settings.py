@@ -543,41 +543,30 @@ class SettingsDialog:
         )
         row += 1
 
-        ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
-        row += 1
-        ttk.Label(frm, text=t("set.overlay")).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Checkbutton(
-            frm, text=t("set.hud_show_stats"), variable=self.hud_show_stats
-        ).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Label(
-            frm, text=t("set.hud_show_stats_hint"), foreground="#666", justify="left"
-        ).grid(row=row, column=0, sticky="w", padx=24)
-        row += 1
-        ttk.Checkbutton(
-            frm, text=t("set.click"), variable=self.click_through
-        ).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Checkbutton(
-            frm,
-            text=t("set.belts"),
-            variable=self.show_belt_clusters,
-        ).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Checkbutton(
-            frm,
-            text=t("set.remote_bio"),
-            variable=self.show_remote_bio,
-        ).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        wrow = ttk.Frame(frm)
-        wrow.grid(row=row, column=0, sticky="w", **pad)
+    def _build_overlay_options(self, box: ttk.Frame) -> None:
+        """Настройки верхнего оверлея — внутри блока «Верхний оверлей» вкладки «Окна»."""
+        ttk.Separator(box).pack(fill="x", pady=8)
+        ttk.Checkbutton(box, text=t("set.hud_show_stats"), variable=self.hud_show_stats).pack(
+            anchor="w", pady=2
+        )
+        ttk.Label(box, text=t("set.hud_show_stats_hint"), foreground="#666", justify="left").pack(
+            anchor="w", padx=(20, 0), pady=(0, 4)
+        )
+        ttk.Checkbutton(box, text=t("set.click"), variable=self.click_through).pack(
+            anchor="w", pady=2
+        )
+        ttk.Checkbutton(box, text=t("set.belts"), variable=self.show_belt_clusters).pack(
+            anchor="w", pady=2
+        )
+        ttk.Checkbutton(box, text=t("set.remote_bio"), variable=self.show_remote_bio).pack(
+            anchor="w", pady=2
+        )
+        wrow = ttk.Frame(box)
+        wrow.pack(anchor="w", pady=(6, 0))
         ttk.Label(wrow, text=t("set.width")).pack(side="left")
         ttk.Spinbox(wrow, from_=600, to=2400, increment=20, textvariable=self.width, width=6).pack(
             side="left", padx=8
         )
-        row += 1
 
     def _build_about(self, frm: ttk.Frame) -> None:
         """О программе: версия, ссылки, обновления (перенесено из «Окон»)."""
@@ -770,6 +759,7 @@ class SettingsDialog:
             self.opacity,
             "overlay",
             pad,
+            extra=self._build_overlay_options,
         )
         self._window_block(
             frm,
@@ -815,7 +805,8 @@ class SettingsDialog:
         alpha_var: DoubleVar,
         kind: str,
         pad: dict,
-    ) -> None:
+        extra=None,
+    ) -> ttk.Frame:
         box = ttk.LabelFrame(frm, text=title, padding=8)
         box.grid(row=row, column=0, sticky="ew", padx=8, pady=6)
         line = ttk.Frame(box)
@@ -843,6 +834,11 @@ class SettingsDialog:
         ttk.Button(pad_fr, text="→", width=3, command=lambda: self._nudge(kind, NUDGE_STEP, 0)).grid(
             row=1, column=2, padx=2, pady=2
         )
+
+        # дополнительные настройки прямо в блоке (например, настройки оверлея)
+        if extra is not None:
+            extra(box)
+        return box
 
     def _nudge(self, kind: str, dx: int, dy: int) -> None:
         if kind == "overlay":
