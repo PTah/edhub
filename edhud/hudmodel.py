@@ -369,6 +369,20 @@ def _value_row(state: GameState, body: Body) -> Row | None:
     return row
 
 
+def _mining_row(state: GameState) -> Row | None:
+    """Строка добычи в верхнем HUD: качество камня и выработка за сессию."""
+    metrics = getattr(state, "mining", None)
+    if metrics is None or not metrics.has_data():
+        return None
+    text = metrics.hud_text()
+    if not text:
+        return None
+    row = Row()
+    row.segments.append(Segment(t("hud.mining"), "muted"))
+    row.segments.append(Segment(text, "text"))
+    return row
+
+
 def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     rows: list[Row] = []
     body = state.body_for_status() or state.current_body()
@@ -555,6 +569,9 @@ def build_view(
     body_row = _body_row(state, cfg)
     expanded = cfg.expanded if expanded is None else expanded
     detail = _sample_rows(state)
+    mining_row = _mining_row(state)
+    if mining_row is not None:
+        detail.append(mining_row)
     if expanded:
         detail.extend(_detail_rows(state, cfg, now))
     alert = None

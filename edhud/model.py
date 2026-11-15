@@ -19,6 +19,7 @@ from .i18n import t
 from . import codex
 from .mining import format_hotspots, format_hotspots_tip  # noqa: F401 — re-export
 from .mining import ring_density as mining_ring_density
+from .miningstats import MiningMetrics
 from .route import Route
 from .values import body_values
 
@@ -1004,6 +1005,8 @@ class GameState:
     fid: str | None = None
     ship: str | None = None
     ship_name: str | None = None
+    # максимальный прыжок из Loadout: нужен для ранга «цена × достижимость»
+    jump_range: float = 0.0
     game_mode: str | None = None
     mode: str = "Ship"  # Ship | SRV | OnFoot
     system: System = field(default_factory=System)
@@ -1052,6 +1055,8 @@ class GameState:
     last_event: str | None = None
     # текущий трек из события Music: по нему видно, открыт ли экран-меню игры
     music_track: str = ""
+    # живые метрики добычи: качество камня, выработка, трюм
+    mining: MiningMetrics = field(default_factory=MiningMetrics)
     game_running: bool = False
     # Legacy (Elite Dangerous 3.8, Horizons/Beyond) — без Odyssey-бонусов и био-прогноза
     legacy: bool = False
@@ -1094,6 +1099,8 @@ class GameState:
     # --- запуск/система
     def _on_fileheader(self, e: dict) -> None:
         self._apply_version(e)
+        if not self.mining.started:
+            self.mining.started = time.time()
 
     def _on_loadgame(self, e: dict) -> None:
         self.cmdr = e.get("Commander")
@@ -1103,6 +1110,8 @@ class GameState:
         self.game_mode = e.get("GameMode")
         self.game_running = True
         self.music_track = ""  # новый вход в игру — экранов-меню ещё нет
+        self.mining.reset()  # добыча: новый вход — новые счётчики
+        self.mining.started = time.time()
         self._apply_version(e)
         if e.get("Fuel") is not None:
             self.status.fuel_main = float(e.get("Fuel") or 0.0)
@@ -1125,6 +1134,10 @@ class GameState:
         self.ship = e.get("Ship") or self.ship
         if e.get("ShipName") is not None:
             self.ship_name = e.get("ShipName") or self.ship_name
+        try:
+            self.jump_range = float(e.get("MaxJumpRange") or self.jump_range or 0.0)
+        except (TypeError, ValueError):
+            pass
 
     def _on_shutdown(self, _e: dict) -> None:
         self.game_running = False
@@ -1136,6 +1149,19 @@ class GameState:
         track = e.get("MusicTrack")
         if isinstance(track, str) and track:
             self.music_track = track
+
+    # --- добыча: качество камня (ProspectedAsteroid), выработка (MiningRefined/Cargo)
+    def _on_prospectedasteroid(self, e: dict) -> None:
+        self.mining.apply(dict(e, event="ProspectedAsteroid"))
+
+    def _on_miningrefined(self, e: dict) -> None:
+        self.mining.apply(dict(e, event="MiningRefined"))
+
+    def _on_cargo(self, e: dict) -> None:
+        self.mining.apply(dict(e, event="Cargo"))
+
+    def _on_marketsell(self, e: dict) -> None:
+        self.mining.apply(dict(e, event="MarketSell"))
 
     def _set_system(self, e: dict) -> None:
         pos = e.get("StarPos")

@@ -19,7 +19,7 @@ import tkinter as tk
 from dataclasses import dataclass, field
 from tkinter import ttk
 
-from . import hotspots, mining, miningsearch
+from . import hotspots, mining, miningsearch, sellstations, values
 from .i18n import t
 
 COLUMNS: tuple[tuple[str, str, int, str], ...] = (
@@ -109,6 +109,41 @@ MATERIAL_CHOICES: tuple[str, ...] = tuple(
 )
 
 
+def rows_from_spansh(
+    hits: list,
+    price_index=None,
+    material: str | None = None,
+) -> list[MiningRow]:
+    """Строки из базы Spansh: кольца с известным составом и координатами системы."""
+    rows: list[MiningRow] = []
+    want = (material or "").strip()
+    for hit in hits:
+        if want and not any(name.lower() == want.lower() for name in hit.hotspots):
+            continue
+        name, price, exact = (
+            _material_quote(want, price_index) if want else _best_hotspot(hit.hotspots, price_index)
+        )
+        rows.append(
+            MiningRow(
+                system=hit.system,
+                body=hit.body,
+                subtype=hit.kind or "",
+                sites=_sites_label(sum(hit.hotspots.values()), hit.reserve),
+                material=name,
+                distance_ly=hit.distance_ly,
+                rings=mining.format_hotspots(hit.hotspots),
+                price=price,
+                price_exact=exact,
+                hotspots=dict(hit.hotspots),
+                address=hit.address,
+                density=hit.density,
+                planet_class=hit.kind,
+                origin="spansh",
+            )
+        )
+    return rows
+
+
 def _sites_label(count: int, reserve: str | None = None) -> str:
     """«хотспоты ×3 · Pristine» — сколько и насколько богатое кольцо."""
     label = t("mining.ring_sites", n=count)
@@ -138,16 +173,16 @@ def ring_hint(ring_types, reserve: str | None = None, density: float | None = No
     return f"{head} — {body}" if body else head
 
 
-def best_sell_hint(price_index, material: str | None) -> str:
-    """«лучший сбыт: <станция> (<система>) — 1 200 000 cr» по своему индексу цен."""
+def best_sell_hint(price_index, material: str | None, origin=None, jump_range: float | None = None) -> str:
+    """«лучший сбыт: <станция> (<система>) — 1 200 000 cr · 45 ly · 3 прыж.»."""
     if price_index is None or not material:
         return ""
-    quote = price_index.best(material)
-    if quote is None or quote.price <= 0:
+    choice = sellstations.best_sell(price_index, material, origin, jump_range)
+    if choice is None:
         return ""
-    price = f"{int(quote.price):,}".replace(",", " ")
-    where = " — ".join(part for part in (quote.station, quote.system) if part)
-    return t("mining.best_sell", where=where or "—", price=price)
+    return t("mining.best_sell_full", where=f"{choice.station} ({choice.system})", price=values.credits(choice.price),
+             distance=(f"{choice.distance_ly:.0f} ly" if choice.distance_ly is not None else "—"),
+             jumps=(str(choice.jumps) if choice.jumps else "—"))
 
 
 def rows_from_state(state, price_index=None, material: str | None = None) -> list[MiningRow]:
@@ -336,6 +371,8 @@ class MiningTab:
         price_index=None,
         belt_store=None,
         hotspot_store=None,
+        spansh_index=None,
+        on_target=None,
         on_copy_system=None,
         on_status=None,
         default_radius: float = 25.0,
@@ -346,6 +383,8 @@ class MiningTab:
         self.price_index = price_index
         self.belt_store = belt_store
         self.hotspot_store = hotspot_store
+        self.spansh_index = spansh_index
+        self.on_target = on_target or (lambda _name: None)
         self.on_copy_system = on_copy_system
         self.on_status = on_status or (lambda _text: None)
         self.frame = ttk.Frame(parent, style="ED.TFrame", padding=8)
@@ -568,13 +607,25 @@ class MiningTab:
             if not material
             else t("mining.filter_status", n=len(self._rows), material=material)
         ]
+        metrics = getattr(self._state, "mining", None)
+        if metrics is not None:
+            stats_text = metrics.hud_text()
+            if stats_text:
+                parts.append(stats_text)
         hint = self._ring_hint_text()
         if hint:
             parts.append(hint)
-        sell = best_sell_hint(self.price_index, material)
+        sell = best_sell_hint(self.price_index, material, *self._sell_context())
         if sell:
             parts.append(sell)
         return " · ".join(parts)
+
+    def _sell_context(self):
+        """Координаты текущей системы и прыжковый радиус — для ранга сбыта."""
+        state = self._state
+        pos = getattr(getattr(state, "system", None), "star_pos", None)
+        origin = (float(pos[0]), float(pos[1]), float(pos[2])) if pos and len(pos) == 3 else None
+        return origin, float(getattr(state, "jump_range", 0.0) or 0.0)
 
     def _ring_hint_text(self) -> str:
         """Подсказка по самому дорогому кольцу текущей системы: тип, запас, что копать."""
@@ -607,6 +658,19 @@ class MiningTab:
         near = self.hotspot_store.search(origin, radius_ly=radius, mineral=material or None)
         self._source = "db"
         self._rows = rows_from_hotspots(near, self.price_index, material)
+        from_base = 0
+        if self.spansh_index is not None and self.spansh_index.exists():
+            hits = self.spansh_index.search(origin, radius_ly=radius, mineral=material or None, limit=150)
+            known = {(row.system.lower(), row.body.lower()) for row in self._rows}
+            fresh = [hit for hit in hits if (hit.system.lower(), hit.body.lower()) not in known]
+            from_base = len(fresh)
+            self._rows += rows_from_spansh(fresh, self.price_index, material)
+            self._rows.sort(
+                key=lambda row: (
+                    row.distance_ly if row.distance_ly is not None else 9e9,
+                    -row.price,
+                )
+            )
         self._render()
         parts = [
             t(
@@ -617,18 +681,24 @@ class MiningTab:
                 material=material or t("mining.any_material"),
             )
         ]
+        if from_base:
+            parts.append(t("mining.db_spansh", n=from_base))
         if near:
             first = near[0].ring
             hint = ring_hint(first.ring_types, first.reserve_level, first.density)
             if hint:
                 parts.append(hint)
-        sell = best_sell_hint(self.price_index, material)
+        sell = best_sell_hint(self.price_index, material, *self._sell_context())
         if sell:
             parts.append(sell)
         self._status.set(" · ".join(parts))
 
     def _on_material_change(self, _event=None) -> None:
-        """Сменили минерал — перестраиваем то, что уже показано."""
+        """Сменили минерал — перестраиваем то, что уже показано, и запоминаем цель."""
+        material = self._material_now()
+        self.on_target(material)
+        if self._state is not None:
+            self._state.mining.target = material
         if self._source == "db":
             self.search_db()
         elif self._source == "spansh":
@@ -695,7 +765,7 @@ class MiningTab:
         self._rows = rows or []
         self._render()
         text = t("mining.found", n=len(self._rows)) + " " + t("mining.spansh_note")
-        sell = best_sell_hint(self.price_index, self._material_now())
+        sell = best_sell_hint(self.price_index, self._material_now(), *self._sell_context())
         self._status.set(f"{text} · {sell}" if sell else text)
 
     def _ui(self, callback) -> None:

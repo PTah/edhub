@@ -54,6 +54,12 @@ class SessionStats:
     bio_estimate_cr: int = 0
     bio_sold_cr: int = 0
     sold_cr: int = 0
+    # добыча: камни, качество и выработка
+    mining_rocks: int = 0
+    mining_avg: int = 0
+    mining_best: int = 0
+    mining_tons: int = 0
+    mining_target: str = ""
 
     @property
     def duration_sec(self) -> float:
@@ -74,7 +80,7 @@ class SessionStats:
                     clean[key] = float(value)
                 except (TypeError, ValueError):
                     continue
-            elif key in ("key", "commander"):
+            elif key in ("key", "commander", "mining_target"):
                 clean[key] = str(value or "")
             else:
                 try:
@@ -169,6 +175,13 @@ class StatsStore:
                 setattr(session, name, int(getattr(state, attr, 0) or 0))
             except (TypeError, ValueError):
                 continue
+        metrics = getattr(state, "mining", None)
+        if metrics is not None:
+            session.mining_rocks = int(getattr(metrics, "prospected", 0) or 0)
+            session.mining_avg = int(round(getattr(metrics, "avg_share", 0.0) or 0.0))
+            session.mining_best = int(round(getattr(metrics, "best_share", 0.0) or 0.0))
+            session.mining_tons = int(getattr(metrics, "refined_total", 0) or 0)
+            session.mining_target = str(getattr(metrics, "target", "") or "")
         session.updated = time.time()
         if session.updated < session.started:
             session.started = session.updated
@@ -194,10 +207,13 @@ class StatsStore:
             "bio_estimate_cr": 0,
             "bio_sold_cr": 0,
             "sold_cr": 0,
+            "mining_rocks": 0,
+            "mining_tons": 0,
         }
         for item in self.sessions:
             for name in ("jumps", "new_systems", "scans", "new_bodies", "mapped", "bio_analyzed",
-                         "scan_cr", "map_cr", "bio_estimate_cr", "bio_sold_cr", "sold_cr"):
+                         "scan_cr", "map_cr", "bio_estimate_cr", "bio_sold_cr", "sold_cr",
+                         "mining_rocks", "mining_tons"):
                 total[name] += int(getattr(item, name, 0) or 0)
             total["distance_ly"] += float(item.distance_ly or 0.0)
             total["hours"] += item.duration_sec / 3600.0

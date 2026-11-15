@@ -407,6 +407,7 @@ class MainWindow:
         cfg=None,
         belt_store: BeltStore | None = None,
         hotspot_store=None,
+        spansh_index=None,
         on_copy_system: Callable[[str], None] | None = None,
         on_copy_carrier: Callable[[str], None] | None = None,
         on_plot_to_carrier: Callable[[], None] | None = None,
@@ -416,6 +417,7 @@ class MainWindow:
         self.cfg = cfg
         self.belt_store = belt_store if belt_store is not None else BeltStore()
         self.hotspot_store = hotspot_store
+        self.spansh_index = spansh_index
         self.price_index = price_index
         self.on_copy_system = on_copy_system
         self.on_copy_carrier = on_copy_carrier
@@ -581,6 +583,8 @@ class MainWindow:
             price_index=self.price_index,
             belt_store=self.belt_store,
             hotspot_store=self.hotspot_store,
+            on_target=self._set_mining_target,
+            spansh_index=self.spansh_index,
             on_copy_system=self._copy_belt_system,
             on_status=self._flash_status,
             default_radius=radius,
@@ -1562,6 +1566,21 @@ class MainWindow:
             if self._state is not None:
                 self.mining_tab.set_state(self._state)
             self.mining_tab.on_show()
+
+    def _set_mining_target(self, name: str) -> None:
+        """Целевой минерал выбран в «Добыче» — запоминаем и отдаём счётчикам."""
+        target = (name or "").strip()
+        if self.cfg is not None:
+            self.cfg.mining_target = target
+        if getattr(self, "_state", None) is not None:
+            self._state.mining.target = target
+
+    def set_spansh_index(self, index) -> None:
+        """Включили/выключили базу Spansh в настройках — переключаем поиск на лету."""
+        self.spansh_index = index
+        tab = getattr(self, "mining_tab", None)
+        if tab is not None:
+            tab.spansh_index = index
 
     def _apply_tab(self, state: GameState) -> None:
         """Автопереключение Route/Bodies: срабатывает на смену системы и на смену маршрута.

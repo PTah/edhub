@@ -22,6 +22,7 @@ from .model import GameState
 from .route import Route
 from .belts import BeltStore
 from .hotspots import HotspotStore
+from .spanshdb import SpanshIndex
 from .stats import StatsStore
 from .store import SystemStore
 from .tui import run_tui
@@ -61,10 +62,12 @@ class App:
         self.expanded = cfg.expanded if expanded is None else expanded
         self.journal_dir = Path(journal_dir) if journal_dir else cfg.resolved_journal_dir()
         self.state = GameState()
+        self.state.mining.target = cfg.mining_target or ""
         self.store = SystemStore()
         self.belt_store = BeltStore()
         self.hotspot_store = HotspotStore()
         self.stats = StatsStore()
+        self.spansh_index = SpanshIndex()
         self.prices = prices.MarketIndex()
         self.price_feed: prices.PriceFeed | None = None
         self.remote_client = self._make_remote_client()
@@ -244,7 +247,9 @@ class App:
         self.eddn_upload.note(event, self.state)
         self.inara.note(event, self.state)
         if event.get("event") == "Market":
-            if self.prices.ingest_market_event(event):
+            pos = self.state.system.star_pos
+            coords = (float(pos[0]), float(pos[1]), float(pos[2])) if pos and len(pos) == 3 else None
+            if self.prices.ingest_market_event(event, coords):
                 self.prices.save()
         if event.get("event") in ("FSDJump", "Location", "CarrierJump"):
             self._load_canonn(event.get("StarSystem") or self.state.system.name)
@@ -563,6 +568,7 @@ class App:
             cfg=self.cfg,
             belt_store=self.belt_store,
             hotspot_store=self.hotspot_store,
+            spansh_index=self.spansh_index if self.cfg.spansh_db else None,
             price_index=self.prices,
             on_copy_system=self.copy_system_name,
             on_copy_carrier=self.copy_system_name,
@@ -773,6 +779,7 @@ class App:
                 pass
         if self.mainwindow is not None:
             self.mainwindow.cfg = self.cfg
+            self.mainwindow.set_spansh_index(self.spansh_index if self.cfg.spansh_db else None)
             try:
                 self.mainwindow.move_to(self.cfg.main_x, self.cfg.main_y)
                 self.mainwindow.apply_opacity()

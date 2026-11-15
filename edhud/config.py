@@ -155,6 +155,14 @@ class Config:
     # вкладка «Добыча»: радиус поиска у Spansh и живой индекс цен из EDDN
     mining_radius_ly: float = 25.0
     prices_eddn: bool = True
+    # база хотспотов колец из дампа Spansh: по умолчанию НЕ качаем (гигабайты)
+    spansh_db: bool = False
+    spansh_dump: str = "galaxy_1day"
+    spansh_db_updated: str | None = None
+    # счётчики добычи: качество камня и выработка (ProspectedAsteroid / MiningRefined)
+    mining_metrics: bool = True
+    # целевой минерал для счётчика «% в камне» (ставится из вкладки «Добыча»)
+    mining_target: str = ""
     hide_delay_sec: float = 0.0
     overlay_x: int | None = None
     overlay_y: int | None = None

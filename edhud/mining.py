@@ -383,6 +383,43 @@ def hotspot_count(hotspots: dict[str, int] | None, mineral: str | None) -> int:
     return 0
 
 
+_COMMODITY_BY_KEY: dict[str, str] = {}
+
+
+def _key(text: str) -> str:
+    return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
+
+
+def _commodity_index() -> dict[str, str]:
+    """Индекс «нормализованное имя → наше написание» по всем справочникам."""
+    if _COMMODITY_BY_KEY:
+        return _COMMODITY_BY_KEY
+    names = set(HOTSPOT_AVG_PRICE_CR)
+    for table in RING_MINERALS.values():
+        for group in table.values():
+            names.update(group)
+    # при равном ключе предпочитаем написание без дефиса
+    for name in sorted(names, key=lambda item: ("-" in item, item)):
+        _COMMODITY_BY_KEY.setdefault(_key(name), name)
+    return _COMMODITY_BY_KEY
+
+
+def canonical_mineral(name: str | None) -> str:
+    """Привести имя минерала к нашему написанию: «tritium» → «Tritium».
+
+    Журнал в `MiningRefined`/`MarketSell` отдаёт `Type` в нижнем регистре
+    (`lowtemperaturediamonds`), а `SAASignalsFound` — в обычном виде; счётчикам
+    нужен один и тот же ключ.
+    """
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    hit = _commodity_index().get(_key(text))
+    if hit:
+        return hit
+    return text.title() if text.islower() else text
+
+
 def overlap_label(count: int) -> str:
     """Подпись к количеству хотспотов: 'double'/'triple' (переводит UI)."""
     count = int(count or 0)

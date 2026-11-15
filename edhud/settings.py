@@ -3,13 +3,14 @@
 """Окно настроек EDHUD (tkinter)."""
 from __future__ import annotations
 
+import threading
 import time
 import webbrowser
 from pathlib import Path
 from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, filedialog, messagebox, ttk
 import tkinter as tk
 
-from . import __version__, config, icon, values
+from . import __version__, config, icon, spanshdb, values
 from .i18n import t
 from .mainwindow import _geometry_xy
 
@@ -244,19 +245,22 @@ class SettingsDialog:
         if self.stats is None:
             return
         total = self.stats.totals()
-        label.configure(
-            text=t(
-                "set.stats_total",
-                sessions=total["sessions"],
-                hours=f"{total['hours']:.1f}",
-                jumps=total["jumps"],
-                ly=f"{total['distance_ly']:.0f}",
-                new_systems=total["new_systems"],
-                new_bodies=total["new_bodies"],
-                bio=total["bio_analyzed"],
-                sold=values.credits(total["bio_sold_cr"] + total["sold_cr"]),
-            )
+        text_value = t(
+            "set.stats_total",
+            sessions=total["sessions"],
+            hours=f"{total['hours']:.1f}",
+            jumps=total["jumps"],
+            ly=f"{total['distance_ly']:.0f}",
+            new_systems=total["new_systems"],
+            new_bodies=total["new_bodies"],
+            bio=total["bio_analyzed"],
+            sold=values.credits(total["bio_sold_cr"] + total["sold_cr"]),
         )
+        if total["mining_rocks"] or total["mining_tons"]:
+            text_value += "\n" + t(
+                "set.stats_mining", rocks=total["mining_rocks"], tons=total["mining_tons"]
+            )
+        label.configure(text=text_value)
         for item in self.stats.recent(60):
             tree.insert(
                 "",
@@ -282,6 +286,10 @@ class SettingsDialog:
         self.remote_enabled = BooleanVar(value=bool(self.cfg.remote_enabled))
         self.eddn_enabled = BooleanVar(value=bool(self.cfg.eddn_enabled))
         self.nebulae_enabled = BooleanVar(value=bool(self.cfg.nebulae_enabled))
+        self.spansh_db = BooleanVar(value=bool(self.cfg.spansh_db))
+        self.spansh_dump = StringVar(value=self.cfg.spansh_dump or spanshdb.DEFAULT_DUMP)
+        self.spansh_index = spanshdb.SpanshIndex()
+        self._spansh_busy = False
         self.click_through = BooleanVar(value=bool(self.cfg.click_through))
         self.edsm_api_key = StringVar(value=self.cfg.edsm_api_key or "")
         self.edsm_commander = StringVar(value=self.cfg.edsm_commander or "")
@@ -347,6 +355,34 @@ class SettingsDialog:
         ttk.Checkbutton(
             frm, text=t("set.nebulae"), variable=self.nebulae_enabled
         ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm,
+            text=t("set.spansh_db"),
+            variable=self.spansh_db,
+            command=self._on_spansh_toggle,
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        spansh_row = ttk.Frame(frm)
+        spansh_row.grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
+        ttk.Label(spansh_row, text=t("set.spansh_dump")).pack(side="left")
+        self.spansh_dump_box = ttk.Combobox(
+            spansh_row,
+            textvariable=self.spansh_dump,
+            values=list(spanshdb.DUMPS),
+            width=17,
+            state="readonly",
+        )
+        self.spansh_dump_box.pack(side="left", padx=(6, 8))
+        self.spansh_update_button = ttk.Button(
+            spansh_row, text=t("set.spansh_update"), command=self._update_spansh
+        )
+        self.spansh_update_button.pack(side="left")
+        row += 1
+        self.spansh_status = ttk.Label(
+            frm, text=self._spansh_status_text(), foreground="#666", justify="left"
+        )
+        self.spansh_status.grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
         row += 1
 
         ttk.Label(frm, text=t("set.cmdr")).grid(row=row, column=0, sticky="w", **pad)
@@ -501,6 +537,96 @@ class SettingsDialog:
         ttk.Label(frm, text=t("set.update_hint"), foreground="#666", justify="left").grid(
             row=row, column=0, columnspan=2, sticky="w", padx=10
         )
+
+    def _spansh_status_text(self) -> str:
+        """Сколько колец в базе Spansh и когда её строили."""
+        info = self.spansh_index.counts()
+        if not info["rings"]:
+            return t("set.spansh_empty")
+        return t(
+            "set.spansh_status",
+            rings=info["rings"],
+            systems=info["systems"],
+            mb=info["size_mb"],
+            when=info["built_at"] or "—",
+            dump=info["dump"] or "—",
+        )
+
+    def _on_spansh_toggle(self) -> None:
+        # галочка сохраняется сразу: качать гигабайты или нет — решение пользователя
+        self.cfg.spansh_db = bool(self.spansh_db.get())
+        try:
+            self.cfg.save()
+        except OSError:
+            pass
+        self.spansh_status.configure(text=self._spansh_status_text())
+
+    def _update_spansh(self) -> None:
+        """Скачать дамп Spansh и перестроить SQLite-базу хотспотов (в фоне)."""
+        if self._spansh_busy:
+            return
+        if not bool(self.allow_network.get()):
+            messagebox.showwarning("EDHUD", t("set.spansh_no_net"), parent=self.win)
+            return
+        dump = self.spansh_dump.get() or spanshdb.DEFAULT_DUMP
+        if not messagebox.askyesno(
+            "EDHUD",
+            t("set.spansh_confirm", dump=dump, size=spanshdb.DUMPS.get(dump, "")),
+            parent=self.win,
+        ):
+            return
+        self._spansh_busy = True
+        self.spansh_update_button.configure(state="disabled")
+        self.spansh_status.configure(text=t("set.spansh_downloading", dump=dump))
+
+        def work() -> None:
+            try:
+                result = self.spansh_index.update(dump, progress=self._spansh_progress)
+            except Exception as exc:  # noqa: BLE001 — показываем текст ошибки
+                self._ui(lambda: self._spansh_failed(str(exc)))
+                return
+            self._ui(lambda: self._spansh_done(result, dump))
+
+        threading.Thread(target=work, daemon=True, name="spansh-dump").start()
+
+    def _spansh_progress(self, info: dict) -> None:
+        text = t(
+            "set.spansh_progress",
+            systems=info.get("systems", 0),
+            rings=info.get("rings", 0),
+            secs=int(info.get("seconds", 0)),
+        )
+        self._ui(lambda: self.spansh_status.configure(text=text))
+
+    def _spansh_done(self, result: dict, dump: str) -> None:
+        self._spansh_busy = False
+        self.spansh_update_button.configure(state="normal")
+        self.cfg.spansh_dump = dump
+        self.cfg.spansh_db = True
+        self.cfg.spansh_db_updated = time.strftime("%Y-%m-%d %H:%M")
+        try:
+            self.cfg.save()
+        except OSError:
+            pass
+        self.spansh_db.set(True)
+        self.spansh_status.configure(
+            text=t("set.spansh_done", rings=result.get("rings", 0)) + " " + self._spansh_status_text()
+        )
+        if self.on_saved:
+            # приложению надо узнать про новую базу сразу, не дожидаясь Save
+            self.on_saved(self.cfg)
+
+    def _spansh_failed(self, error: str) -> None:
+        self._spansh_busy = False
+        self.spansh_update_button.configure(state="normal")
+        self.spansh_status.configure(text=t("set.spansh_error", error=str(error)[:200]))
+
+    def _ui(self, callback) -> None:
+        """Выполнить что-то в потоке Tk (из фонового потока импорта)."""
+        try:
+            self.win.after(0, callback)
+        except tk.TclError:
+            pass
 
     def _check_updates(self) -> None:
         mode = self.update_check.get()
@@ -809,6 +935,8 @@ class SettingsDialog:
         self.cfg.remote_enabled = bool(self.remote_enabled.get())
         self.cfg.eddn_enabled = bool(self.eddn_enabled.get())
         self.cfg.nebulae_enabled = bool(self.nebulae_enabled.get())
+        self.cfg.spansh_db = bool(self.spansh_db.get())
+        self.cfg.spansh_dump = self.spansh_dump.get() or spanshdb.DEFAULT_DUMP
         self.cfg.click_through = bool(self.click_through.get())
         self.cfg.edsm_api_key = self.edsm_api_key.get().strip()
         self.cfg.edsm_commander = self.edsm_commander.get().strip()

@@ -75,6 +75,13 @@ class RingMineralsTests(unittest.TestCase):
         self.assertTrue(mining.is_high_value("Void Opals"))
         self.assertFalse(mining.is_high_value("Water"))
 
+    def test_canonical_mineral_names(self):
+        self.assertEqual(mining.canonical_mineral("tritium"), "Tritium")
+        self.assertEqual(mining.canonical_mineral("lowtemperaturediamonds"), "Low Temperature Diamonds")
+        self.assertEqual(mining.canonical_mineral("Alexandrite"), "Alexandrite")
+        self.assertEqual(mining.canonical_mineral("iron"), "Iron")
+        self.assertEqual(mining.canonical_mineral(None), "")
+
     def test_unknown_ring_type_gives_nothing(self):
         self.assertEqual(mining.ring_minerals(["eRingClass_BeltCluster"]), {"core": [], "laser": []})
 

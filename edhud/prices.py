@@ -45,6 +45,8 @@ class Quote:
     system: str
     price: int
     updated: float = 0.0
+    # координаты системы станции (StarPos) — чтобы считать расстояние сбыта
+    coords: tuple[float, float, float] | None = None
 
     def age_days(self, now: float | None = None) -> float:
         if not self.updated:
@@ -59,20 +61,25 @@ class MarketIndex:
         self.path = Path(path) if path else config.app_dir() / "prices.json"
         self.max_age_days = float(max_age_days)
         self._quotes: dict[str, Quote] = {}
+        # альтернативные станции по товару (топ до 5) — для ранга «цена × расстояние»
+        self._alts: dict[str, list[Quote]] = {}
         self._lock = threading.Lock()
         self.load()
 
     # ------------------------------------------------------------ хранилище
     def load(self) -> None:
         quotes: dict[str, Quote] = {}
+        alts: dict[str, list[Quote]] = {}
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             self._quotes = {}
+            self._alts = {}
             return
         rows = raw.get("quotes") if isinstance(raw, dict) else raw
         if not isinstance(rows, list):
             self._quotes = {}
+            self._alts = {}
             return
         for item in rows:
             if not isinstance(item, dict):
@@ -80,6 +87,14 @@ class MarketIndex:
             commodity = item.get("commodity")
             if not is_mining_commodity(commodity):
                 continue
+            coords = item.get("coords")
+            if isinstance(coords, list) and len(coords) == 3:
+                try:
+                    coords = (float(coords[0]), float(coords[1]), float(coords[2]))
+                except (TypeError, ValueError):
+                    coords = None
+            else:
+                coords = None
             try:
                 quote = Quote(
                     commodity=str(commodity),
@@ -87,20 +102,33 @@ class MarketIndex:
                     system=str(item.get("system") or ""),
                     price=int(item.get("price") or 0),
                     updated=float(item.get("updated") or 0.0),
+                    coords=coords,
                 )
             except (TypeError, ValueError):
                 continue
             if quote.price > 0:
-                quotes[quote.commodity.lower()] = quote
+                key = quote.commodity.lower()
+                best = quotes.get(key)
+                if best is None:
+                    quotes[key] = quote
+                elif quote.price > best.price:
+                    alts.setdefault(key, []).append(best)
+                    quotes[key] = quote
+                else:
+                    alts.setdefault(key, []).append(quote)
+        for key, items in alts.items():
+            items.sort(key=lambda item: -item.price)
+            del items[5:]
         self._quotes = quotes
+        self._alts = alts
 
     def save(self) -> bool:
         self.prune()
         with self._lock:
-            payload = {
-                "version": 1,
-                "quotes": [asdict(quote) for quote in self._quotes.values()],
-            }
+            rows = [asdict(quote) for quote in self._quotes.values()]
+            for items in self._alts.values():
+                rows.extend(asdict(quote) for quote in items)
+            payload = {"version": 2, "quotes": rows}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -109,8 +137,16 @@ class MarketIndex:
             return False
 
     # ------------------------------------------------------------- наполнение
-    def add(self, commodity: str, station: str, system: str, price: int, updated: float | None = None) -> bool:
-        """Добавить цену, если она лучше известной. True — индекс изменился."""
+    def add(
+        self,
+        commodity: str,
+        station: str,
+        system: str,
+        price: int,
+        updated: float | None = None,
+        coords: tuple[float, float, float] | None = None,
+    ) -> bool:
+        """Добавить цену. True — индекс изменился (новая лучшая или альтернативная станция)."""
         if not is_mining_commodity(commodity):
             return False
         price = int(price or 0)
@@ -118,21 +154,57 @@ class MarketIndex:
             return False
         key = str(commodity).lower()
         when = float(updated or time.time())
+        quote = Quote(
+            commodity=str(commodity),
+            station=str(station or ""),
+            system=str(system or ""),
+            price=price,
+            updated=when,
+            coords=coords,
+        )
         with self._lock:
             current = self._quotes.get(key)
-            if current is not None and current.price >= price and current.updated >= when:
-                return False
-            self._quotes[key] = Quote(
-                commodity=str(commodity),
-                station=str(station or ""),
-                system=str(system or ""),
-                price=price,
-                updated=when,
-            )
-            return True
+            if current is None or price > current.price or (price == current.price and when > current.updated):
+                if current is not None:
+                    self._keep_alt(key, current)
+                self._quotes[key] = quote
+                return True
+            # лучшая цена не изменилась — станция уходит в альтернативы
+            self._keep_alt(key, quote)
+            return False
 
-    def ingest_market_event(self, event: dict) -> int:
-        """Снимок рынка из журнала: {"StationName","StarSystem","Items":[...]}."""
+    def _keep_alt(self, key: str, quote: Quote) -> bool:
+        """Запомнить альтернативную станцию (до 5 на товар) — для выбора сбыта."""
+        items = self._alts.setdefault(key, [])
+        for index, old in enumerate(items):
+            if (old.station, old.system) == (quote.station, quote.system):
+                if quote.price <= old.price:
+                    return False
+                items[index] = quote
+                break
+        else:
+            items.append(quote)
+        items.sort(key=lambda item: -item.price)
+        del items[5:]
+        return True
+
+    def top(self, commodity: str, limit: int = 5) -> list[Quote]:
+        """Несколько станций для товара: лучшая и альтернативы (по цене)."""
+        key = str(commodity or "").lower()
+        with self._lock:
+            best = self._quotes.get(key)
+            rows = list(self._alts.get(key, []))
+        if best is not None:
+            rows = [best] + [row for row in rows if (row.station, row.system) != (best.station, best.system)]
+        rows.sort(key=lambda item: -item.price)
+        return rows[: max(1, int(limit))]
+
+    def ingest_market_event(self, event: dict, coords=None) -> int:
+        """Снимок рынка из журнала: {"StationName","StarSystem","Items":[...]}.
+
+        `coords` — StarPos системы станции, если известны (свой журнал): с ними
+        потом считается расстояние до станции сбыта.
+        """
         if not isinstance(event, dict):
             return 0
         station = str(event.get("StationName") or "")
@@ -153,7 +225,7 @@ class MarketIndex:
                 price = int(price or 0)
             except (TypeError, ValueError):
                 continue
-            if self.add(str(name), station, system, price, stamp):
+            if self.add(str(name), station, system, price, stamp, coords):
                 changed += 1
         return changed
 
@@ -204,6 +276,12 @@ class MarketIndex:
                 fresh = dict(keep)
             removed = len(self._quotes) - len(fresh)
             self._quotes = fresh
+            for key in list(self._alts):
+                kept = [quote for quote in self._alts[key] if quote.updated >= limit]
+                if kept:
+                    self._alts[key] = kept
+                else:
+                    del self._alts[key]
         return removed
 
     def __len__(self) -> int:
