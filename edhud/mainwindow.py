@@ -434,6 +434,8 @@ class MainWindow:
         self.apply_opacity()
         self._visible = True
         self._shown_tab = "bodies"
+        self._tab_address: int | None = None
+        self._tab_view: str | None = None
         self._ring_icon: tk.PhotoImage | None = None
         self._ui_family = "Segoe UI"
         self._ui_size = 9
@@ -1539,11 +1541,13 @@ class MainWindow:
             return
         if current == str(self.tab_route):
             self._shown_tab = "route"
+            self._tab_view = "route"
             if self._state is not None:
                 self._state.view_tab = "route"
             return
         if current == str(self.tab_bodies):
             self._shown_tab = "bodies"
+            self._tab_view = "bodies"
             if self._state is not None:
                 self._state.view_tab = "bodies"
                 self._update_header(self._state)
@@ -1560,23 +1564,23 @@ class MainWindow:
             self.mining_tab.on_show()
 
     def _apply_tab(self, state: GameState) -> None:
-        # «Пояса» и «Добыча» — ручные вкладки: игра их не переключает.
-        if self._shown_tab in ("belts", "mining"):
-            return
+        """Автопереключение Route/Bodies: срабатывает на смену системы и на смену маршрута.
+
+        Ручной выбор вкладки (например «Добыча») живёт до прыжка — после входа
+        в новую систему окно снова показывает Bodies (или Route, если проложен
+        маршрут), иначе автопереключение «залипало» навсегда.
+        """
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
-        try:
-            current = self.nb.select()
-            if current == str(self.tab_belts):
-                self._shown_tab = "belts"
-                return
-            shown = "route" if current == str(self.tab_route) else "bodies"
-        except tk.TclError:
-            shown = self._shown_tab
-        if tab == shown:
-            self._shown_tab = tab
+        address = state.system.address
+        if address == self._tab_address and tab == self._tab_view:
             return
+        self._tab_address = address
+        self._tab_view = tab
         self._shown_tab = tab
-        self.nb.select(self.tab_route if tab == "route" else self.tab_bodies)
+        try:
+            self.nb.select(self.tab_route if tab == "route" else self.tab_bodies)
+        except tk.TclError:
+            return
 
     def _update_header(self, state: GameState) -> None:
         name = state.system.name or "—"

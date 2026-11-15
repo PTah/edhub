@@ -999,6 +999,12 @@ class GameState:
     session_new_systems: int = 0
     last_jump_ts: float = 0.0
     avg_jump_sec: float = 0.0
+    # счётчики сессии для вкладки «Статистика»
+    session_distance_ly: float = 0.0
+    session_scans: int = 0
+    session_new_bodies: int = 0
+    session_mapped: int = 0
+    session_bio_analyzed: int = 0
     session_started: float = field(default_factory=time.time)
     last_event_ts: float = 0.0
     last_event: str | None = None
@@ -1135,6 +1141,7 @@ class GameState:
         self.last_jump_ts = now
         self.session_jumps += 1
         self.jump_dist = float(e.get("JumpDist") or 0.0)
+        self.session_distance_ly += self.jump_dist
         if e.get("FuelLevel") is not None:
             self.status.fuel_main = float(e.get("FuelLevel") or 0.0)
         self.current_body_id = None
@@ -1342,6 +1349,10 @@ class GameState:
         body_id = e.get("BodyID")
         if body_id is None:
             return
+        # статистика сессии: всего сканов и сколько тел никто до нас не находил
+        self.session_scans += 1
+        if e.get("WasDiscovered") is False:
+            self.session_new_bodies += 1
         body = self.system.bodies.get(body_id)
         if body is None:
             body = Body(body_id=body_id, name=e.get("BodyName") or "")
@@ -1668,6 +1679,7 @@ class GameState:
         return self._hyperspace_spool()
 
     def _on_saascancomplete(self, e: dict) -> None:
+        self.session_mapped += 1
         body = self._ensure_body(e)
         if body is None:
             return
@@ -1749,6 +1761,7 @@ class GameState:
         elif scan_type in ("analyse", "analyze"):
             organic.samples = 3
             organic.analysed = True
+            self.session_bio_analyzed += 1
             self.session_organic_estimate += organic.payout
             self._alert(t("hud.alert_done", genus=organic.genus_en))
         if lat is not None and lon is not None and scan_type in ("log", "sample"):

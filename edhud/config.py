@@ -203,6 +203,8 @@ class Config:
     locked_route: str | None = None
     # окно Route/Bodies: геометрия и ширины колонок
     main_geometry: str | None = None
+    # окно настроек: запомненные размер и положение
+    settings_geometry: str | None = None
     bodies_columns: dict[str, int] = field(default_factory=dict)
     route_columns: dict[str, int] = field(default_factory=dict)
     colors: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLORS))

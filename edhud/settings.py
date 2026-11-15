@@ -3,12 +3,13 @@
 """Окно настроек EDHUD (tkinter)."""
 from __future__ import annotations
 
+import time
 import webbrowser
 from pathlib import Path
 from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, filedialog, messagebox, ttk
 import tkinter as tk
 
-from . import __version__, config, icon
+from . import __version__, config, icon, values
 from .i18n import t
 from .mainwindow import _geometry_xy
 
@@ -49,11 +50,20 @@ def _clamp_alpha(value: float) -> float:
 class SettingsDialog:
     """Модальное окно настроек."""
 
-    def __init__(self, root: tk.Misc, cfg: config.Config, on_saved=None, on_live=None, on_check_updates=None) -> None:
+    def __init__(
+        self,
+        root: tk.Misc,
+        cfg: config.Config,
+        on_saved=None,
+        on_live=None,
+        on_check_updates=None,
+        stats=None,
+    ) -> None:
         self.cfg = cfg
         self.on_saved = on_saved
         self.on_live = on_live
         self.on_check_updates = on_check_updates
+        self.stats = stats
         self.win = tk.Toplevel(root)
         self.win.title(t("set.title"))
         icon.apply_icon(self.win)
@@ -78,7 +88,7 @@ class SettingsDialog:
         except tk.TclError:
             pass
         self.win.focus_force()
-        self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
+        self.win.protocol("WM_DELETE_WINDOW", self._close)
         self.win.after(200, self._arm_live)
 
     def _arm_live(self) -> None:
@@ -112,10 +122,23 @@ class SettingsDialog:
         return inner
 
     def _fit_to_screen(self) -> None:
-        """На 1080p и с панелью задач окно не должно уезжать кнопкой Save за край."""
+        """Размер/положение окна настроек: своё запомненное или разумный дефолт.
+
+        Раньше окно каждый раз открывалось «сжатым» по высоте и его приходилось
+        растягивать мышкой — теперь высота по умолчанию больше, а ручной размер
+        запоминается в `settings_geometry`.
+        """
+        saved = (getattr(self.cfg, "settings_geometry", None) or "").strip()
+        if saved:
+            try:
+                self.win.geometry(saved)
+                self.win.minsize(520, 380)
+                return
+            except tk.TclError:
+                pass
         self.win.update_idletasks()
-        need_w = max(self.win.winfo_reqwidth(), 560)
-        need_h = max(self.win.winfo_reqheight(), 360)
+        need_w = max(self.win.winfo_reqwidth(), 660)
+        need_h = max(self.win.winfo_reqheight(), 680)
         sw = self.win.winfo_screenwidth()
         sh = self.win.winfo_screenheight()
         # запас под панель задач / верхнюю панель / DPI
@@ -126,7 +149,25 @@ class SettingsDialog:
         x = max(0, (sw - width) // 2)
         y = max(0, (sh - height) // 4)
         self.win.geometry(f"{width}x{height}+{x}+{y}")
-        self.win.minsize(min(520, width), min(360, height))
+        self.win.minsize(min(520, width), min(380, height))
+
+    def _remember_geometry(self) -> None:
+        """Запомнить текущий размер и положение окна настроек."""
+        try:
+            geo = self.win.geometry()
+        except tk.TclError:
+            return
+        if not geo or geo == getattr(self.cfg, "settings_geometry", None):
+            return
+        self.cfg.settings_geometry = geo
+        try:
+            self.cfg.save()
+        except OSError:
+            pass
+
+    def _close(self) -> None:
+        self._remember_geometry()
+        self.win.destroy()
 
     def _build(self) -> None:
         pad = {"padx": 10, "pady": 4}
@@ -141,24 +182,100 @@ class SettingsDialog:
         general_tab = ttk.Frame(nb)
         windows_tab = ttk.Frame(nb)
         look_tab = ttk.Frame(nb)
+        stats_tab = ttk.Frame(nb)
         nb.add(general_tab, text=t("set.tab_general"))
         nb.add(windows_tab, text=t("set.tab_windows"))
         nb.add(look_tab, text=t("set.tab_look"))
+        nb.add(stats_tab, text=t("set.tab_stats"))
         general = self._scrollable(general_tab)
         windows = self._scrollable(windows_tab)
         look = self._scrollable(look_tab)
         self._build_general(general, pad)
         self._build_windows(windows, pad)
         self._build_look(look)
+        self._build_stats(stats_tab)
         btns = ttk.Frame(outer)
         btns.grid(row=1, column=0, sticky="ew", pady=(8, 4))
-        ttk.Button(btns, text=t("set.cancel"), command=self.win.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text=t("set.cancel"), command=self._close).pack(side="right", padx=4)
         self._save_btn = ttk.Button(btns, text=t("set.save"), command=self._save)
         self._save_btn.pack(side="right", padx=4)
         self._fit_to_screen()
 
-    def _build_general(self, frm: ttk.Frame, pad: dict) -> None:
+    def _build_stats(self, frm: ttk.Frame) -> None:
+        """Статистика: одна строка на вход в игру + итоги по всем сессиям."""
+        top = ttk.Frame(frm, padding=(8, 8, 8, 0))
+        top.pack(fill="x")
+        self._stats_total = ttk.Label(top, text=t("set.stats_empty"), justify="left")
+        self._stats_total.pack(anchor="w")
+        ttk.Label(top, text=t("set.stats_hint"), foreground="#888").pack(anchor="w", pady=(2, 6))
 
+        columns = (
+            ("when", t("set.stats_when"), 110, "w"),
+            ("hours", t("set.stats_hours"), 60, "e"),
+            ("jumps", t("set.stats_jumps"), 60, "e"),
+            ("ly", t("set.stats_ly"), 80, "e"),
+            ("new_systems", t("set.stats_new_systems"), 70, "e"),
+            ("new_bodies", t("set.stats_new_bodies"), 70, "e"),
+            ("scans", t("set.stats_scans"), 60, "e"),
+            ("dss", t("set.stats_dss"), 60, "e"),
+            ("bio", t("set.stats_bio"), 60, "e"),
+            ("sold", t("set.stats_sold"), 110, "e"),
+        )
+        host = ttk.Frame(frm, padding=(8, 0, 8, 8))
+        host.pack(fill="both", expand=True)
+        tree = ttk.Treeview(host, columns=[col[0] for col in columns], show="headings", height=10)
+        for key, title, width, anchor in columns:
+            tree.heading(key, text=title)
+            tree.column(key, width=width, anchor=anchor, stretch=(key == "sold"))
+        scroll = ttk.Scrollbar(host, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self._stats_tree = tree
+        self._fill_stats()
+
+    def _fill_stats(self) -> None:
+        tree = getattr(self, "_stats_tree", None)
+        label = getattr(self, "_stats_total", None)
+        if tree is None or label is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        if self.stats is None:
+            return
+        total = self.stats.totals()
+        label.configure(
+            text=t(
+                "set.stats_total",
+                sessions=total["sessions"],
+                hours=f"{total['hours']:.1f}",
+                jumps=total["jumps"],
+                ly=f"{total['distance_ly']:.0f}",
+                new_systems=total["new_systems"],
+                new_bodies=total["new_bodies"],
+                bio=total["bio_analyzed"],
+                sold=values.credits(total["bio_sold_cr"] + total["sold_cr"]),
+            )
+        )
+        for item in self.stats.recent(60):
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    time.strftime("%d.%m %H:%M", time.localtime(item.started)),
+                    f"{item.duration_sec / 3600:.1f}",
+                    item.jumps,
+                    f"{item.distance_ly:.0f}",
+                    item.new_systems,
+                    item.new_bodies,
+                    item.scans,
+                    item.mapped,
+                    item.bio_analyzed,
+                    values.credits(item.bio_sold_cr + item.sold_cr),
+                ),
+            )
+
+    def _build_general(self, frm: ttk.Frame, pad: dict) -> None:
         self.journal_dir = StringVar(value=self.cfg.journal_dir or "")
         self.width = IntVar(value=int(self.cfg.width))
         self.allow_network = BooleanVar(value=bool(self.cfg.allow_network))
@@ -730,4 +847,5 @@ class SettingsDialog:
             return
         if self.on_saved:
             self.on_saved(self.cfg)
+        self._remember_geometry()
         self.win.destroy()

@@ -42,13 +42,19 @@
   ПКМ по полоске. Окно удерживается поверх всех каждые 2 секунды,
   DPI-awareness (Per-Monitor v2), не забирает фокус у игры.
 * **Настройки** (трей → Настройки): каталог журналов, сеть, EDSM/Spansh/EDDN,
-  необязательные EDSM и INARA API key, голос, прозрачность/ширина оверлея. Файл:
-  `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
+  необязательные EDSM и INARA API key, голос, прозрачность/ширина оверлея,
+  **вкладка «Статистика»** — по каждому входу в игру (файл журнала) и суммарная:
+  прыжки, ly, новые системы и тела, сканы, DSS, био-анализы, продано кредитов.
+  Размер и положение окна настроек запоминаются (`settings_geometry`). Файл:
+  `%LOCALAPPDATA%\EliteDangerousHUD\config.json`; история сессий — `stats.json`.
   Там же `edhud.log` — строки о старте (система, тела, файл журнала) и ошибки
   чтения событий: если система «застряла», причина видна в этом файле.
 * **Окно EDHUD** (трей → «Окно EDHUD»): вкладки Route, Bodies, Пояса и Добыча —
   список тел системы (тип, атмосфера, био/гео, DSS, оценка Cr, первооткрытие,
   дистанция).
+  Автопереключение: при зарядке прыжка открывается Route, после входа в систему —
+  Bodies. Вручную выбранная вкладка («Добыча», «Пояса») не отбирается, но прыжок
+  в новую систему возвращает окно на Bodies/Route.
   Своё открытие помечается золотым «Ваше открытие (<CMDR>)», чужое — именем
   командира из EDSM. Оверлей сверху экрана при этом остаётся.
 * **Добыча** (вкладка «Добыча»): где копать — точки добычи на поверхности
@@ -150,7 +156,9 @@ python run.py eddn --system "Sol"  :: только сообщения по си�
 * Linux/Proton: `…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`
 
 Настройки: `config.json` (Windows `%LOCALAPPDATA%\EliteDangerousHUD`), там же кэш
-систем (`systems/`), ответы EDSM/Spansh (`remote/`) и залоченный маршрут.
+систем (`systems/`), ответы EDSM/Spansh (`remote/`), база хотспотов колец
+(`hotspots.json`), поясов (`belts.json`), статистика сессий (`stats.json`)
+и залоченный маршрут.
 
 ### Эксклюзивный fullscreen
 
@@ -317,8 +325,9 @@ PING/PONG): EDDN отдаёт zlib-сжатый JSON, поэтому pyzmq не 
 ## Тесты и разработка
 
 ```bash
-python -m unittest discover -s tests     # 234 теста: критерии, регионы, стоимость,
-                                         # EDSM/Spansh, EDDN/ZMTP, Legacy, хотспоты, конвейер
+python -m unittest discover -s tests     # 242 теста: критерии, регионы, стоимость,
+                                         # EDSM/Spansh, EDDN/ZMTP, Legacy, хотспоты,
+                                         # статистика сессий, вкладки
 python tools/inspect_bio.py              # свойства тела и предсказания по журналу
 python tools/inspect_remote.py "HIP 36601"  # предсказания по чужим данным
 python tools/debug_bio.py Bacterium      # трассировка критериев
@@ -352,7 +361,7 @@ python tools/make_icon.py                # data/edhud.ico и .png из data/edhu
   трея. API: догрузка тел и Galaxy Plotter (`python run.py plot A B`). Ключ EDSM
   для чтения тел **не нужен** (поле в настройках — для личных API EDSM).
 * Вкладки Surroundings / History (как в EDEB) пока нет — Route, Bodies, Пояса и
-  Добыча.
+  Добыча. Статистика — в настройках, отдельной вкладкой окна.
 * **Состав колец по чужим данным недоступен**: в `bodies/search` у Spansh и в
   `api-system-v1/bodies` у EDSM кольцо — это только тип/масса/радиус, хотспотов
   там нет (проверено запросами; фильтры по ним Spansh игнорирует). Поэтому

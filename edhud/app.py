@@ -22,6 +22,7 @@ from .model import GameState
 from .route import Route
 from .belts import BeltStore
 from .hotspots import HotspotStore
+from .stats import StatsStore
 from .store import SystemStore
 from .tui import run_tui
 from .i18n import t
@@ -63,6 +64,7 @@ class App:
         self.store = SystemStore()
         self.belt_store = BeltStore()
         self.hotspot_store = HotspotStore()
+        self.stats = StatsStore()
         self.prices = prices.MarketIndex()
         self.price_feed: prices.PriceFeed | None = None
         self.remote_client = self._make_remote_client()
@@ -288,6 +290,8 @@ class App:
             self.collect_eddn()
             # кольца, которые просканировали, — в свою базу хотспотов
             self.hotspot_store.harvest(self.state)
+            # статистика сессии (по файлу журнала) — раз в полминуты на диск
+            self.stats.note(self.watcher.current_file if self.watcher else None, self.state)
             self._lookup_carrier_pos()
             self._lookup_route_discoverers()
             self.autosave()
@@ -749,6 +753,7 @@ class App:
             on_saved=on_saved,
             on_live=self._apply_window_layout,
             on_check_updates=lambda parent: self.check_updates(interactive=True, parent=parent),
+            stats=self.stats,
         )
         dlg.win.bind("<Destroy>", lambda e: on_close() if e.widget is dlg.win else None)
 
@@ -1035,6 +1040,8 @@ class App:
                 pass
         if self.state.system.address and self.state.system.bodies:
             self.store.save(self.state.system)
+        # последний снимок статистики сессии
+        self.stats.note(self.watcher.current_file if self.watcher else None, self.state, save_interval=0)
         try:
             self.cfg.save()
         except OSError:

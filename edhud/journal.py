@@ -74,6 +74,11 @@ class JournalWatcher(threading.Thread):
         """True, пока идёт первичный replay журнала — на диск писать рано."""
         return bool(self._catchup_pending)
 
+    @property
+    def current_file(self) -> str | None:
+        """Имя текущего файла журнала — ключ сессии для статистики."""
+        return self._file.name if self._file else None
+
     def stop(self) -> None:
         self._stop.set()
 
