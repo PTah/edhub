@@ -297,6 +297,8 @@ class App:
                 self.overlay.set_view(view)
                 self.overlay.set_bio(hudmodel.build_bio_board(self.state))
                 self.overlay.set_planet_dim(self.state.in_atmosphere)
+                # на станции/авианосце HUD и био-панель не мешают
+                self.overlay.set_docked(self.state.status.docked)
             if self.mainwindow is not None:
                 self.mainwindow.update_state(self.state)
         except Exception:

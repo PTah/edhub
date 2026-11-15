@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:05
 # Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:07
+# Edited by nc.ai 1.2.15 on Papasha 2026-11-15 15:27:11
 """Оверлей в верхней части экрана (стиль SrvSurvey) на tkinter.
 
 Свойства, которые нам нужны от окна:
@@ -67,6 +68,7 @@ class Overlay:
         self._keeper: winapi.TopmostKeeper | None = None
         self._menu = None
         self._planet_dim = False
+        self._docked = False
         self._carrier_hit: tuple[int, int, int, int] | None = None
         self._copy_hits: list[tuple[int, int, int, int, str]] = []
 
@@ -90,13 +92,26 @@ class Overlay:
         """Обычная прозрачность из настроек; в атмосфере — сильно приглушаем верхний HUD."""
         try:
             base = max(0.25, min(1.0, float(self.cfg.opacity)))
-            if self._planet_dim:
+            if self._docked:
+                # на станции/авианосце верхняя панель не нужна совсем
+                alpha = 0.0
+            elif self._planet_dim:
                 alpha = max(0.12, min(0.28, base * 0.28))
             else:
                 alpha = base
             self.root.attributes("-alpha", alpha)
         except Exception:
             pass
+
+    def set_docked(self, docked: bool) -> None:
+        """Сели на станцию или авианосец — HUD и био-панель полностью прозрачны."""
+        want = bool(docked)
+        if want == self._docked:
+            return
+        self._docked = want
+        self.apply_opacity()
+        if getattr(self, "bio", None) is not None:
+            self.bio.set_parent_visible(self._visible and not want)
 
     def set_planet_dim(self, dim: bool) -> None:
         want = bool(dim)
@@ -567,7 +582,7 @@ class Overlay:
         else:
             self.root.withdraw()
         if getattr(self, "bio", None) is not None:
-            self.bio.set_parent_visible(self._visible)
+            self.bio.set_parent_visible(self._visible and not self._docked)
 
     def copy_to_clipboard(self, text: str) -> None:
         try:

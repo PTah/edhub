@@ -2153,6 +2153,64 @@ class BioBoardTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_docked_makes_hud_and_bio_fully_transparent(self):
+        """Сели на станцию/авианосец — HUD alpha 0.0, био-панель скрыта."""
+        from types import SimpleNamespace
+
+        from edhud.config import Config
+        from edhud.overlay import Overlay
+
+        class FakeRoot:
+            def __init__(self):
+                self.alpha = None
+
+            def attributes(self, _name, value=None):
+                if value is not None:
+                    self.alpha = value
+                return self.alpha
+
+        class FakeBio:
+            def __init__(self):
+                self._parent_visible = True
+
+            def set_parent_visible(self, visible):
+                self._parent_visible = visible
+
+        cfg = Config()
+        overlay = SimpleNamespace(
+            root=FakeRoot(),
+            bio=FakeBio(),
+            cfg=cfg,
+            _docked=False,
+            _planet_dim=False,
+            _visible=True,
+        )
+        overlay.apply_opacity = lambda: Overlay.apply_opacity(overlay)
+        overlay.set_planet_dim = lambda dim: Overlay.set_planet_dim(overlay, dim)
+
+        Overlay.apply_opacity(overlay)
+        self.assertAlmostEqual(float(overlay.root.alpha), float(cfg.opacity))
+
+        Overlay.set_docked(overlay, True)
+        self.assertEqual(float(overlay.root.alpha), 0.0)
+        self.assertFalse(overlay.bio._parent_visible)
+
+        # посадка в атмосфере не должна вернуть панель: приоритет у доку
+        Overlay.set_planet_dim(overlay, True)
+        self.assertEqual(float(overlay.root.alpha), 0.0)
+        self.assertFalse(overlay.bio._parent_visible)
+
+        Overlay.set_docked(overlay, False)
+        self.assertGreater(float(overlay.root.alpha), 0.0)
+        self.assertTrue(overlay.bio._parent_visible)
+
+    def test_status_flag_docked_is_recognised(self):
+        state = GameState()
+        state.status.update({"Flags": 1 << 0})
+        self.assertTrue(state.status.docked)
+        state.status.update({"Flags": 0})
+        self.assertFalse(state.status.docked)
+
     def test_panel_width_ignores_long_radar_title(self):
         """Длинный radar_empty не должен раздувать панель вдвое (номад/SRV)."""
         import tkinter as tk
