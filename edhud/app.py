@@ -30,6 +30,7 @@ from .i18n import t
 from .voice import Voice
 
 SAVE_INTERVAL = 20.0
+GAME_ALIVE_SEC = 180.0  # Status.json пишется каждую секунду, пока игра запущена
 
 
 def _system_discoverer_from_remote(result) -> str | None:
@@ -312,8 +313,8 @@ class App:
                 self.overlay.set_planet_dim(self.state.in_atmosphere)
                 # на станции/авианосце HUD и био-панель не мешают
                 self.overlay.set_docked(self.state.status.docked)
-                # вне игры (не запущена / главное меню) — панели прячем
-                self.overlay.set_in_game(self.state.in_game)
+                # вне игры (не запущена / главное меню) — панели прячем целиком
+                self.overlay.set_in_game(self.state.in_game and self._game_alive())
                 # на поверхности планеты/пешком верхний дашборд приглушаем
                 self.overlay.set_grounded(self.state.grounded)
                 # открыто меню игры (карта, Carrier Management) — панели почти невидимы
@@ -488,6 +489,20 @@ class App:
                 self._remote_results.put(result)
 
         threading.Thread(target=work, name="edhud-remote", daemon=True).start()
+
+    def _game_alive(self) -> bool:
+        """Игра действительно запущена: Status.json обновляется каждую секунду.
+
+        Журнал заканчивается `Shutdown` только при аккуратном выходе, поэтому
+        `game_running` из одного журнала врёт; свежесть Status.json — надёжнее.
+        """
+        if self.demo_speed is not None:
+            return True
+        watcher = getattr(self, "watcher", None)
+        mtime = watcher.status_mtime if watcher is not None else 0.0
+        if not mtime:
+            return False
+        return (time.time() - mtime) < GAME_ALIVE_SEC
 
     def collect_remote(self) -> None:
         while True:

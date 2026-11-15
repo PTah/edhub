@@ -75,6 +75,11 @@ class JournalWatcher(threading.Thread):
         return bool(self._catchup_pending)
 
     @property
+    def status_mtime(self) -> float:
+        """mtime Status.json: игра пишет его каждую секунду, пока запущена."""
+        return float(getattr(self, "_status_mtime", 0.0))
+
+    @property
     def current_file(self) -> str | None:
         """Имя текущего файла журнала — ключ сессии для статистики."""
         return self._file.name if self._file else None

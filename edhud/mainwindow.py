@@ -425,7 +425,7 @@ class MainWindow:
         self._carrier_system: str | None = None
         self._system_name: str | None = None
         self.win = tk.Toplevel(root)
-        self.win.title("EDHUD")
+        self.win.title(t("win.title"))
         icon.apply_icon(self.win)
         geometry = getattr(cfg, "main_geometry", None) if cfg is not None else None
         self.win.geometry(geometry or "980x520")

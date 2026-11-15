@@ -83,7 +83,8 @@ class Overlay:
         self._menu = None
         self._planet_dim = False
         self._menu_dim = False
-        self._in_game = False
+        # None — состояние ещё неизвестно: первый set_in_game обязан примениться
+        self._in_game = None
         self._grounded = False
         self._docked = False
         self._carrier_hit: tuple[int, int, int, int] | None = None
@@ -129,7 +130,7 @@ class Overlay:
     def set_in_game(self, in_game: bool) -> None:
         """Панели показываем только когда игра запущена и мы не в главном меню."""
         want = bool(in_game)
-        if want == getattr(self, "_in_game", True):
+        if want == getattr(self, "_in_game", None):
             return
         self._in_game = want
         self.apply_opacity()

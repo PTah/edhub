@@ -128,6 +128,24 @@ class OverlayVisibilityTests(unittest.TestCase):
         Overlay.set_grounded(overlay, False)
         self.assertAlmostEqual(overlay.root.alpha, float(overlay.cfg.opacity))
 
+    def test_first_call_hides_everything(self):
+        """На старте состояние неизвестно — первый set_in_game обязан примениться."""
+        overlay = self.make()
+        overlay._in_game = None
+        self.assertTrue(overlay.bio._parent_visible)
+        Overlay.set_in_game(overlay, False)
+        self.assertEqual(overlay.root.alpha, 0.0)
+        self.assertFalse(overlay.bio._parent_visible)
+
+
+class StatusFreshnessTests(unittest.TestCase):
+    def test_status_mtime_is_exposed(self):
+        from edhud.journal import JournalWatcher
+
+        watcher = JournalWatcher.__new__(JournalWatcher)  # без запуска потока
+        watcher._status_mtime = 123.0
+        self.assertEqual(watcher.status_mtime, 123.0)
+
 
 if __name__ == "__main__":
     unittest.main()
