@@ -18,7 +18,9 @@ import webbrowser
 
 from . import icon, winapi
 from .biooverlay import BioPanel
+from .config import MENU_ALPHA
 from .hudmodel import BioBoard, HudView
+from .model import menu_open
 
 PAD = 12
 BAR_H = 4
@@ -68,6 +70,7 @@ class Overlay:
         self._keeper: winapi.TopmostKeeper | None = None
         self._menu = None
         self._planet_dim = False
+        self._menu_dim = False
         self._docked = False
         self._carrier_hit: tuple[int, int, int, int] | None = None
         self._copy_hits: list[tuple[int, int, int, int, str]] = []
@@ -89,12 +92,15 @@ class Overlay:
         self._start_keeper()
 
     def apply_opacity(self) -> None:
-        """Обычная прозрачность из настроек; в атмосфере — сильно приглушаем верхний HUD."""
+        """Обычная прозрачность из настроек; в атмосфере и под меню игры — сильно приглушаем."""
         try:
             base = max(0.25, min(1.0, float(self.cfg.opacity)))
             if self._docked:
                 # на станции/авианосце верхняя панель не нужна совсем
                 alpha = 0.0
+            elif getattr(self, "_menu_dim", False):
+                # открыта карта / сервисы станции / управление авианосцем — не заслоняем
+                alpha = min(base, MENU_ALPHA)
             elif self._planet_dim:
                 alpha = max(0.12, min(0.28, base * 0.28))
             else:
@@ -102,6 +108,16 @@ class Overlay:
             self.root.attributes("-alpha", alpha)
         except Exception:
             pass
+
+    def set_gui_focus(self, gui_focus: int | None) -> None:
+        """В игре открыли меню (в т.ч. Carrier Management) — панели почти прозрачны."""
+        want = menu_open(gui_focus)
+        if want == self._menu_dim:
+            return
+        self._menu_dim = want
+        self.apply_opacity()
+        if getattr(self, "bio", None) is not None:
+            self.bio.set_dim(want)
 
     def set_docked(self, docked: bool) -> None:
         """Сели на станцию или авианосец — HUD и био-панель полностью прозрачны."""

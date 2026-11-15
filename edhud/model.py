@@ -148,6 +148,19 @@ GUI_FOCUS = {
     11: "Codex",
 }
 
+# Меню игры, при которых наши панели не должны закрывать экран. FSS (9) и
+# DSS/SAA (10) — исключение: там карточка био и радар как раз нужны.
+GUI_FOCUS_KEEP = (0, 9, 10)
+
+
+def menu_open(gui_focus: int | None) -> bool:
+    """True — в игре открыто меню/панель: карта, сервисы станции, управление авианосцем."""
+    try:
+        focus = int(gui_focus or 0)
+    except (TypeError, ValueError):
+        return False
+    return focus not in GUI_FOCUS_KEEP
+
 
 def surface_distance(lat1: float, lon1: float, lat2: float, lon2: float, radius: float) -> float:
     """Расстояние по поверхности сферы (метры) — гаверсинус."""

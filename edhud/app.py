@@ -299,6 +299,8 @@ class App:
                 self.overlay.set_planet_dim(self.state.in_atmosphere)
                 # на станции/авианосце HUD и био-панель не мешают
                 self.overlay.set_docked(self.state.status.docked)
+                # открыто меню игры (карта, Carrier Management) — панели почти невидимы
+                self.overlay.set_gui_focus(self.state.status.gui_focus)
             if self.mainwindow is not None:
                 self.mainwindow.update_state(self.state)
         except Exception:

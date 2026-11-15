@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 
 from . import winapi
+from .config import MENU_ALPHA
 from .hudmodel import BioBoard, BioLine
 from .i18n import t
 from .model import RadarBlip, RadarView
@@ -39,6 +40,7 @@ class BioPanel:
         self._fonts: dict[tuple[int, bool], object] = {}
         self._signature: tuple | None = None
         self._mapped = False
+        self._dim = False
 
         self.win = tk.Toplevel(root)
         self.win.title("EDHUD bio")
@@ -63,7 +65,19 @@ class BioPanel:
         alpha = getattr(self.cfg, "bio_opacity", None)
         if alpha is None:
             alpha = self.cfg.opacity
-        self.set_alpha(max(0.25, min(1.0, float(alpha))))
+        alpha = max(0.25, min(1.0, float(alpha)))
+        if self._dim:
+            # открыто меню игры — панель почти невидима, чтобы не мешать карте
+            alpha = min(alpha, MENU_ALPHA)
+        self.set_alpha(alpha)
+
+    def set_dim(self, dim: bool) -> None:
+        """Меню игры открыто/закрыто: держим панель максимально прозрачной."""
+        want = bool(dim)
+        if want == self._dim:
+            return
+        self._dim = want
+        self.apply_opacity()
 
     def set_alpha(self, alpha: float) -> None:
         try:
