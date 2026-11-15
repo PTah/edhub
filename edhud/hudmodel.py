@@ -862,6 +862,26 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
     return lines, (low, high)
 
 
+def _ff_segment(body: Body) -> Segment | None:
+    """Метка первого шага: «FF+» свободен, «FF» уже кто-то ступал (WasFootfalled).
+
+    Бонус за первый шаг входит в «с первым шагом» внизу панели, но по одной
+    планете не видно, свободен ли он: метка отвечает на этот вопрос сразу.
+    """
+    if body.was_footfalled:
+        return Segment(t("hud.ff_taken"), "muted")
+    if getattr(body, "landable", False):
+        return Segment(t("hud.ff_free"), "ok")
+    return None
+
+
+def _ff_legend(bodies) -> tuple[str, str] | None:
+    """Сноска к меткам первого шага — только если метки вообще есть."""
+    if not any(getattr(body, "landable", False) for body in bodies or []):
+        return None
+    return (t("hud.ff_legend"), "dim")
+
+
 def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tuple[int, int]]:
     """Сводка по системе: на каждый сигнал — своя цена, под ними итог планеты."""
     lines: list[BioLine] = []
@@ -884,12 +904,17 @@ def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tup
         highlight = _marked(body, state)
         style = "muted" if done else ("accent" if highlight else "text")
         # шапка планеты: имя, число сигналов и расстояние — цена ушла к сигналам
+        header_segments = [
+            Segment(_short_body(body, state.system), style),
+            Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
+        ]
+        ff_segment = _ff_segment(body)
+        if ff_segment is not None:
+            header_segments.append(Segment("  ", "dim"))
+            header_segments.append(ff_segment)
         lines.append(
             BioLine(
-                segments=[
-                    Segment(_short_body(body, state.system), style),
-                    Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
-                ],
+                segments=header_segments,
                 tail=[Segment(_ls(body.distance_ls), "dim")],
                 rule=body_index > 0,
             )
@@ -967,18 +992,29 @@ def build_bio_board(state: GameState) -> BioBoard | None:
         ff_high = high * FIRST_LOGGED_MULTIPLIER if bonus else high
         count = focus.bio_signals or 0
         title = t("hud.body_bio", name=_short_body(focus, state.system), n=count)
+        ff_segment = _ff_segment(focus)
+        if ff_segment is not None:
+            title = f"{title}  {ff_segment.text}"
+        footers = _footers(low, high, ff_low, ff_high, bonus)
+        legend = _ff_legend([focus])
+        if legend is not None:
+            footers = footers + [legend]
         return BioBoard(
             title=title,
             lines=lines,
-            footers=_footers(low, high, ff_low, ff_high, bonus),
+            footers=footers,
             radar=radar,
         )
     lines, (low, high), (ff_low, ff_high) = _system_lines(state)
     total = sum(body.bio_signals or 0 for body in bodies)
     bonus = any(body.landable and not body.was_footfalled for body in bodies)
+    footers = _footers(low, high, ff_low, ff_high, bonus)
+    legend = _ff_legend(bodies)
+    if legend is not None:
+        footers = footers + [legend]
     return BioBoard(
         title=t("hud.bio_title", n=total),
         lines=lines,
-        footers=_footers(low, high, ff_low, ff_high, bonus),
+        footers=footers,
         radar=radar,
     )

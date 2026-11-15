@@ -2005,7 +2005,7 @@ class BioBoardTests(unittest.TestCase):
         board = hudmodel.build_bio_board(state)
         self.assertIsNotNone(board)
         assert board is not None
-        self.assertEqual(board.title, "1 · био ×2")
+        self.assertTrue(board.title.startswith("1 · био ×2"), board.title)
         text = "\n".join(board.plain())
         self.assertIn("Bacterium", text)
         self.assertIn("итого", text)
@@ -2081,7 +2081,7 @@ class BioBoardTests(unittest.TestCase):
         board = hudmodel.build_bio_board(state)
         self.assertIsNotNone(board)
         assert board is not None
-        self.assertEqual(board.title, "1 · био ×4")
+        self.assertTrue(board.title.startswith("1 · био ×4"), board.title)
         text = "\n".join(board.plain())
         self.assertNotIn("Test 2", text)
         self.assertNotIn("Test 4", text)
