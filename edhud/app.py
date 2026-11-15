@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import canonn, demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, remote, spansh, tray
+from . import canonn, demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, prices, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -61,6 +61,8 @@ class App:
         self.state = GameState()
         self.store = SystemStore()
         self.belt_store = BeltStore()
+        self.prices = prices.MarketIndex()
+        self.price_feed: prices.PriceFeed | None = None
         self.remote_client = self._make_remote_client()
         self.watcher: JournalWatcher | None = None
         self.overlay = None
@@ -150,6 +152,17 @@ class App:
             self.voice.start()
         self._warm_nebulae()
         self._start_eddn()
+        self._start_price_feed()
+
+    def _start_price_feed(self) -> None:
+        """Индекс цен на добычу: поток EDDN commodity (журнал Market — по событию)."""
+        if not (getattr(self.cfg, "prices_eddn", True) and self.cfg.allow_network):
+            return
+        try:
+            self.price_feed = prices.PriceFeed(self.prices)
+            self.price_feed.start()
+        except Exception:  # noqa: BLE001 — без цен программа работать обязана
+            self.price_feed = None
 
     def _start_eddn(self) -> None:
         """Подписка на живой EDDN (нужен только текущий прыжок/система)."""
@@ -226,6 +239,9 @@ class App:
         self.edsm.note(event, self.state)
         self.eddn_upload.note(event, self.state)
         self.inara.note(event, self.state)
+        if event.get("event") == "Market":
+            if self.prices.ingest_market_event(event):
+                self.prices.save()
         if event.get("event") in ("FSDJump", "Location", "CarrierJump"):
             self._load_canonn(event.get("StarSystem") or self.state.system.name)
 
@@ -534,6 +550,7 @@ class App:
             self.overlay.root,
             cfg=self.cfg,
             belt_store=self.belt_store,
+            price_index=self.prices,
             on_copy_system=self.copy_system_name,
             on_copy_carrier=self.copy_system_name,
             on_plot_to_carrier=self.plot_route_to_carrier,
@@ -995,6 +1012,8 @@ class App:
             self.demo_player.stop()
         if self.eddn is not None:
             self.eddn.stop()
+        if self.price_feed is not None:
+            self.price_feed.stop()
         if self.hotkeys is not None:
             self.hotkeys.stop()
         if self.tray is not None:

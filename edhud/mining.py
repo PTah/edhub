@@ -1,3 +1,4 @@
+# Edited by nc.ai 1.2.15 on Papasha 2026-11-15 12:11:56
 """Hotspot-минералы колец: средние рыночные цены и сортировка.
 
 Цены — ориентир galactic average (Inara / mining-гайды, ~2025), не live-рынок.
@@ -88,3 +89,108 @@ def format_hotspots_tip(hotspots: dict[str, int] | None) -> str | None:
         else:
             lines.append(f"• {label}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- планеты
+# Сырьё, которое копают на поверхности: имя → грейд (1 частое … 4 редкое).
+# Грейды по инженерке Elite; нужны, чтобы отделить «металлолом» от Rare.
+RAW_MATERIAL_GRADE: dict[str, int] = {
+    "Iron": 1,
+    "Nickel": 1,
+    "Sulphur": 1,
+    "Carbon": 1,
+    "Phosphorus": 1,
+    "Chromium": 1,
+    "Manganese": 1,
+    "Zinc": 1,
+    "Vanadium": 2,
+    "Germanium": 2,
+    "Cadmium": 2,
+    "Niobium": 2,
+    "Molybdenum": 2,
+    "Tin": 2,
+    "Tungsten": 2,
+    "Arsenic": 2,
+    "Selenium": 3,
+    "Mercury": 3,
+    "Tellurium": 3,
+    "Zirconium": 3,
+    "Antimony": 4,
+    "Polonium": 4,
+    "Ruthenium": 4,
+    "Technetium": 4,
+    "Yttrium": 4,
+}
+
+# Сигналы, которыми игра помечает «на этом теле есть что копать».
+SURFACE_SITE_SIGNALS = ("Planetary Mining Location", "Geological")
+BIO_SITE_SIGNAL = "Biological"
+
+
+def material_grade(name: str | None) -> int:
+    """Грейд сырья; 0 для неизвестного."""
+    if not name:
+        return 0
+    direct = RAW_MATERIAL_GRADE.get(name)
+    if direct is not None:
+        return int(direct)
+    lower = {k.lower(): v for k, v in RAW_MATERIAL_GRADE.items()}
+    return int(lower.get(str(name).lower()) or 0)
+
+
+def material_rows(
+    materials: dict[str, float] | None,
+    *,
+    min_share: float = 0.0,
+    rare_first: bool = True,
+) -> list[tuple[str, float, int]]:
+    """(имя, доля %, грейд) — редкие (грейд 4) вперёд, затем по доле."""
+    if not materials:
+        return []
+    rows = [
+        (name, float(share or 0.0), material_grade(name))
+        for name, share in materials.items()
+        if float(share or 0.0) >= float(min_share)
+    ]
+    if rare_first:
+        rows.sort(key=lambda item: (-item[2], -item[1], item[0].lower()))
+    else:
+        rows.sort(key=lambda item: (-item[1], -item[2], item[0].lower()))
+    return rows
+
+
+def format_materials(materials: dict[str, float] | None, limit: int = 4, min_share: float = 0.0) -> str:
+    """«Polonium 1.8% · Iron 23.5%» — что копать на поверхности."""
+    rows = material_rows(materials, min_share=min_share)[: max(1, int(limit))]
+    if not rows:
+        return "—"
+    return " · ".join(f"{name} {share:.1f}%" for name, share, _grade in rows)
+
+
+def has_surface_site(signals: dict[str, int] | None) -> bool:
+    """Есть ли на теле точки поверхностной добычи."""
+    if not signals:
+        return False
+    return any(name in signals for name in SURFACE_SITE_SIGNALS)
+
+
+def ring_kind(rings: list | None) -> str:
+    """«Icy», «Metallic», «Rocky · Metallic» — типы колец тела."""
+    kinds: list[str] = []
+    for ring in rings or []:
+        if isinstance(ring, dict):
+            kind = ring.get("type") or ring.get("Type")
+        else:
+            kind = getattr(ring, "type", None) or getattr(ring, "Type", None)
+        if isinstance(kind, str) and kind and kind not in kinds:
+            kinds.append(kind)
+    return " · ".join(kinds)
+
+
+def ring_revenue(hotspots: dict[str, int] | None, capacity: int) -> int:
+    """Сколько вывезет трюм, если грести самый дорогой минерал кольца."""
+    rows = sorted_hotspots(hotspots)
+    if not rows or capacity <= 0:
+        return 0
+    return int(rows[0][2]) * int(capacity)
+

@@ -409,10 +409,12 @@ class MainWindow:
         on_copy_system: Callable[[str], None] | None = None,
         on_copy_carrier: Callable[[str], None] | None = None,
         on_plot_to_carrier: Callable[[], None] | None = None,
+        price_index=None,
     ) -> None:
         self.on_close = on_close
         self.cfg = cfg
         self.belt_store = belt_store if belt_store is not None else BeltStore()
+        self.price_index = price_index
         self.on_copy_system = on_copy_system
         self.on_copy_carrier = on_copy_carrier
         self.on_plot_to_carrier = on_plot_to_carrier
@@ -537,9 +539,11 @@ class MainWindow:
         self.tab_route = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_belts = ttk.Frame(nb, style="ED.TFrame", padding=8)
+        self.tab_mining = ttk.Frame(nb, style="ED.TFrame", padding=0)
         nb.add(self.tab_route, text="Route")
         nb.add(self.tab_bodies, text="Bodies")
         nb.add(self.tab_belts, text=t("win.tab_belts"))
+        nb.add(self.tab_mining, text=t("win.tab_mining"))
         nb.select(self.tab_bodies)
 
         self.route_info = ttk.Label(self.tab_route, text=t("win.route_empty"), style="ED.TLabel")
@@ -548,8 +552,29 @@ class MainWindow:
         self._build_route_table()
         self._build_bodies_table()
         self._build_belts_tab()
+        self._build_mining_tab()
         self._bind_minerals_header_menu()
         self._refresh_belts_tab_title()
+
+    def _build_mining_tab(self) -> None:
+        """Вкладка «Добыча»: планетарные точки и кольца (см. edhud/miningui.py)."""
+        from .miningui import MiningTab
+
+        radius = 25.0
+        if self.cfg is not None:
+            radius = float(getattr(self.cfg, "mining_radius_ly", 25.0) or 25.0)
+        self.mining_tab = MiningTab(
+            self.tab_mining,
+            colors=COLORS,
+            ui_family=self._ui_family,
+            ui_size=self._ui_size,
+            price_index=self.price_index,
+            belt_store=self.belt_store,
+            on_copy_system=self._copy_belt_system,
+            on_status=lambda text: None,
+            default_radius=radius,
+        )
+        self.mining_tab.frame.pack(fill="both", expand=True)
 
     def _load_column_widths(self) -> None:
         if self.cfg is None:
@@ -1391,6 +1416,8 @@ class MainWindow:
     def update_state(self, state: GameState) -> None:
         self._state = state
         self._apply_tab(state)
+        if getattr(self, "mining_tab", None) is not None:
+            self.mining_tab.set_state(state)
         if not self._visible:
             # всё равно обновляем редко — но дешевле пропускать, если скрыто
             key = self._snapshot_key(state)
@@ -1516,10 +1543,16 @@ class MainWindow:
         if current == str(self.tab_belts):
             self._shown_tab = "belts"
             self._refresh_belts_list()
+            return
+        if current == str(self.tab_mining):
+            self._shown_tab = "mining"
+            if self._state is not None:
+                self.mining_tab.set_state(self._state)
+            self.mining_tab.on_show()
 
     def _apply_tab(self, state: GameState) -> None:
-        # Вкладку «Пояса» игра не переключает — оставляем, если пользователь там.
-        if self._shown_tab == "belts":
+        # «Пояса» и «Добыча» — ручные вкладки: игра их не переключает.
+        if self._shown_tab in ("belts", "mining"):
             return
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
         try:
