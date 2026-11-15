@@ -1442,6 +1442,11 @@ class GameState:
     def _hyperspace_jump_active(self) -> bool:
         return self.status.fsd_charging or self.status.flag(FLAG_FSD_JUMP)
 
+    @property
+    def jumping_away(self) -> bool:
+        """Зарядка FSD в другую систему (или уже прыгаем): био этой системы не нужно."""
+        return self._hyperspace_spool() or self.status.flag(FLAG_FSD_JUMP)
+
     # --- тела и биология
     def _on_scan(self, e: dict) -> None:
         body_id = e.get("BodyID")

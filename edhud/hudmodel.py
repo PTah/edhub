@@ -414,6 +414,9 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     system_bio = [
         b for b in state.system.bio_bodies if b is not body and _bio_visible_on_hud(b, cfg)
     ]
+    # стартуем прыжок в другую систему — список био по системе уже не нужен
+    if getattr(state, "jumping_away", False):
+        system_bio = []
     if system_bio:
         head = Row([Segment(t("hud.bio_in_system"), "dim")])
         head.segments.append(Segment(f"{len(system_bio)}", "ok"))

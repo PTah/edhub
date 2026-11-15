@@ -138,6 +138,58 @@ class OverlayVisibilityTests(unittest.TestCase):
         self.assertFalse(overlay.bio._parent_visible)
 
 
+class HudSystemBioTests(unittest.TestCase):
+    def make_state(self) -> GameState:
+        from edhud.model import Body
+
+        state = GameState()
+        state.apply(LOAD_GAME)
+        state.system.name = "Alpha"
+        state.system.address = 1
+        state.system.bodies[2] = Body(
+            body_id=2, name="Alpha 2", bio_signals=3, signals_known=True, signals_local=True
+        )
+        state.system.bodies[3] = Body(
+            body_id=3, name="Alpha 3", bio_signals=2, signals_known=True, signals_local=True
+        )
+        return state
+
+    def cfg(self) -> Config:
+        cfg = Config()
+        cfg.expanded = True  # блок «био в системе» живёт в подробностях
+        return cfg
+
+    def test_bio_list_visible_in_normal_flight(self):
+        from edhud import hudmodel
+
+        detail = "\n".join(row.text for row in hudmodel.build_view(self.make_state(), self.cfg()).detail)
+        self.assertIn("био в системе", detail)
+
+    def test_bio_list_hidden_when_jumping_away(self):
+        from edhud import hudmodel
+
+        state = self.make_state()
+        state.apply_status(
+            {
+                "Flags": 1 << 17,  # FSD charging
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        self.assertTrue(state.jumping_away)
+        detail = "\n".join(row.text for row in hudmodel.build_view(state, self.cfg()).detail)
+        self.assertNotIn("био в системе", detail)
+
+    def test_bio_list_returns_after_cancel(self):
+        from edhud import hudmodel
+
+        state = self.make_state()
+        state.apply_status({"Flags": 1 << 17, "Destination": {"System": 2, "Body": 0, "Name": "There"}})
+        state.apply_status({"Flags": 0})  # прыжок отменили
+        self.assertFalse(state.jumping_away)
+        detail = "\n".join(row.text for row in hudmodel.build_view(state, self.cfg()).detail)
+        self.assertIn("био в системе", detail)
+
+
 class StatusFreshnessTests(unittest.TestCase):
     def test_status_mtime_is_exposed(self):
         from edhud.journal import JournalWatcher
