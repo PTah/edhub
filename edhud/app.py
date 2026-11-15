@@ -312,6 +312,10 @@ class App:
                 self.overlay.set_planet_dim(self.state.in_atmosphere)
                 # на станции/авианосце HUD и био-панель не мешают
                 self.overlay.set_docked(self.state.status.docked)
+                # вне игры (не запущена / главное меню) — панели прячем
+                self.overlay.set_in_game(self.state.in_game)
+                # на поверхности планеты/пешком верхний дашборд приглушаем
+                self.overlay.set_grounded(self.state.grounded)
                 # открыто меню игры (карта, Carrier Management) — панели почти невидимы
                 self.overlay.set_gui_focus(self.state.status.gui_focus, self.state.music_track)
             if self.mainwindow is not None:

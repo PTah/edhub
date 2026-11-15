@@ -1102,6 +1102,25 @@ class GameState:
         if not self.mining.started:
             self.mining.started = time.time()
 
+    # ------------------------------------------------------- где мы находимся
+    @property
+    def in_game(self) -> bool:
+        """Игра запущена и идёт сессия, а не главное меню/лобби."""
+        if not self.game_running:
+            return False
+        return (self.music_track or "") != "MainMenu"
+
+    @property
+    def grounded(self) -> bool:
+        """Игрок не в космосе: на поверхности, в ТРП или пешком."""
+        status = self.status
+        return bool(status.landed or status.srv or status.on_foot)
+
+    @property
+    def in_space(self) -> bool:
+        """В игре и в космосе — только тогда верхний дашборд виден целиком."""
+        return self.in_game and not self.grounded and not self.status.docked
+
     def _on_loadgame(self, e: dict) -> None:
         self.cmdr = e.get("Commander")
         self.fid = e.get("FID")

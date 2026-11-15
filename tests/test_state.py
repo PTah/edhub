@@ -2685,10 +2685,8 @@ class SampleGuideTests(unittest.TestCase):
         self.assertTrue(state.dss_in_probe_range())
         engine = AlertEngine()
         engine.arm()
-        alerts = engine.handle_status(state)
-        self.assertEqual(len(alerts), 1)
-        self.assertIn("Тормози", alerts[0].text)
-        self.assertIn("4", alerts[0].overlay or "")
+        # голосовое «тормози — зона DSS» убрано из настроек, алертов больше нет
+        self.assertEqual(engine.handle_status(state), [])
 
     def test_dss_in_probe_range_saa_does_not_override_out_of_range(self):
         """SAA открыт, но Altitude выше лимита — Out of Range, не «Тормози»."""

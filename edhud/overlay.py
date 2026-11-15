@@ -27,6 +27,18 @@ BAR_H = 4
 CLOSE_SIZE = 18
 
 
+def sync_bio(overlay) -> None:
+    """Окно «Биосигналы»: скрыто вне игры и на станции, показано в космосе и на планете."""
+    if getattr(overlay, "bio", None) is None:
+        return
+    visible = (
+        bool(getattr(overlay, "_visible", True))
+        and bool(getattr(overlay, "_in_game", True))
+        and not bool(getattr(overlay, "_docked", False))
+    )
+    overlay.bio.set_parent_visible(visible)
+
+
 class Overlay:
     def __init__(
         self,
@@ -71,6 +83,8 @@ class Overlay:
         self._menu = None
         self._planet_dim = False
         self._menu_dim = False
+        self._in_game = False
+        self._grounded = False
         self._docked = False
         self._carrier_hit: tuple[int, int, int, int] | None = None
         self._copy_hits: list[tuple[int, int, int, int, str]] = []
@@ -92,14 +106,17 @@ class Overlay:
         self._start_keeper()
 
     def apply_opacity(self) -> None:
-        """Обычная прозрачность из настроек; в атмосфере и под меню игры — сильно приглушаем."""
+        """Обычная прозрачность из настроек; в космосе — базовая, вне его — глушим."""
         try:
             base = max(0.25, min(1.0, float(self.cfg.opacity)))
-            if self._docked:
+            if not getattr(self, "_in_game", True):
+                # игра не запущена или открыто главное меню — панели прячем
+                alpha = 0.0
+            elif self._docked:
                 # на станции/авианосце верхняя панель не нужна совсем
                 alpha = 0.0
-            elif getattr(self, "_menu_dim", False):
-                # открыта карта / сервисы станции / управление авианосцем — не заслоняем
+            elif getattr(self, "_menu_dim", False) or getattr(self, "_grounded", False):
+                # меню игры или игрок на поверхности — не заслоняем
                 alpha = min(base, MENU_ALPHA)
             elif self._planet_dim:
                 alpha = max(0.12, min(0.28, base * 0.28))
@@ -108,6 +125,26 @@ class Overlay:
             self.root.attributes("-alpha", alpha)
         except Exception:
             pass
+
+    def set_in_game(self, in_game: bool) -> None:
+        """Панели показываем только когда игра запущена и мы не в главном меню."""
+        want = bool(in_game)
+        if want == getattr(self, "_in_game", True):
+            return
+        self._in_game = want
+        self.apply_opacity()
+        sync_bio(self)
+
+    def set_grounded(self, grounded: bool) -> None:
+        """Игрок на поверхности/пешком — верхний дашборд приглушаем."""
+        want = bool(grounded)
+        if want == getattr(self, "_grounded", False):
+            return
+        self._grounded = want
+        self.apply_opacity()
+
+    def _sync_bio(self) -> None:
+        sync_bio(self)
 
     def set_gui_focus(self, gui_focus: int | None, music_track: str | None = None) -> None:
         """В игре открыли экран-меню (Carrier Management, карта) — панели почти прозрачны."""
@@ -126,8 +163,7 @@ class Overlay:
             return
         self._docked = want
         self.apply_opacity()
-        if getattr(self, "bio", None) is not None:
-            self.bio.set_parent_visible(self._visible and not want)
+        sync_bio(self)
 
     def set_planet_dim(self, dim: bool) -> None:
         want = bool(dim)
@@ -598,7 +634,7 @@ class Overlay:
         else:
             self.root.withdraw()
         if getattr(self, "bio", None) is not None:
-            self.bio.set_parent_visible(self._visible and not self._docked)
+            self._sync_bio()
 
     def copy_to_clipboard(self, text: str) -> None:
         try:

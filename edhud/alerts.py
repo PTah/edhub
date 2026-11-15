@@ -25,7 +25,7 @@ class AlertEngine:
     voice_enabled: bool = True
     voice_bio: bool = True
     voice_first_discovery: bool = True
-    voice_dss_range: bool = True
+    voice_dss_range: bool = False  # отключено: зона DSS на практике не работала
     voice_expensive_planets: bool = True
     expensive_planet_credits: int = 2_500_000
     _bio_seen: set[tuple[int, int]] = field(default_factory=set)
@@ -38,7 +38,8 @@ class AlertEngine:
         self.voice_enabled = bool(getattr(cfg, "voice_enabled", True))
         self.voice_bio = bool(getattr(cfg, "voice_bio", True))
         self.voice_first_discovery = bool(getattr(cfg, "voice_first_discovery", True))
-        self.voice_dss_range = bool(getattr(cfg, "voice_dss_range", True))
+        # «тормози — зона DSS» больше не включается: галка убрана из настроек
+        self.voice_dss_range = False
         self.voice_expensive_planets = bool(getattr(cfg, "voice_expensive_planets", True))
         try:
             self.expensive_planet_credits = max(

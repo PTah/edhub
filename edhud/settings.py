@@ -184,10 +184,12 @@ class SettingsDialog:
         windows_tab = ttk.Frame(nb)
         look_tab = ttk.Frame(nb)
         stats_tab = ttk.Frame(nb)
+        about_tab = ttk.Frame(nb)
         nb.add(general_tab, text=t("set.tab_general"))
         nb.add(windows_tab, text=t("set.tab_windows"))
         nb.add(look_tab, text=t("set.tab_look"))
         nb.add(stats_tab, text=t("set.tab_stats"))
+        nb.add(about_tab, text=t("set.tab_about"))
         general = self._scrollable(general_tab)
         windows = self._scrollable(windows_tab)
         look = self._scrollable(look_tab)
@@ -195,6 +197,7 @@ class SettingsDialog:
         self._build_windows(windows, pad)
         self._build_look(look)
         self._build_stats(stats_tab)
+        self._build_about(about_tab)
         btns = ttk.Frame(outer)
         btns.grid(row=1, column=0, sticky="ew", pady=(8, 4))
         ttk.Button(btns, text=t("set.cancel"), command=self._close).pack(side="right", padx=4)
@@ -300,7 +303,6 @@ class SettingsDialog:
         self.voice_enabled = BooleanVar(value=bool(self.cfg.voice_enabled))
         self.voice_bio = BooleanVar(value=bool(self.cfg.voice_bio))
         self.voice_first_discovery = BooleanVar(value=bool(self.cfg.voice_first_discovery))
-        self.voice_dss_range = BooleanVar(value=bool(getattr(self.cfg, "voice_dss_range", True)))
         self.voice_expensive_planets = BooleanVar(
             value=bool(getattr(self.cfg, "voice_expensive_planets", True))
         )
@@ -458,10 +460,6 @@ class SettingsDialog:
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
         ttk.Checkbutton(
-            frm, text=t("set.voice_dss"), variable=self.voice_dss_range
-        ).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Checkbutton(
             frm, text=t("set.voice_rich"), variable=self.voice_expensive_planets
         ).grid(row=row, column=0, sticky="w", **pad)
         row += 1
@@ -514,13 +512,42 @@ class SettingsDialog:
         )
         row += 1
 
+    def _build_about(self, frm: ttk.Frame) -> None:
+        """О программе: версия, ссылки, обновления (перенесено из «Окон»)."""
+        pad = {"padx": 10, "pady": 4}
+        row = 0
+        ttk.Label(frm, text="EDHUD", font=("Segoe UI", 16, "bold")).grid(
+            row=row, column=0, sticky="w", padx=10, pady=(10, 2)
+        )
+        row += 1
+        ttk.Label(frm, text=t("about.tagline"), foreground="#666", justify="left").grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
+        ttk.Label(frm, text=t("set.version", version=__version__), justify="left").grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
+        ttk.Label(frm, text=t("about.about_text"), justify="left").grid(
+            row=row, column=0, sticky="w", **pad
+        )
+        row += 1
+        links = ttk.Frame(frm)
+        links.grid(row=row, column=0, sticky="w", **pad)
+        ttk.Button(
+            links, text=t("about.releases"), command=lambda: webbrowser.open(config.RELEASES_URL)
+        ).pack(side="left")
+        ttk.Button(
+            links, text=t("about.readme"), command=lambda: webbrowser.open(config.README_URL)
+        ).pack(side="left", padx=(6, 0))
+        row += 1
+        ttk.Label(
+            frm, text=t("about.files", path=str(config.app_dir())), foreground="#666", justify="left"
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
         ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
         row += 1
         ttk.Label(frm, text=t("set.updates")).grid(row=row, column=0, sticky="w", **pad)
-        row += 1
-        ttk.Label(frm, text=t("set.version", version=__version__)).grid(
-            row=row, column=0, sticky="w", **pad
-        )
         row += 1
         ttk.Radiobutton(
             frm, text=t("set.update_auto"), value="auto", variable=self.update_check
@@ -947,7 +974,6 @@ class SettingsDialog:
         self.cfg.voice_enabled = bool(self.voice_enabled.get())
         self.cfg.voice_bio = bool(self.voice_bio.get())
         self.cfg.voice_first_discovery = bool(self.voice_first_discovery.get())
-        self.cfg.voice_dss_range = bool(self.voice_dss_range.get())
         self.cfg.voice_expensive_planets = bool(self.voice_expensive_planets.get())
         try:
             raw = self.expensive_planet_credits.get().replace(" ", "").replace(",", "")

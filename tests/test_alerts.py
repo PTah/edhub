@@ -171,7 +171,8 @@ class AlertEngineTests(unittest.TestCase):
         self.engine.voice_bio = True
         self.assertEqual(self.engine.handle(event, self.state), [])
 
-    def test_dss_range_voice(self) -> None:
+    def test_dss_range_voice_is_disabled(self) -> None:
+        """Функция «тормози — зона DSS» убрана (галка из настроек удалена)."""
         from edhud.model import Body
 
         self.engine.arm()
@@ -193,11 +194,8 @@ class AlertEngineTests(unittest.TestCase):
                 "Destination": {"System": 12345, "Body": 2, "Name": "Test System 2"},
             }
         )
-        alerts = self.engine.handle_status(self.state)
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0].kind, "dss_range")
-        self.assertEqual(alerts[0].text, "Тормози")
         self.assertEqual(self.engine.handle_status(self.state), [])
+        self.assertFalse(self.engine.voice_dss_range)
 
     def test_dss_range_voice_on_saa_without_altitude(self) -> None:
         from edhud.model import Body

@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "EDHUD"
+RELEASES_URL = "https://github.com/PTah/edhub/releases"
+README_URL = "https://github.com/PTah/edhub#readme"
 
 # Прозрачность верхнего HUD и панели био, когда в игре открыто меню (карта,
 # сервисы станции, управление авианосцем): почти невидимо, но окно живо.
@@ -196,7 +198,7 @@ class Config:
     voice_enabled: bool = True
     voice_bio: bool = True
     voice_first_discovery: bool = True
-    voice_dss_range: bool = True
+    voice_dss_range: bool = False  # функция «тормози — зона DSS» отключена (не работала)
     voice_expensive_planets: bool = True
     expensive_planet_credits: int = 2_500_000
     voice_rate: int = 0  # SAPI Rate -10..10
