@@ -176,8 +176,25 @@ class HudSystemBioTests(unittest.TestCase):
             }
         )
         self.assertTrue(state.jumping_away)
-        detail = "\n".join(row.text for row in hudmodel.build_view(state, self.cfg()).detail)
+        view = hudmodel.build_view(state, self.cfg())
+        detail = "\n".join(row.text for row in view.detail)
         self.assertNotIn("био в системе", detail)
+        # и карточка текущего тела тоже без био, пока летим в другую систему
+        self.assertNotIn("БИО", view.body_row.text.upper())
+
+    def test_bio_card_hidden_while_charging_and_back_after_cancel(self):
+        from edhud import hudmodel
+
+        state = self.make_state()
+        state.apply_status({"Flags": 1 << 17, "BodyID": 2, "Destination": {"System": 2, "Body": 0}})
+        self.assertTrue(state.jumping_away)
+        view = hudmodel.build_view(state, self.cfg())
+        self.assertNotIn("БИО", view.body_row.text.upper())
+
+        state.apply_status({"Flags": 0, "BodyID": 2})  # прыжок отменили
+        self.assertFalse(state.jumping_away)
+        view = hudmodel.build_view(state, self.cfg())
+        self.assertIn("БИО", view.body_row.text.upper())
 
     def test_bio_list_returns_after_cancel(self):
         from edhud import hudmodel

@@ -185,24 +185,27 @@ def _body_row(state: GameState, cfg) -> Row:
     if body.distance_ls:
         row.segments.append(Segment(f" · {_ls(body.distance_ls)}", "muted"))
 
-    row.segments.append(Segment(t("hud.bio"), "dim"))
-    # Чужой счётчик (EDSM/Spansh/EDDN) на HUD не показываем, пока не включена настройка.
-    # Свои сигналы журнала и таблица Bodies от этого не зависят.
-    if not _bio_visible_on_hud(body, cfg) or (body.bio_signals is None and not body.signals_known):
-        row.segments.append(Segment("?", "muted"))
-    elif not body.bio_signals:
-        row.segments.append(Segment("0", "muted"))
-    else:
-        row.segments.append(Segment(str(body.bio_signals), "ok"))
-        forecast = bio.forecast_names(body, state.system, limit=3)
-        if forecast:
-            row.segments.append(Segment(f" ({', '.join(forecast)})", "muted"))
+    # прыгаем в другую систему — био этого тела уже не нужно
+    bio_off = bool(getattr(state, "jumping_away", False))
+    if not bio_off:
+        row.segments.append(Segment(t("hud.bio"), "dim"))
+        # Чужой счётчик (EDSM/Spansh/EDDN) на HUD не показываем, пока не включена настройка.
+        # Свои сигналы журнала и таблица Bodies от этого не зависят.
+        if not _bio_visible_on_hud(body, cfg) or (body.bio_signals is None and not body.signals_known):
+            row.segments.append(Segment("?", "muted"))
+        elif not body.bio_signals:
+            row.segments.append(Segment("0", "muted"))
         else:
-            genuses = _genuses(body)
-            if genuses:
-                row.segments.append(Segment(f" ({genuses})", "muted"))
-        if body.geo_signals:
-            row.segments.append(Segment(t("hud.geo", n=body.geo_signals), "muted"))
+            row.segments.append(Segment(str(body.bio_signals), "ok"))
+            forecast = bio.forecast_names(body, state.system, limit=3)
+            if forecast:
+                row.segments.append(Segment(f" ({', '.join(forecast)})", "muted"))
+            else:
+                genuses = _genuses(body)
+                if genuses:
+                    row.segments.append(Segment(f" ({genuses})", "muted"))
+    if body.geo_signals:
+        row.segments.append(Segment(t("hud.geo", n=body.geo_signals), "muted"))
 
     if body.landable or body.bio_signals:
         row.segments.append(Segment("   DSS ", "dim"))
@@ -387,15 +390,19 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     rows: list[Row] = []
     body = state.body_for_status() or state.current_body()
     max_pred = max(1, int(cfg.max_predictions))
+    # прыгаем в другую систему — всё про био этой системы из дашборда убираем
+    bio_off = bool(getattr(state, "jumping_away", False))
 
     if body is not None:
-        rows.extend(_organism_rows(state, body))
+        if not bio_off:
+            rows.extend(_organism_rows(state, body))
         value_row = _value_row(state, body)
         if value_row is not None:
             rows.append(value_row)
 
     if (
         body is not None
+        and not bio_off
         and cfg.show_predictions
         and state.odyssey
         and (body.landable or body.genuses)
@@ -411,12 +418,11 @@ def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
                     row.segments.append(Segment(f"  {values.credits(prediction.reward)}", "muted"))
                 rows.append(row)
 
-    system_bio = [
-        b for b in state.system.bio_bodies if b is not body and _bio_visible_on_hud(b, cfg)
-    ]
-    # стартуем прыжок в другую систему — список био по системе уже не нужен
-    if getattr(state, "jumping_away", False):
-        system_bio = []
+    system_bio = []
+    if not bio_off:
+        system_bio = [
+            b for b in state.system.bio_bodies if b is not body and _bio_visible_on_hud(b, cfg)
+        ]
     if system_bio:
         head = Row([Segment(t("hud.bio_in_system"), "dim")])
         head.segments.append(Segment(f"{len(system_bio)}", "ok"))
@@ -550,7 +556,7 @@ def _session_row(state: GameState) -> Row:
         row.segments.append(Segment(t("hud.sess_scan", value=values.credits(state.session_scan_value)), "text"))
     if state.session_map_value:
         row.segments.append(Segment(t("hud.sess_dss", value=values.credits(state.session_map_value)), "text"))
-    if state.session_organic_estimate:
+    if state.session_organic_estimate and not getattr(state, "jumping_away", False):
         row.segments.append(Segment(t("hud.sess_bio", value=values.credits(state.session_organic_estimate)), "ok"))
     if state.session_sold or state.session_organic_sold:
         total = state.session_sold + state.session_organic_sold
