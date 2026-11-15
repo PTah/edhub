@@ -589,7 +589,11 @@ class BioLine:
 
     @property
     def text(self) -> str:
-        return "".join(segment.text for segment in self.segments + self.tail)
+        head = "".join(segment.text for segment in self.segments)
+        tail = "".join(segment.text for segment in self.tail)
+        # хвост (цена) в текстовом виде отделяем от имени: в оверлее он
+        # выравнивается по правому краю, а в TUI/логах иначе слипается
+        return f"{head}  {tail}" if tail else head
 
 
 @dataclass
@@ -659,19 +663,48 @@ def _own_bio_bodies(state: GameState) -> list[Body]:
     return sorted(bodies, key=lambda body: body.body_id)
 
 
+def _player_body(state: GameState) -> Body | None:
+    """Тело, на котором стоит командир (пешком, в SRV или на площадке).
+
+    Высоту (`Altitude`) намеренно не учитываем: она есть и в обычном полёте
+    над планетой, а панель должна переключаться только при реальном спуске.
+    """
+    status = state.status
+    body = state.system.bodies.get(status.body_id) if status.body_id is not None else None
+    if body is None:
+        name = (status.body_name or "").strip().lower()
+        if name:
+            for candidate in state.system.bodies.values():
+                if (candidate.name or "").strip().lower() == name:
+                    body = candidate
+                    break
+    if body is None:
+        return None
+    if status.landed or status.srv or status.lat is not None:
+        return body
+    return None
+
+
+def _has_bio(body: Body) -> bool:
+    return bool(body.bio_signals or body.genuses or body.organisms)
+
+
 def _focus_bio_body(state: GameState) -> Body | None:
     """Планета, чьи виды показывать вместо сводки системы."""
+    # На поверхности показываем ТОЛЬКО своё тело: сводка всей системы на планете
+    # бесполезна и сбивает — командир работает здесь, а не в системе.
+    here = _player_body(state)
+    if here is not None:
+        return here if _has_bio(here) else None
     own = {body.body_id: body for body in _own_bio_bodies(state)}
     if not own:
         return None
     # FSS: карточка последнего тела, и только если на нём есть биология.
     if state.status.gui_focus == 9:
         last = own.get(state.last_fss_body_id or -1)
-        return last
+        if last is not None:
+            return last
     status = state.status
-    near = status.lat is not None or status.landed or status.altitude is not None
-    if near and status.body_id in own:
-        return own[status.body_id]
     if status.destination_body in own:
         return own[status.destination_body]
     dest = (status.destination_name or "").strip().lower()
@@ -800,57 +833,62 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
 
 
 def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tuple[int, int]]:
+    """Сводка по системе: на каждый сигнал — своя цена, под ними итог планеты."""
     lines: list[BioLine] = []
     total_low = 0
     total_high = 0
     ff_low = 0
     ff_high = 0
     for body_index, body in enumerate(_own_bio_bodies(state)):
-        forecast = bio.forecast_names(body, state.system, limit=12)
-        predicted = False
-        if forecast:
-            names = forecast
-            # ≈ только до DSS: после DSS виды уже подтверждены родами
-            predicted = not bool(body.genuses)
-        else:
-            names = _genus_name_list(body, limit=12)
-        low, high = _body_reward_span(body, state)
+        body_lines, (low, high) = _body_lines(body, state)
         total_low += low
         total_high += high
         bonus = body.landable and not body.was_footfalled
         if bonus:
-            ff_low += low * FIRST_LOGGED_MULTIPLIER
-            ff_high += high * FIRST_LOGGED_MULTIPLIER
+            ff_low += int(round(low * FIRST_LOGGED_MULTIPLIER))
+            ff_high += int(round(high * FIRST_LOGGED_MULTIPLIER))
         else:
             ff_low += low
             ff_high += high
         done = body.bio_signals and body.bio_analysed >= body.bio_signals
         highlight = _marked(body, state)
         style = "muted" if done else ("accent" if highlight else "text")
-        genus_style = "muted" if done else ("accent" if predicted else "text")
+        # шапка планеты: имя, число сигналов и расстояние — цена ушла к сигналам
         lines.append(
             BioLine(
                 segments=[
                     Segment(_short_body(body, state.system), style),
                     Segment(f"  ×{body.bio_signals}", "muted" if done else "ok"),
                 ],
-                tail=[
-                    Segment(_credit_span(low, high), "muted"),
-                    Segment(f"   {_ls(body.distance_ls)}", "dim"),
-                ],
-                bars=_reward_bars(low),
-                bars_max=_reward_bars(high),
+                tail=[Segment(_ls(body.distance_ls), "dim")],
                 rule=body_index > 0,
             )
         )
-        for name in names:
-            prefix = "≈ " if predicted else ""
+        lines.extend(_mute_lines(body_lines) if done else body_lines)
+        if low or high:
             lines.append(
                 BioLine(
-                    segments=[Segment(f"  {prefix}{name}", genus_style)],
+                    segments=[Segment(f"  {t('hud.body_total')}", "dim")],
+                    tail=[Segment(_credit_span(low, high), "fg")],
                 )
             )
     return lines, (total_low, total_high), (ff_low, ff_high)
+
+
+def _mute_lines(lines: list[BioLine]) -> list[BioLine]:
+    """Сданная планета — всё её строки приглушаем, как было до правки."""
+    muted: list[BioLine] = []
+    for line in lines:
+        muted.append(
+            BioLine(
+                segments=[Segment(segment.text, "muted", copy=segment.copy) for segment in line.segments],
+                tail=[Segment(segment.text, "muted", copy=segment.copy) for segment in line.tail],
+                bars=line.bars,
+                bars_max=line.bars_max,
+                rule=line.rule,
+            )
+        )
+    return muted
 
 
 def _marked(body: Body, state: GameState) -> bool:
@@ -878,11 +916,14 @@ def build_bio_board(state: GameState) -> BioBoard | None:
     """
     if state.bio_panel_suppressed():
         return None
+    focus = _focus_bio_body(state)
+    if focus is None and _player_body(state) is not None:
+        # стоим на теле без биологии: сводку системы здесь не показываем
+        return None
     bodies = _own_bio_bodies(state)
-    if not bodies:
+    if not bodies and focus is None:
         return None
     radar = state.radar_view()
-    focus = _focus_bio_body(state)
     if focus is not None:
         lines, (low, high) = _body_lines(focus, state)
         if state.status.body_id == focus.body_id:

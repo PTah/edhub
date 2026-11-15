@@ -2045,9 +2045,11 @@ class BioBoardTests(unittest.TestCase):
         self.assertIsNotNone(board)
         assert board is not None
         self.assertEqual(board.title, "биосигналы ×3")
-        headers = [line for line in board.lines if "×" in line.text and line.bars]
+        headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
         self.assertEqual(len(headers), 2)
         self.assertTrue(any("Bacterium" in line.text for line in board.lines))
+        # цена стоит у каждого сигнала, а под ними — итог планеты
+        self.assertTrue(any("итого по планете" in line.text for line in board.lines))
 
     def test_system_bio_board_lists_organisms_vertically(self):
         """В сводке системы каждое био — отдельная строка, не через запятую вправо."""
@@ -2064,6 +2066,55 @@ class BioBoardTests(unittest.TestCase):
         for line in organism_lines:
             self.assertNotIn(", ", line.text)
             self.assertNotIn("×2", line.text)
+
+    def test_on_planet_shows_only_that_body(self):
+        """Стоим на планете — в панели только её сигналы, а не вся система."""
+        state = GameState()
+        self._icy(state, 1, 4)
+        self._icy(state, 2, 2)
+        self._icy(state, 4, 2)
+        state.status.lat = 12.5
+        state.status.lon = 44.1
+        state.status.flags = 1 << 1  # FLAG_LANDED
+        state.status.body_id = 1
+        state.status.body_name = "Test 1"
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "1 · био ×4")
+        text = "\n".join(board.plain())
+        self.assertNotIn("Test 2", text)
+        self.assertNotIn("Test 4", text)
+        self.assertNotIn("×2", text)
+
+    def test_planet_without_bio_hides_the_system_summary(self):
+        """На планете без биологии сводку системы не показываем."""
+        state = GameState()
+        self._icy(state, 1, 2)
+        bare = Body(body_id=7, name="Test 7", planet_class="Rocky body", landable=True)
+        state.system.bodies[7] = bare
+        state.status.flags = 1 << 1  # FLAG_LANDED
+        state.status.body_id = 7
+        state.status.body_name = "Test 7"
+        self.assertIsNone(hudmodel.build_bio_board(state))
+
+    def test_signal_price_is_per_signal_not_per_body(self):
+        """В сводке цена стоит у каждого сигнала, итог планеты — под ними."""
+        state = GameState()
+        body = self._icy(state, 1, 2)
+        body.genuses = {"$Codex_Ent_Bacterial_Genus_Name;": 1}
+        body.dss_scanned = True
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        signal_lines = [line for line in board.lines if "Bacterium" in line.text]
+        self.assertTrue(signal_lines)
+        for line in signal_lines:
+            self.assertRegex(line.text, r"\d[\d\s]{5,}")
+        total_index = next(
+            index for index, line in enumerate(board.lines) if "итого по планете" in line.text
+        )
+        self.assertGreater(total_index, board.lines.index(signal_lines[-1]))
 
     def test_jump_hides_the_board(self):
         state = GameState()
