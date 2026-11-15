@@ -11,17 +11,7 @@ cd /d "%~dp0"
 
 set "VERSION=1.2.0"
 for /f "usebackq tokens=*" %%V in (`python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" 2^>nul`) do set "VERSION=%%V"
-
-rem Автообновление сравнивает версию из edhud\__init__.py с тегом GitHub-релиза.
-rem Если она разошлась с pyproject.toml, приложение навсегда считает себя старым
-rem (или наоборот - свежим) и обновляться перестаёт. Лучше упасть здесь.
-set "CODE_VERSION="
-for /f "usebackq tokens=*" %%C in (`python -c "from edhud import __version__; print(__version__)" 2^>nul`) do set "CODE_VERSION=%%C"
-if not "%CODE_VERSION%"=="%VERSION%" (
-  echo Version mismatch: pyproject.toml=%VERSION% edhud\__init__.py=%CODE_VERSION%
-  echo Bump BOTH before building: auto-update compares edhud.__version__ with the GitHub tag.
-  goto :err
-)
+python tools\check_version.py || goto :err
 
 echo === EDHUD %VERSION% — сборка Windows ===
 echo.
