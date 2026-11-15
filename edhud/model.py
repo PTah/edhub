@@ -8,6 +8,7 @@ monitor.py) плюс периодических снимков Status.json. Вс
 """
 from __future__ import annotations
 
+import calendar
 import math
 import time
 from datetime import datetime
@@ -118,6 +119,20 @@ def ring_parent_name(name: str | None) -> str | None:
         return parent or None
     parent = text[: -len(" ring")].strip()
     return parent or None
+
+
+def _journal_timestamp(event: dict) -> float | None:
+    """`"2026-11-15T19:19:23Z"` из события журнала → epoch (UTC)."""
+    raw = event.get("timestamp") if isinstance(event, dict) else None
+    if not isinstance(raw, str) or not raw:
+        return None
+    text = raw.strip()
+    for pattern in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return calendar.timegm(time.strptime(text, pattern))
+        except ValueError:
+            continue
+    return None
 
 
 def _mineable_belt(rings: list, name: str | None = None) -> bool:
@@ -1097,10 +1112,39 @@ class GameState:
             handler(event)
 
     # --- запуск/система
+    # --- сессии
+    def reset_session(self, started: float | None = None) -> None:
+        """Новый вход в игру (новый файл журнала) — счётчики сессии с нуля.
+
+        Без этого статистика новой сессии приписывала себе продажи и сканы
+        предыдущей: игра меняет файл журнала, а счётчики в GameState оставались.
+        """
+        now = time.time() if started is None else float(started)
+        self.session_started = now
+        self.session_jumps = 0
+        self.session_new_systems = 0
+        self.session_distance_ly = 0.0
+        self.session_scans = 0
+        self.session_new_bodies = 0
+        self.session_mapped = 0
+        self.session_bio_analyzed = 0
+        self.session_scan_value = 0
+        self.session_map_value = 0
+        self.session_organic_estimate = 0
+        self.session_sold = 0
+        self.session_organic_sold = 0
+        self.last_jump_ts = 0.0
+        self.avg_jump_sec = 0.0
+        self._jump_times.clear()
+        self._new_systems.clear()
+        self._valued_bodies.clear()
+        self.mining.reset()
+        self.mining.started = now
+
     def _on_fileheader(self, e: dict) -> None:
         self._apply_version(e)
-        if not self.mining.started:
-            self.mining.started = time.time()
+        # начало сессии берём из отметки времени самой игры
+        self.reset_session(_journal_timestamp(e))
 
     # ------------------------------------------------------- где мы находимся
     @property
@@ -1129,8 +1173,7 @@ class GameState:
         self.game_mode = e.get("GameMode")
         self.game_running = True
         self.music_track = ""  # новый вход в игру — экранов-меню ещё нет
-        self.mining.reset()  # добыча: новый вход — новые счётчики
-        self.mining.started = time.time()
+        self.reset_session()  # новый вход — новые счётчики сессии
         self._apply_version(e)
         if e.get("Fuel") is not None:
             self.status.fuel_main = float(e.get("Fuel") or 0.0)

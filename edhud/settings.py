@@ -212,6 +212,11 @@ class SettingsDialog:
         self._stats_total = ttk.Label(top, text=t("set.stats_empty"), justify="left")
         self._stats_total.pack(anchor="w")
         ttk.Label(top, text=t("set.stats_hint"), foreground="#888").pack(anchor="w", pady=(2, 6))
+        ttk.Button(top, text=t("set.stats_clear"), command=self._clear_stats).pack(anchor="w", pady=(0, 6))
+        self.stats_rebuild_button = ttk.Button(
+            top, text=t("set.stats_rebuild"), command=self._rebuild_stats
+        )
+        self.stats_rebuild_button.pack(anchor="w", pady=(0, 6))
 
         columns = (
             ("when", t("set.stats_when"), 110, "w"),
@@ -236,6 +241,58 @@ class SettingsDialog:
         scroll.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         self._stats_tree = tree
+        self._fill_stats()
+
+    def _rebuild_stats(self) -> None:
+        """Пересчитать статистику по журналам (единственный источник правды)."""
+        if self.stats is None or self._stats_busy:
+            return
+        folder = str(getattr(self.cfg, "journal_dir", "") or "").strip()
+        if not folder or not Path(folder).is_dir():
+            messagebox.showwarning("EDHUD", t("set.stats_rebuild_no_dir"), parent=self.win)
+            return
+        if not messagebox.askyesno(
+            "EDHUD", t("set.stats_rebuild_ask", path=folder), parent=self.win
+        ):
+            return
+        self._stats_busy = True
+        self.stats_rebuild_button.configure(state="disabled")
+        self._stats_total.configure(text=t("set.stats_rebuilding"))
+
+        def work() -> None:
+            try:
+                count = self.stats.rebuild_from_journals(folder, progress=self._rebuild_progress)
+            except Exception as exc:  # noqa: BLE001 — показываем текст ошибки
+                self._ui(lambda: self._rebuild_failed(str(exc)))
+                return
+            self._ui(lambda: self._rebuild_done(count))
+
+        threading.Thread(target=work, daemon=True, name="stats-rebuild").start()
+
+    def _rebuild_progress(self, index: int, total: int, name: str) -> None:
+        text = t("set.stats_rebuilding_progress", index=index, total=total, name=name)
+        self._ui(lambda: self._stats_total.configure(text=text))
+
+    def _rebuild_done(self, count: int) -> None:
+        self._stats_busy = False
+        self.stats_rebuild_button.configure(state="normal")
+        self._fill_stats()
+        self._stats_total.configure(
+            text=self._stats_total.cget("text") + " · " + t("set.stats_rebuilt", n=count)
+        )
+
+    def _rebuild_failed(self, error: str) -> None:
+        self._stats_busy = False
+        self.stats_rebuild_button.configure(state="normal")
+        self._stats_total.configure(text=t("set.stats_rebuild_error", error=str(error)[:200]))
+
+    def _clear_stats(self) -> None:
+        """Сбросить историю сессий (старые записи бывают с мусорными числами)."""
+        if self.stats is None:
+            return
+        if not messagebox.askyesno("EDHUD", t("set.stats_clear_ask"), parent=self.win):
+            return
+        self.stats.clear()
         self._fill_stats()
 
     def _fill_stats(self) -> None:
@@ -293,6 +350,7 @@ class SettingsDialog:
         self.spansh_dump = StringVar(value=self.cfg.spansh_dump or spanshdb.DEFAULT_DUMP)
         self.spansh_index = spanshdb.SpanshIndex()
         self._spansh_busy = False
+        self._stats_busy = False
         self.click_through = BooleanVar(value=bool(self.cfg.click_through))
         self.edsm_api_key = StringVar(value=self.cfg.edsm_api_key or "")
         self.edsm_commander = StringVar(value=self.cfg.edsm_commander or "")

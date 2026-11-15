@@ -9,11 +9,32 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from . import config
+
+JOURNAL_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})")
+
+
+def session_started_from_name(name: str | None) -> float | None:
+    """`Journal.2026-11-15T191923.01.log` → время начала сессии (epoch).
+
+    Имя файла журнала — самый надёжный источник «когда начался вход в игру»:
+    не зависит от того, когда запустился EDHUD.
+    """
+    if not name:
+        return None
+    match = JOURNAL_NAME.search(str(name))
+    if not match:
+        return None
+    day, hh, mm, ss = match.groups()
+    try:
+        return time.mktime(time.strptime(f"{day} {hh}:{mm}:{ss}", "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        return None
 
 # Поля-счётчики: имя в записи -> имя в GameState
 COUNTERS = {
@@ -117,7 +138,34 @@ class StatsStore:
             session = SessionStats.from_persist(item)
             self.sessions.append(session)
             self._by_key[session.key] = session
+        self._sanitize()
         self.sessions.sort(key=lambda item: item.started)
+
+    def _sanitize(self) -> None:
+        """Починить записи прошлых версий: вернуть время из имени журнала, убрать дубли.
+
+        Раньше начало сессии перезаписывалось временем запуска EDHUD, а при смене
+        журнала не обнулялись счётчики — из-за этого строки путались и общая
+        статистика врала. Имя файла `Journal.…T191923.01.log` даёт точное время.
+        """
+        best: dict[str, SessionStats] = {}
+        for session in self.sessions:
+            named = session_started_from_name(session.key)
+            if named:
+                session.started = named
+            if session.started <= 0:
+                continue
+            current = best.get(session.key)
+            if current is None or _weight(session) > _weight(current):
+                best[session.key] = session
+        self.sessions = sorted(best.values(), key=lambda item: item.started)
+        self._by_key = dict(best)
+
+    def clear(self) -> bool:
+        """Обнулить историю сессий (кнопка «Сбросить статистику»)."""
+        self.sessions = []
+        self._by_key = {}
+        return self.save()
 
     def save(self) -> bool:
         try:
@@ -148,40 +196,14 @@ class StatsStore:
         """
         if not key:
             return False
+        known = key in self._by_key
         session = self.session(key)
-        started = getattr(state, "session_started", None)
-        if started and (session.started <= 0 or session.jumps == 0 and session.scans == 0):
-            session.started = float(started)
-        commander = getattr(state, "cmdr", "") or ""
-        if commander:
-            session.commander = commander
-        for name, attr in COUNTERS.items():
-            try:
-                setattr(session, name, int(getattr(state, attr, 0) or 0))
-            except (TypeError, ValueError):
-                continue
-        try:
-            session.distance_ly = float(getattr(state, "session_distance_ly", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            session.distance_ly = 0.0
-        for name, attr in (
-            ("scan_cr", "session_scan_value"),
-            ("map_cr", "session_map_value"),
-            ("bio_estimate_cr", "session_organic_estimate"),
-            ("bio_sold_cr", "session_organic_sold"),
-            ("sold_cr", "session_sold"),
-        ):
-            try:
-                setattr(session, name, int(getattr(state, attr, 0) or 0))
-            except (TypeError, ValueError):
-                continue
-        metrics = getattr(state, "mining", None)
-        if metrics is not None:
-            session.mining_rocks = int(getattr(metrics, "prospected", 0) or 0)
-            session.mining_avg = int(round(getattr(metrics, "avg_share", 0.0) or 0.0))
-            session.mining_best = int(round(getattr(metrics, "best_share", 0.0) or 0.0))
-            session.mining_tons = int(getattr(metrics, "refined_total", 0) or 0)
-            session.mining_target = str(getattr(metrics, "target", "") or "")
+        if not known:
+            # начало сессии — из имени журнала, а не из времени запуска EDHUD
+            session.started = session_started_from_name(key) or float(
+                getattr(state, "session_started", 0.0) or time.time()
+            )
+        fill_from_state(session, state)
         session.updated = time.time()
         if session.updated < session.started:
             session.started = session.updated
@@ -221,3 +243,90 @@ class StatsStore:
 
     def recent(self, limit: int = 30) -> list[SessionStats]:
         return sorted(self.sessions, key=lambda item: item.updated, reverse=True)[: max(1, int(limit))]
+
+    # ------------------------------------------------- пересборка из журналов
+    def rebuild_from_journals(self, folder, progress=None) -> int:
+        """Пересчитать статистику по файлам журналов: одна сессия = один файл.
+
+        Единственный способ починить историю: журналы знают правду о том, что
+        реально продано и просканировано в каждой сессии.
+        """
+        from .model import GameState  # локальный импорт: без цикла на уровне модулей
+
+        files = sorted(Path(str(folder)).glob("Journal.*.log"))
+        rebuilt: list[SessionStats] = []
+        for index, path in enumerate(files, start=1):
+            state = GameState()
+            try:
+                with path.open(encoding="utf-8", errors="replace") as handle:
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        try:
+                            state.apply(event)
+                        except Exception:  # noqa: BLE001 — битое событие не должно ронять пересчёт
+                            continue
+            except OSError:
+                continue
+            session = SessionStats(key=path.name)
+            session.started = session_started_from_name(path.name) or time.time()
+            fill_from_state(session, state)
+            session.updated = max(session.started, path.stat().st_mtime)
+            rebuilt.append(session)
+            if progress is not None:
+                progress(index, len(files), path.name)
+        self.sessions = rebuilt
+        self._by_key = {session.key: session for session in rebuilt}
+        self.save()
+        return len(rebuilt)
+
+
+def fill_from_state(session: SessionStats, state) -> None:
+    """Перенести счётчики GameState в запись сессии."""
+    commander = getattr(state, "cmdr", "") or ""
+    if commander:
+        session.commander = commander
+    for name, attr in COUNTERS.items():
+        try:
+            setattr(session, name, int(getattr(state, attr, 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    try:
+        session.distance_ly = float(getattr(state, "session_distance_ly", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        session.distance_ly = 0.0
+    for name, attr in (
+        ("scan_cr", "session_scan_value"),
+        ("map_cr", "session_map_value"),
+        ("bio_estimate_cr", "session_organic_estimate"),
+        ("bio_sold_cr", "session_organic_sold"),
+        ("sold_cr", "session_sold"),
+    ):
+        try:
+            setattr(session, name, int(getattr(state, attr, 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    metrics = getattr(state, "mining", None)
+    if metrics is not None:
+        session.mining_rocks = int(getattr(metrics, "prospected", 0) or 0)
+        session.mining_avg = int(round(getattr(metrics, "avg_share", 0.0) or 0.0))
+        session.mining_best = int(round(getattr(metrics, "best_share", 0.0) or 0.0))
+        session.mining_tons = int(getattr(metrics, "refined_total", 0) or 0)
+        session.mining_target = str(getattr(metrics, "target", "") or "")
+
+
+def _weight(session: SessionStats) -> int:
+    """Насколько запись «содержательнее» — из дублей оставляем самую полную."""
+    return int(
+        session.jumps
+        + session.scans
+        + session.new_bodies
+        + session.bio_analyzed
+        + session.mining_rocks
+        + session.mining_tons
+    )
