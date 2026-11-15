@@ -113,7 +113,7 @@ class CarrierWindowTests(unittest.TestCase):
             window.update_state(state)
             root_.update_idletasks()
             text = window.lbl_carrier_info.cget("text")
-            self.assertIn("тритий", text)
+            self.assertIn("трити", text)
             self.assertIn("512/1 000", text)
             self.assertIn("через", text)
             self.assertRegex(text, r"через \d+:\d\d")

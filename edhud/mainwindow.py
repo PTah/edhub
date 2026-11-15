@@ -498,7 +498,12 @@ class MainWindow:
         )
         self.lbl_system.pack(side="left")
         self.lbl_system.bind("<Double-Button-1>", self._on_system_double)
-        self.lbl_status = ttk.Label(top, text="", style="ED.Muted.TLabel")
+        self.lbl_status = ttk.Label(
+            top,
+            text="",
+            style="ED.Muted.TLabel",
+            font=(self._ui_family, self._ui_size),
+        )
         self.lbl_status.pack(side="left", padx=(16, 0))
         # Несколько подписей: у прыжка «из A в B» каждая система копируется отдельно.
         self.frm_carrier = tk.Frame(top, bg=COLORS["bg"])
@@ -526,6 +531,7 @@ class MainWindow:
         )
         self.lbl_carrier_info.pack(side="left")
         self._carrier_snapshot = None
+        self._carrier_jumping = False
         self.lbl_carrier_hint = ttk.Label(
             top, text="", style="ED.Muted.TLabel", font=(self._ui_family, max(7, self._ui_size - 1))
         )
@@ -1605,7 +1611,9 @@ class MainWindow:
             self._refresh_carrier_info()
             return
         self._clear_carrier_links()
+        self._carrier_jumping = False
         self.lbl_carrier.configure(cursor="hand2", font=(self._ui_family, self._ui_size, "underline"))
+        self._carrier_info_last()
         if self._carrier_system:
             # Всегда явно «Карриер …», иначе в шапке неочевидно, что за система
             generic = t("hud.carrier")
@@ -1636,17 +1644,31 @@ class MainWindow:
             return
         parts: list[str] = []
         left = carrier.jump_remaining()
+        jumping = bool(getattr(self, "_carrier_jumping", False))
         if left is not None:
-            parts.append(t("win.carrier_countdown", time=_fmt_clock(left)))
+            parts.append(
+                t("win.carrier_jump_start", time=_fmt_clock(left))
+                if jumping
+                else t("win.carrier_countdown", time=_fmt_clock(left))
+            )
         if carrier.fuel_level is not None:
             level = f"{carrier.fuel_level:,.0f}".replace(",", " ")
             if carrier.fuel_capacity:
                 cap = f"{carrier.fuel_capacity:,.0f}".replace(",", " ")
-                parts.append(t("win.carrier_fuel", level=level, cap=cap))
+                parts.append(
+                    t("win.carrier_jump_fuel_cap", level=level, cap=cap)
+                    if jumping
+                    else t("win.carrier_fuel", level=level, cap=cap)
+                )
             else:
-                parts.append(t("win.carrier_fuel_nocap", level=level))
+                parts.append(
+                    t("win.carrier_jump_fuel", fuel=level)
+                    if jumping
+                    else t("win.carrier_fuel_nocap", level=level)
+                )
         self.lbl_carrier_info.configure(
-            text=(" · ".join(parts)) if parts else "",
+            # при прыжке каждая часть уже начинается с запятой — клеим подряд
+            text=("".join(parts) if jumping else " · ".join(parts)) if parts else "",
             fg=COLORS["warn"] if left is not None else COLORS["muted"],
         )
 
@@ -1679,6 +1701,7 @@ class MainWindow:
 
     def _show_carrier_jump(self, frm: str, to: str) -> None:
         self._clear_carrier_links()
+        self._carrier_jumping = True
         self.lbl_carrier.configure(
             text=t("win.carrier_jump_prefix"),
             fg=COLORS["warn"],
@@ -1689,6 +1712,15 @@ class MainWindow:
         self._carrier_link(frm, None if frm == "—" else frm, COLORS["warn"])
         self._carrier_link(t("win.carrier_jump_mid"), None, COLORS["warn"])
         self._carrier_link(to, to or None, COLORS["warn"])
+        # «, старт через … , остаток трития: …» — только после систем назначения
+        self._carrier_info_last()
+
+    def _carrier_info_last(self) -> None:
+        """Переставить подпись с отсчётом/тритием в конец строки носителя."""
+        if getattr(self, "lbl_carrier_info", None) is None:
+            return
+        self.lbl_carrier_info.pack_forget()
+        self.lbl_carrier_info.pack(side="left")
 
     def carrier_header_text(self) -> str:
         parts = [self.lbl_carrier.cget("text")]
