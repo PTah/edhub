@@ -154,6 +154,8 @@ class Config:
     show_belt_clusters: bool = True
     # верхний HUD: био, которое до вас нашли другие (EDSM/Spansh/EDDN)
     show_remote_bio: bool = False
+    # верхний HUD: кроме маршрута/карриера/системы показывать блок «скан + сессия»
+    hud_show_stats: bool = True
     # вкладка «Добыча»: радиус поиска у Spansh и живой индекс цен из EDDN
     mining_radius_ly: float = 25.0
     prices_eddn: bool = True

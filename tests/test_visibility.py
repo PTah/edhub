@@ -207,6 +207,47 @@ class HudSystemBioTests(unittest.TestCase):
         self.assertIn("био в системе", detail)
 
 
+class HudDetailToggleTests(unittest.TestCase):
+    """«Показывать маршрут и статистику»: выкл. — только верхняя часть дашборда."""
+
+    def make_state(self) -> GameState:
+        from edhud.model import Body
+
+        state = GameState()
+        state.apply(LOAD_GAME)
+        state.system.name = "Alpha"
+        state.system.address = 1
+        state.system.bodies[2] = Body(
+            body_id=2, name="Alpha 2", bio_signals=3, signals_known=True, signals_local=True
+        )
+        state.session_jumps = 5
+        return state
+
+    def test_default_shows_scan_and_session_block(self):
+        from edhud import hudmodel
+
+        cfg = Config()
+        cfg.expanded = True
+        self.assertTrue(cfg.hud_show_stats)
+        view = hudmodel.build_view(self.make_state(), cfg)
+        self.assertTrue(view.detail)
+        detail = "\n".join(row.text for row in view.detail)
+        self.assertIn("био в системе", detail)
+        self.assertIn("сессия", detail)
+
+    def test_switch_off_keeps_only_route_and_system(self):
+        from edhud import hudmodel
+
+        cfg = Config()
+        cfg.expanded = True
+        cfg.hud_show_stats = False
+        view = hudmodel.build_view(self.make_state(), cfg)
+        self.assertEqual(view.detail, [])
+        # верхняя часть на месте: маршрут/карриер и текущая система
+        self.assertTrue(view.route_row.text.strip())
+        self.assertTrue(view.body_row.text.strip())
+
+
 class StatusFreshnessTests(unittest.TestCase):
     def test_status_mtime_is_exposed(self):
         from edhud.journal import JournalWatcher

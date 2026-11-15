@@ -369,6 +369,7 @@ class SettingsDialog:
         )
         self.show_belt_clusters = BooleanVar(value=bool(getattr(self.cfg, "show_belt_clusters", True)))
         self.show_remote_bio = BooleanVar(value=bool(getattr(self.cfg, "show_remote_bio", False)))
+        self.hud_show_stats = BooleanVar(value=bool(getattr(self.cfg, "hud_show_stats", True)))
         self.voice_rate = IntVar(value=int(self.cfg.voice_rate or 0))
         mode = str(getattr(self.cfg, "update_check", "auto") or "auto")
         self.update_check = StringVar(value=mode if mode in ("auto", "manual") else "auto")
@@ -545,6 +546,14 @@ class SettingsDialog:
         ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
         row += 1
         ttk.Label(frm, text=t("set.overlay")).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Checkbutton(
+            frm, text=t("set.hud_show_stats"), variable=self.hud_show_stats
+        ).grid(row=row, column=0, sticky="w", **pad)
+        row += 1
+        ttk.Label(
+            frm, text=t("set.hud_show_stats_hint"), foreground="#666", justify="left"
+        ).grid(row=row, column=0, sticky="w", padx=24)
         row += 1
         ttk.Checkbutton(
             frm, text=t("set.click"), variable=self.click_through
@@ -1045,6 +1054,7 @@ class SettingsDialog:
             return
         self.cfg.show_belt_clusters = bool(self.show_belt_clusters.get())
         self.cfg.show_remote_bio = bool(self.show_remote_bio.get())
+        self.cfg.hud_show_stats = bool(self.hud_show_stats.get())
         mode = self.update_check.get()
         self.cfg.update_check = mode if mode in ("auto", "manual") else "auto"
         self.cfg.voice_rate = max(-10, min(10, int(self.voice_rate.get())))

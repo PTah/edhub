@@ -577,12 +577,16 @@ def build_view(
     route_row, progress, dots, accent = _route_row(state, cfg)
     body_row = _body_row(state, cfg)
     expanded = cfg.expanded if expanded is None else expanded
-    detail = _sample_rows(state)
-    mining_row = _mining_row(state)
-    if mining_row is not None:
-        detail.append(mining_row)
-    if expanded:
-        detail.extend(_detail_rows(state, cfg, now))
+    detail: list[Row] = []
+    # «Показывать маршрут и статистику» выключено — остаётся только верхняя часть:
+    # маршрут, карриер и текущая система/тело
+    if getattr(cfg, "hud_show_stats", True):
+        detail = _sample_rows(state)
+        mining_row = _mining_row(state)
+        if mining_row is not None:
+            detail.append(mining_row)
+        if expanded:
+            detail.extend(_detail_rows(state, cfg, now))
     alert = None
     if state.organic_alert and now - state.organic_alert_ts < 6:
         alert = state.organic_alert
