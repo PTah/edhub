@@ -3,6 +3,7 @@
 """Основное окно EDHUD (стиль EDEB): вкладки Route, Bodies и Пояса."""
 from __future__ import annotations
 
+import threading
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -14,6 +15,7 @@ from .i18n import t
 from .mining import format_hotspots, format_hotspots_tip
 from .model import Body, GameState, format_dss_range, is_belt_body, is_ring_body
 from .route import Route
+from .sphere import SphereHop, fetch_sphere, plan_tour
 
 
 COLORS = {
@@ -495,6 +497,22 @@ class MainWindow:
             background=[("selected", COLORS["panel"])],
             foreground=[("selected", COLORS["fg"])],
         )
+        style.configure(
+            "ED.Treeview",
+            background=COLORS["row"],
+            fieldbackground=COLORS["row"],
+            foreground=COLORS["text"],
+            borderwidth=0,
+            rowheight=_row_height(self._ui_size),
+            font=(self._ui_family, self._ui_size),
+        )
+        style.configure(
+            "ED.Treeview.Heading",
+            background=COLORS["panel"],
+            foreground=COLORS["fg"],
+            font=(self._ui_family, self._ui_size, "bold"),
+        )
+        style.map("ED.Treeview", background=[("selected", COLORS["sel"])], foreground=[("selected", COLORS["text"])])
 
     def _build(self) -> None:
         top = ttk.Frame(self.win, style="ED.TFrame", padding=(12, 10))
@@ -549,10 +567,12 @@ class MainWindow:
         nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self.tab_route = ttk.Frame(nb, style="ED.TFrame", padding=8)
+        self.tab_sphere = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_belts = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_mining = ttk.Frame(nb, style="ED.TFrame", padding=0)
         nb.add(self.tab_route, text="Route")
+        nb.add(self.tab_sphere, text=t("win.tab_sphere"))
         nb.add(self.tab_bodies, text="Bodies")
         nb.add(self.tab_belts, text=t("win.tab_belts"))
         nb.add(self.tab_mining, text=t("win.tab_mining"))
@@ -562,6 +582,7 @@ class MainWindow:
         self.route_info.pack(anchor="w", pady=(0, 6))
         self._ring_icon = _ring_icon(self.win)
         self._build_route_table()
+        self._build_sphere_tab()
         self._build_bodies_table()
         self._build_belts_tab()
         self._build_mining_tab()
@@ -1427,6 +1448,7 @@ class MainWindow:
                     child.configure(bg=COLORS["bg"])
         if getattr(self, "lbl_carrier_hint", None) is not None:
             self.lbl_carrier_hint.configure(font=(self._ui_family, max(7, self._ui_size - 1)))
+        self._paint_sphere()
 
     def update_state(self, state: GameState) -> None:
         self._state = state
@@ -1772,7 +1794,12 @@ class MainWindow:
             pass
 
     def _on_system_double(self, _event=None) -> None:
+        """Двойной клик по системе в шапке: имя в «Маршрут по шару» и в буфер."""
         name = self._system_name
+        entry = getattr(self, "sphere_system", None)
+        if name and entry is not None:
+            entry.delete(0, "end")
+            entry.insert(0, name)
         if self.on_copy_system and name:
             self.on_copy_system(name)
         else:
@@ -1790,6 +1817,203 @@ class MainWindow:
         """Оставлено для API/тестов: маршрут Spansh до карриера (из шапки убран)."""
         if self.on_plot_to_carrier and self._carrier_system:
             self.on_plot_to_carrier()
+
+    def _build_sphere_tab(self) -> None:
+        """Вкладка обхода всех систем в шаре заданного радиуса."""
+        self._sphere_busy = False
+        self._sphere_hops: list[SphereHop] = []
+        bar = tk.Frame(self.tab_sphere, bg=COLORS["bg"])
+        bar.pack(fill="x", pady=(0, 6))
+        self._sphere_bar = bar
+        font = (self._ui_family, self._ui_size)
+        self.sphere_system_lbl = tk.Label(bar, text=t("sphere.system"), bg=COLORS["bg"], fg=COLORS["muted"], font=font)
+        self.sphere_system_lbl.pack(side="left")
+        self.sphere_system = tk.Entry(
+            bar,
+            width=28,
+            bg=COLORS["row"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            font=font,
+        )
+        self.sphere_system.pack(side="left", padx=(6, 12))
+        self.sphere_distance_lbl = tk.Label(
+            bar, text=t("sphere.distance"), bg=COLORS["bg"], fg=COLORS["muted"], font=font
+        )
+        self.sphere_distance_lbl.pack(side="left")
+        self.sphere_distance = tk.Entry(
+            bar,
+            width=8,
+            bg=COLORS["row"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            font=font,
+        )
+        self.sphere_distance.insert(0, "10")
+        self.sphere_distance.pack(side="left", padx=(6, 12))
+        self.sphere_calc = tk.Button(
+            bar,
+            text=t("sphere.calc"),
+            command=self._calc_sphere,
+            bg=COLORS["panel"],
+            fg=COLORS["fg"],
+            activebackground=COLORS["sel"],
+            activeforeground=COLORS["fg"],
+            relief="flat",
+            font=font,
+            padx=10,
+        )
+        self.sphere_calc.pack(side="left")
+        self.sphere_system.bind("<Return>", lambda _e: self._calc_sphere())
+        self.sphere_distance.bind("<Return>", lambda _e: self._calc_sphere())
+        self.sphere_status = tk.Label(
+            self.tab_sphere,
+            text=t("sphere.hint"),
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            anchor="w",
+            font=font,
+        )
+        self.sphere_status.pack(fill="x", pady=(0, 6))
+
+        host = tk.Frame(self.tab_sphere, bg=COLORS["bg"])
+        host.pack(fill="both", expand=True)
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(0, weight=1)
+        columns = ("idx", "system", "star", "leg", "center")
+        self.sphere_tree = ttk.Treeview(host, columns=columns, show="headings", style="ED.Treeview")
+        headings = {
+            "idx": (t("sphere.col_idx"), 48),
+            "system": (t("sphere.col_system"), 280),
+            "star": (t("sphere.col_star"), 120),
+            "leg": (t("sphere.col_leg"), 110),
+            "center": (t("sphere.col_center"), 120),
+        }
+        for key, (title, width) in headings.items():
+            anchor = "w" if key in ("system", "star") else "e"
+            if key == "idx":
+                anchor = "center"
+            self.sphere_tree.heading(key, text=title, anchor=anchor)
+            self.sphere_tree.column(key, width=width, minwidth=40, anchor=anchor, stretch=key == "system")
+        scroll = ttk.Scrollbar(host, orient="vertical", command=self.sphere_tree.yview)
+        self.sphere_tree.configure(yscrollcommand=scroll.set)
+        self.sphere_tree.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.sphere_tree.tag_configure("back", foreground=COLORS["gold"])
+        self.sphere_tree.bind("<Double-Button-1>", self._on_sphere_double)
+
+    def _paint_sphere(self) -> None:
+        bar = getattr(self, "_sphere_bar", None)
+        if bar is None:
+            return
+        font = (self._ui_family, self._ui_size)
+        bar.configure(bg=COLORS["bg"])
+        for label in (self.sphere_system_lbl, self.sphere_distance_lbl, self.sphere_status):
+            label.configure(bg=COLORS["bg"], font=font)
+        self.sphere_system_lbl.configure(fg=COLORS["muted"])
+        self.sphere_distance_lbl.configure(fg=COLORS["muted"])
+        self.sphere_status.configure(fg=COLORS["muted"])
+        for entry in (self.sphere_system, self.sphere_distance):
+            entry.configure(
+                bg=COLORS["row"],
+                fg=COLORS["text"],
+                insertbackground=COLORS["text"],
+                font=font,
+            )
+        self.sphere_calc.configure(
+            bg=COLORS["panel"],
+            fg=COLORS["fg"],
+            activebackground=COLORS["sel"],
+            activeforeground=COLORS["fg"],
+            font=font,
+        )
+        self.sphere_tree.tag_configure("back", foreground=COLORS["gold"])
+
+    def _calc_sphere(self) -> None:
+        if self._sphere_busy:
+            return
+        system = (self.sphere_system.get() or "").strip()
+        if not system:
+            self.sphere_status.configure(text=t("sphere.need_system"), fg=COLORS["warn"])
+            return
+        try:
+            radius = float((self.sphere_distance.get() or "").replace(",", "."))
+        except ValueError:
+            self.sphere_status.configure(text=t("sphere.bad_radius"), fg=COLORS["warn"])
+            return
+        center = None
+        state = self._state
+        if state is not None and (state.system.name or "").strip().lower() == system.lower():
+            center = state.system.star_pos
+        self._sphere_busy = True
+        self.sphere_calc.configure(state="disabled")
+        self.sphere_status.configure(
+            text=t("sphere.searching", radius=radius, system=system),
+            fg=COLORS["muted"],
+        )
+
+        def work() -> None:
+            try:
+                hops = plan_tour(fetch_sphere(system, radius, center=center))
+            except Exception as exc:  # noqa: BLE001 — текст ошибки в статус вкладки
+                self._sphere_ui(lambda err=str(exc): self._show_sphere(None, err))
+                return
+            self._sphere_ui(lambda rows=hops: self._show_sphere(rows, None))
+
+        threading.Thread(target=work, name="edhud-sphere", daemon=True).start()
+
+    def _sphere_ui(self, callback) -> None:
+        try:
+            self.win.after(0, callback)
+        except tk.TclError:
+            pass
+
+    def _show_sphere(self, hops: list[SphereHop] | None, error: str | None) -> None:
+        self._sphere_busy = False
+        try:
+            self.sphere_calc.configure(state="normal")
+            tree = self.sphere_tree
+            tree.delete(*tree.get_children())
+        except tk.TclError:
+            return
+        self._sphere_hops = list(hops or [])
+        if error:
+            self.sphere_status.configure(text=t("sphere.error", error=error), fg=COLORS["bad"])
+            return
+        total = 0.0
+        for index, hop in enumerate(self._sphere_hops):
+            leg = "—" if index == 0 else f"{hop.leg_ly:,.2f}".replace(",", " ")
+            center = f"{hop.from_center:,.2f}".replace(",", " ")
+            mark = "↩" if hop.returning else str(index + 1)
+            tree.insert(
+                "",
+                "end",
+                values=(mark, hop.name, hop.star_class or "—", leg, center),
+                tags=("back",) if hop.returning else (),
+            )
+            total += hop.leg_ly or 0.0
+        unique = sum(1 for hop in self._sphere_hops if not hop.returning)
+        if unique <= 1:
+            text = t("sphere.alone", system=self._sphere_hops[0].name if self._sphere_hops else "—")
+        else:
+            ly = f"{total:,.1f}".replace(",", " ")
+            text = t("sphere.done", n=unique, ly=ly)
+            if unique > 250:
+                text += t("sphere.approx")
+        self.sphere_status.configure(text=text, fg=COLORS["muted"])
+
+    def _on_sphere_double(self, event) -> None:
+        row = self.sphere_tree.identify_row(event.y)
+        if not row:
+            return
+        values = self.sphere_tree.item(row, "values")
+        if len(values) < 2:
+            return
+        name = str(values[1]).strip()
+        if name:
+            self._copy_text(name)
 
     def _update_route(self, state: GameState) -> None:
         route = state.route

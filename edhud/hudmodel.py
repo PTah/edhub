@@ -169,6 +169,13 @@ def _body_kind_label(body) -> str:
     return t("hud.body")
 
 
+def _discovered_mark(state: GameState) -> Segment | None:
+    """Золотая галочка: систему открыл текущий командир."""
+    if state.system.discovered_by_me:
+        return Segment(" ✔", "gold")
+    return None
+
+
 def _body_row(state: GameState, cfg) -> Row:
     row = Row()
     body = state.body_for_status() or state.current_body()
@@ -177,6 +184,9 @@ def _body_row(state: GameState, cfg) -> Row:
         name = state.system.name or "—"
         count = t("hud.bodies_n", n=state.system.body_count) if state.system.body_count else ""
         row.segments.append(Segment(f"{name}{count}", "muted"))
+        mark = _discovered_mark(state)
+        if mark is not None:
+            row.segments.append(mark)
         return row
 
     body_class = body.planet_class or body.star_type or (t("hud.star") if body.is_star else "?")
@@ -184,6 +194,10 @@ def _body_row(state: GameState, cfg) -> Row:
     row.segments.append(Segment(f" · {body_class}", "muted"))
     if body.distance_ls:
         row.segments.append(Segment(f" · {_ls(body.distance_ls)}", "muted"))
+    if body.is_star or body.star_type:
+        mark = _discovered_mark(state)
+        if mark is not None:
+            row.segments.append(mark)
 
     # прыгаем в другую систему — био этого тела уже не нужно
     bio_off = bool(getattr(state, "jumping_away", False))

@@ -665,6 +665,7 @@ class CarrierClickTests(unittest.TestCase):
             window._on_system_double()
             window._on_carrier_double()
             self.assertEqual(copied, ["Alpha Centauri", "Carrier Home"])
+            self.assertEqual(window.sphere_system.get(), "Alpha Centauri")
             carrier_text = window.lbl_carrier.cget("text")
             self.assertTrue(carrier_text.startswith("Карриер"))
             self.assertIn("ABC-123", carrier_text)
