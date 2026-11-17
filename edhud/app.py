@@ -452,10 +452,16 @@ class App:
     def _lookup_carrier_pos(self) -> None:
         """CarrierLocation/прыжок носителя без StarPos — координаты с EDSM/Spansh."""
         self.state.apply_due_carrier_jump()
-        if not self.state.carrier_pos_pending or not self.cfg.allow_network:
+        if not self.state.carrier_pos_pending:
             return
         name = self.state.carrier.system
         address = self.state.carrier.address
+        if self.state.carrier.star_pos is None and address is not None:
+            # сразу показываем приблизительное расстояние по id64: система, куда прыгнул
+            # карриер, может быть ни в EDSM, ни в Spansh (там никто не был)
+            self.state.set_carrier_pos_approx(galaxy.id64_position(address))
+        if not self.cfg.allow_network:
+            return
         if not name and address is None:
             return
         key = (name or "").lower() or str(address)
@@ -489,6 +495,7 @@ class App:
                     self._carrier_lookup_at = time.time()
                     return
                 self.state.carrier.star_pos = pos
+                self.state.carrier.pos_approx = False
                 self.state.carrier_pos_pending = False
                 self.state._remember_star(self.state.carrier.address, self.state.carrier.system, pos)
 

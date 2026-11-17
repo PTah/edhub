@@ -512,7 +512,8 @@ def _carrier_segments(state: GameState) -> list[Segment]:
         label = t("hud.carrier_here", prefix=prefix, where=where)
     else:
         text = f"{dist:,.1f}".replace(",", " ")
-        label = t("hud.carrier_dist", prefix=prefix, where=where, dist=text)
+        key = "hud.carrier_dist_approx" if state.carrier_distance_is_approx() else "hud.carrier_dist"
+        label = t(key, prefix=prefix, where=where, dist=text)
     copy = None if where == "—" else where
     return [Segment(label, "accent", copy=copy)]
 

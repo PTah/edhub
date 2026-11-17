@@ -34,6 +34,36 @@ GUARDIAN_BUBBLES: tuple[tuple[float, float, float, float], ...] = (
 )
 
 
+def id64_position(address: int | None) -> tuple[float, float, float] | None:
+    """Приблизительные координаты системы из её SystemAddress (id64) — центр «коробки» (boxel).
+
+    Адрес кодирует положение: 3 бита масс-кода, затем z/y/x (14-mc, 13-mc, 14-mc бит —
+    сектор плюс номер коробки внутри него). Сторона коробки 10·2^mc ly, ошибка до
+    половины её диагонали (≈17 ly для масс-кода «b»). Нужно для систем, которых нет ни в
+    EDSM, ни в Spansh (например, куда прыгнул карриер, а долетел ещё никто).
+    """
+    try:
+        value = int(address)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    mass = value & 7
+    value >>= 3
+    z_bits, y_bits, x_bits = 14 - mass, 13 - mass, 14 - mass
+    z = value & ((1 << z_bits) - 1)
+    value >>= z_bits
+    y = value & ((1 << y_bits) - 1)
+    value >>= y_bits
+    x = value & ((1 << x_bits) - 1)
+    size = 10.0 * (1 << mass)
+    return (
+        (x + 0.5) * size - 49985.0,
+        (y + 0.5) * size - 40985.0,
+        (z + 0.5) * size - 24105.0,
+    )
+
+
 def within_guardian_bubble(pos: tuple[float, float, float] | None) -> bool:
     if not pos:
         return False

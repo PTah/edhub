@@ -1699,7 +1699,8 @@ class MainWindow:
                 text = t("win.carrier_here", prefix=prefix, system=self._carrier_system)
             else:
                 ly = f"{dist:,.0f}".replace(",", " ")
-                text = t("win.carrier_dist", prefix=prefix, system=self._carrier_system, ly=ly)
+                key = "win.carrier_dist_approx" if state.carrier_distance_is_approx() else "win.carrier_dist"
+                text = t(key, prefix=prefix, system=self._carrier_system, ly=ly)
             self.lbl_carrier.configure(text=text, fg=COLORS["accent"], bg=COLORS["bg"])
             self.lbl_carrier_hint.configure(text="")
             self._carrier_snapshot = state.carrier

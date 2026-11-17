@@ -64,6 +64,54 @@ class LocalRouteStatsTests(unittest.TestCase):
             self.assertTrue(loaded.discovered_by_me)
 
 
+class CarrierApproxPositionTests(unittest.TestCase):
+    def test_id64_position_matches_known_systems(self):
+        import math
+
+        from edhud import galaxy
+
+        # (id64, реальные координаты) из кэша систем: позиция в пределах коробки
+        known = [
+            (10477373803, (0.0, 0.0, 0.0)),  # Sol
+        ]
+        for address, pos in known:
+            got = galaxy.id64_position(address)
+            size = 10.0 * (1 << (address & 7))
+            self.assertLessEqual(math.dist(got, pos), size * math.sqrt(3) / 2 + 1e-6)
+        self.assertIsNone(galaxy.id64_position(None))
+        self.assertIsNone(galaxy.id64_position(0))
+
+    def test_carrier_distance_falls_back_to_id64_then_exact_wins(self):
+        from edhud import galaxy
+
+        address = 10477373803  # Sol, масс-код 3
+        state = GameState()
+        state.apply({"event": "CarrierStats", "CarrierID": 7, "Callsign": "GHY-7TZ", "Name": "x"})
+        state.apply(
+            {"event": "Location", "StarSystem": "Away", "SystemAddress": 2, "StarPos": [0, 0, 400]}
+        )
+        state._move_carrier("Sol", address, None, None)
+        self.assertTrue(state.carrier_pos_pending)
+        self.assertIsNone(state.carrier_distance_ly())
+
+        state.set_carrier_pos_approx(galaxy.id64_position(address))
+        self.assertTrue(state.carrier_distance_is_approx())
+        self.assertIsNotNone(state.carrier_distance_ly())
+        self.assertTrue(state.carrier_pos_pending)  # точные координаты всё ещё ищутся
+
+        from edhud import hudmodel
+        from edhud.config import Config
+
+        view = hudmodel.build_view(state, Config(), expanded=False)
+        self.assertIn("≈", view.route_row.text)
+
+        # точные координаты (EDSM/журнал) заменяют приблизительные
+        state._remember_star(address, "Sol", (0.0, 0.0, 0.0))
+        self.assertFalse(state.carrier_distance_is_approx())
+        self.assertAlmostEqual(state.carrier_distance_ly(), 400.0, places=3)
+        self.assertFalse(state.carrier_pos_pending)
+
+
 class OnEventRegressionTests(unittest.TestCase):
     def test_on_event_does_not_raise_after_canonn(self):
         """Хвост _on_event когда-то попал в _load_canonn → NameError на каждом FSDJump."""

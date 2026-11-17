@@ -679,6 +679,8 @@ class Carrier:
     address: int | None = None
     body_id: int | None = None
     star_pos: tuple[float, float, float] | None = None
+    # координаты взяты из id64 системы (центр коробки): расстояние приблизительное
+    pos_approx: bool = False
     # отложенный прыжок: после DepartureTime локация обновится сама
     jump_from_system: str | None = None
     jump_dest_system: str | None = None
@@ -1397,6 +1399,7 @@ class GameState:
             moved = True
         if moved:
             self.carrier.star_pos = None
+            self.carrier.pos_approx = False
         if system:
             self.carrier.system = system
         if address is not None:
@@ -1405,6 +1408,7 @@ class GameState:
             self.carrier.body_id = body_id
         if isinstance(star_pos, (list, tuple)) and len(star_pos) == 3:
             self.carrier.star_pos = (float(star_pos[0]), float(star_pos[1]), float(star_pos[2]))
+            self.carrier.pos_approx = False
         self._adopt_carrier_pos()
         self.carrier_pos_pending = self.carrier.star_pos is None and bool(self.carrier.system or self.carrier.address is not None)
 
@@ -1438,8 +1442,20 @@ class GameState:
             self._star_names[name.lower()] = pos
         self._adopt_carrier_pos()
 
+    def set_carrier_pos_approx(self, pos: tuple[float, float, float] | None) -> None:
+        """Приблизительные координаты из id64, пока точных (EDSM/Spansh/журнал) нет."""
+        if not pos or self.carrier.star_pos is not None:
+            return
+        self.carrier.star_pos = (float(pos[0]), float(pos[1]), float(pos[2]))
+        self.carrier.pos_approx = True
+        # carrier_pos_pending не трогаем: точные координаты по-прежнему ищутся
+
+    def carrier_distance_is_approx(self) -> bool:
+        """Расстояние до карриера посчитано по приблизительным координатам (id64)."""
+        return bool(self.carrier.pos_approx and self.carrier.star_pos)
+
     def _adopt_carrier_pos(self) -> None:
-        if self.carrier.star_pos:
+        if self.carrier.star_pos and not self.carrier.pos_approx:
             return
         pos = None
         if self.carrier.address is not None:
@@ -1455,6 +1471,7 @@ class GameState:
                     break
         if pos is not None:
             self.carrier.star_pos = pos
+            self.carrier.pos_approx = False
             self.carrier_pos_pending = False
 
     def carrier_star_pos(self) -> tuple[float, float, float] | None:
