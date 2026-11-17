@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:22:52
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:19:46
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:12:08
 """Модель отображения HUD: из GameState в строки/сегменты для рендера.
 
 Чистый слой без зависимостей от UI — его используют и tkinter-оверлей, и
@@ -785,6 +786,15 @@ def _prediction_groups(body: Body, state: GameState) -> list[tuple[str, list[tup
             for species, info in grouped[genus].items()
         ]
         result.append((genus, species_rows))
+    if body.genuses:
+        # род из DSS показываем всегда, даже если критерии не дали ни одного вида
+        covered = {genus.lower().rstrip("s") for genus in order}
+        for key in body.genuses:
+            name = codex.display_name(key)
+            if name.lower().rstrip("s") in covered:
+                continue
+            result.append((name, []))
+            covered.add(name.lower().rstrip("s"))
     return result
 
 
@@ -834,6 +844,16 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
     block = 0
     for genus, species_rows in groups:
         if genus.lower() in sampled:
+            continue
+        if not species_rows:
+            # вид не предсказан — показываем хотя бы род из DSS
+            lines.append(
+                BioLine(
+                    segments=[Segment("? ", "accent"), Segment(genus, "accent")],
+                    rule=block > 0,
+                )
+            )
+            block += 1
             continue
         low, high = _genus_span(species_rows)
         for index, (species, variants, reward) in enumerate(species_rows):

@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:14:01
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:16:35
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:11:45
 """Предсказание биологии (порт движка SrvSurvey BioCriteria/BioPredictor).
 
 Данные критериев — data/bio-criteria/*.json (SrvSurvey, GPLv3). Формат:
@@ -287,8 +288,12 @@ def _clause_ok(clause: Clause, props: dict) -> bool:
     return any(w == bv for bv in lowered for w in wanted)
 
 
-def _query_ok(query: Iterable[Clause], props: dict) -> bool:
-    return all(_clause_ok(clause, props) for clause in query)
+def _query_ok(query: Iterable[Clause], props: dict, ignore_regions: bool = False) -> bool:
+    return all(
+        _clause_ok(clause, props)
+        for clause in query
+        if not (ignore_regions and clause.prop == "regions")
+    )
 
 
 def _walk(
@@ -299,13 +304,14 @@ def _walk(
     variant: str | None,
     common: list[Criteria],
     out: list[Prediction],
+    ignore_regions: bool = False,
 ) -> None:
     common = node.common_children or common
     genus = node.genus or genus
     species = node.species or species
     variant = node.variant or variant
 
-    if not _query_ok(node.query, props):
+    if not _query_ok(node.query, props, ignore_regions):
         return
     children = common if node.use_common_children else node.children
     # Лист без варианта тоже даёт предсказание: в критериях у части родов
@@ -317,18 +323,24 @@ def _walk(
             out.append(prediction)
 
     for child in children or []:
-        _walk(child, props, genus, species, variant, common, out)
+        _walk(child, props, genus, species, variant, common, out, ignore_regions)
 
 
-def predict(props: dict, known_genuses: set[str] | None = None) -> list[Prediction]:
+def predict(
+    props: dict,
+    known_genuses: set[str] | None = None,
+    ignore_regions: bool = False,
+) -> list[Prediction]:
     """Предсказания genus/species/variant для набора свойств тела.
 
     Если набор родов уже известен (DSS/`SAASignalsFound`), остальные ветки не
-    рассматриваются — как в SrvSurvey.
+    рассматриваются — как в SrvSurvey. `ignore_regions` отключает клаузы
+    `regions [ … ]`: после DSS род подтверждён игрой, и региональная статистика
+    кодекса не должна выбрасывать вид, подходящий по климату.
     """
     out: list[Prediction] = []
     for node in load_criteria():
-        _walk(node, props, None, None, None, [], out)
+        _walk(node, props, None, None, None, [], out, ignore_regions)
     if known_genuses:
         # «Brain Trees» в критериях и «Brain Tree» в кодексе — один род:
         # сравниваем без хвостового «s», иначе DSS-фильтр выкидывает всё
@@ -478,13 +490,17 @@ def forecast_names(body, system, limit: int = 4) -> list[str]:
                     names.append(f"{phrase} - {variants[0]}")
                 else:
                     names.append(phrase)
-                if len(names) >= limit:
-                    return names
         else:
             names.append(genus)
-            if len(names) >= limit:
-                return names
-    return names
+    if after_dss:
+        # род из DSS не должен пропасть из списка, даже если вид не предсказан
+        covered = {genus.lower().rstrip("s") for genus in order}
+        for key in body.genuses:
+            name = codex.display_name(key)
+            if name.lower().rstrip("s") in covered or name in names:
+                continue
+            names.append(name)
+    return names[:limit]
 
 
 def predict_for_body(body, system, limit: int = 24) -> list[Prediction]:
@@ -498,4 +514,13 @@ def predict_for_body(body, system, limit: int = 24) -> list[Prediction]:
     if not props:
         return []
     known = {codex.display_name(key) for key in (body.genuses or {})}
-    return predict(props, known_genuses=known or None)[:limit]
+    predictions = predict(props, known_genuses=known or None)
+    if known:
+        covered = {p.genus.lower().rstrip("s") for p in predictions}
+        missing = {genus for genus in known if genus.lower().rstrip("s") not in covered}
+        if missing:
+            # DSS уже показал род в игре: вид, подходящий по климату, не должен
+            # теряться из-за клаузы regions (это статистика находок в кодексе).
+            relaxed = predict(props, known_genuses=missing, ignore_regions=True)
+            predictions.extend(p for p in relaxed if p not in predictions)
+    return predictions[:limit]

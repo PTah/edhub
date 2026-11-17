@@ -1,4 +1,5 @@
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:19:03
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:13:16
 """Тесты движка биологии и регионов."""
 from __future__ import annotations
 
@@ -197,6 +198,60 @@ class PredictionTests(unittest.TestCase):
         predictions = bio.predict_for_body(body, system)
         self.assertTrue(predictions)
         self.assertGreater(predictions[0].reward, 0)
+
+    def _rocky_co2_body(self, system: System) -> Body:
+        """Smojou GH-J c23-11 1 a: 155.86 K, 0.0092 атм CO2, без вулканизма."""
+        body = Body(
+            body_id=10,
+            name="Test 1 a",
+            planet_class="Rocky body",
+            radius=1.2e6,
+            surface_gravity=0.681631,
+            surface_temp=155.857986,
+            surface_pressure=920.68,
+            atmosphere="thin carbon dioxide atmosphere",
+            atmosphere_composition={"CarbonDioxide": 100.0, "SulphurDioxide": 1.935},
+            volcanism="None",
+            materials={"Iron": 20.4, "Sulphur": 19.9, "Carbon": 16.8, "Nickel": 15.4},
+            landable=True,
+            distance_ls=1658.775,
+            parent_ids=[0],
+        )
+        system.bodies[10] = body
+        return body
+
+    def test_dss_genus_survives_region_mismatch(self):
+        """Smojou GH-J c23-11 1 a: DSS дал Bacterium и Tussock, а регион 35.
+
+        Клауза `regions` в критериях — статистика находок кодекса, и она не
+        должна выкидывать вид, если род уже подтверждён DSS.
+        """
+        system = self._system()
+        system.star_pos = (6026.3125, 287.59375, 3777.6875)  # Outer Orion Spur (35)
+        body = self._rocky_co2_body(system)
+        body.bio_signals = 2
+        body.genuses = {
+            "$Codex_Ent_Bacterial_Genus_Name;": 1,
+            "$Codex_Ent_Tussocks_Genus_Name;": 1,
+        }
+        predictions = bio.predict_for_body(body, system, limit=64)
+        self.assertEqual({p.genus for p in predictions}, {"Bacterium", "Tussock"})
+        self.assertIn("Ventusa", [p.species for p in predictions if p.genus == "Tussock"])
+        names = bio.forecast_names(body, system, limit=8)
+        self.assertTrue(any("Tussock" in name for name in names), names)
+
+    def test_dss_genus_kept_when_no_species_predicted(self):
+        """Род из DSS не пропадает из списка, если критерии не дали ни вида."""
+        system = self._system()
+        body = self._icy_body(system)
+        body.bio_signals = 2
+        body.genuses = {
+            "$Codex_Ent_Bacterial_Genus_Name;": 1,
+            "$Codex_Ent_Conchas_Genus_Name;": 1,
+        }
+        names = bio.forecast_names(body, system, limit=8)
+        self.assertTrue(any("Bacterium Acies" in name for name in names), names)
+        self.assertIn("Concha", names)
 
     def test_journal_list_atmosphere_composition_predicts(self):
         """Scan пишет AtmosphereComposition списком — без разбора видов не будет."""
