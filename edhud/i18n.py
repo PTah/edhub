@@ -60,6 +60,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "voice.plotted": "маршрут до карриера: {count} систем, ~{jumps} прыжков",
         "voice.plot_fail": "маршрут не построен: {error}",
         "voice.empty": "пусто",
+        "voice.fullscreen_borderless": (
+            "Полноэкранный режим. Переключите игру в Borderless, чтобы видеть оверлей."
+        ),
         "hud.route": "МАРШРУТ ",
         "hud.route_unset": "не задан — проложите в карте галактики",
         "hud.jumps_short": " · {n} прыжк.",
@@ -266,7 +269,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tray.update": "Проверить обновления…",
         "tray.quit": "Выход (F12)",
         "tray.tip": "EDHUD — оверлей исследователя {version}",
-        "hint.fullscreen": "полноэкранный режим: если оверлея не видно — Alt+Enter (Borderless)",
+        "hint.fullscreen": (
+            "exclusive fullscreen: Graphics → Display Mode → Borderless (или Alt+Enter)"
+        ),
+        "tray.fullscreen_title": "EDHUD",
+        "tray.fullscreen_body": (
+            "Exclusive fullscreen скрывает оверлей. Включите Borderless "
+            "(Graphics → Display Mode) или Alt+Enter."
+        ),
+        "set.warn_fullscreen": "Предупреждать об exclusive fullscreen",
         "hint.legacy": "Legacy 3.8: Odyssey-бонусы, EDSM/EDDN и био-прогноз отключены",
         "set.title": "EDHUD — настройки",
         "set.cancel": "Отмена",
@@ -495,6 +506,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "voice.plotted": "route to carrier: {count} systems, ~{jumps} jumps",
         "voice.plot_fail": "route was not plotted: {error}",
         "voice.empty": "empty",
+        "voice.fullscreen_borderless": (
+            "Fullscreen mode. Switch the game to Borderless to see the overlay."
+        ),
         "hud.route": "ROUTE ",
         "hud.route_unset": "not set — plot a route in the galaxy map",
         "hud.jumps_short": " · {n} jumps",
@@ -701,7 +715,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tray.update": "Check for updates…",
         "tray.quit": "Quit (F12)",
         "tray.tip": "EDHUD — exploration overlay {version}",
-        "hint.fullscreen": "fullscreen: if the overlay is hidden — Alt+Enter (borderless)",
+        "hint.fullscreen": (
+            "exclusive fullscreen: Graphics → Display Mode → Borderless (or Alt+Enter)"
+        ),
+        "tray.fullscreen_title": "EDHUD",
+        "tray.fullscreen_body": (
+            "Exclusive fullscreen hides the overlay. Switch to Borderless "
+            "(Graphics → Display Mode) or press Alt+Enter."
+        ),
+        "set.warn_fullscreen": "Warn about exclusive fullscreen",
         "hint.legacy": "Legacy 3.8: Odyssey bonuses, EDSM/EDDN and bio prediction are off",
         "set.title": "EDHUD — settings",
         "set.cancel": "Cancel",

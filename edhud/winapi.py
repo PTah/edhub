@@ -9,8 +9,9 @@
   * `WS_EX_NOACTIVATE` — клики и фокус не забираются у игры;
   * `WS_EX_TRANSPARENT` — сквозной режим мыши;
   * DPI-awareness (Per-Monitor v2) — на 125/150 % масштабе шрифт не мылится;
-  * если в фокусе полноэкранное окно игры, HUD показывает подсказку переключиться
-    в Borderless (Alt+Enter) — это единственный надёжный способ видеть оверлей.
+  * exclusive DirectX fullscreen детектится через SHQueryUserNotificationState
+    (QUNS_RUNNING_D3D_FULL_SCREEN); Borderless туда не попадает. Подсказка —
+    переключиться в Borderless (Alt+Enter / Display Mode).
 """
 from __future__ import annotations
 
@@ -20,6 +21,15 @@ import threading
 from typing import Callable
 
 IS_WINDOWS = sys.platform == "win32"
+
+# shellapi.h — QUERY_USER_NOTIFICATION_STATE
+QUNS_NOT_PRESENT = 1
+QUNS_BUSY = 2
+QUNS_RUNNING_D3D_FULL_SCREEN = 3
+QUNS_PRESENTATION_MODE = 4
+QUNS_ACCEPTS_NOTIFICATIONS = 5
+QUNS_QUIET_TIME = 6
+QUNS_APP = 7
 
 GWL_STYLE = -16
 GWL_EXSTYLE = -20
@@ -194,8 +204,32 @@ def keep_topmost(hwnd: int) -> bool:
         return False
 
 
+def d3d_exclusive_fullscreen() -> bool | None:
+    """Exclusive DirectX fullscreen (не Borderless).
+
+    Windows выставляет QUNS_RUNNING_D3D_FULL_SCREEN, пока игра держит
+    exclusive mode. Borderless/Windowed обычно дают ACCEPTS_NOTIFICATIONS.
+    None — не Windows или API недоступен.
+    """
+    if not IS_WINDOWS:
+        return None
+    try:
+        shell32 = ctypes.windll.shell32
+        state = ctypes.c_int(0)
+        # HRESULT S_OK == 0
+        hr = int(shell32.SHQueryUserNotificationState(ctypes.byref(state)))
+        if hr != 0:
+            return None
+        return int(state.value) == QUNS_RUNNING_D3D_FULL_SCREEN
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
 def foreground_fullscreen(exclude_hwnd: int = 0) -> bool | None:
-    """Полноэкранное ли окно в фокусе (None — не Windows или нет окна)."""
+    """Полноэкранное ли окно в фокусе (эвристика без различия exclusive/borderless).
+
+    Для предупреждения оверлея используйте `d3d_exclusive_fullscreen`.
+    """
     if not IS_WINDOWS:
         return None
     try:
@@ -230,7 +264,7 @@ def foreground_fullscreen(exclude_hwnd: int = 0) -> bool | None:
 
 
 class TopmostKeeper(threading.Thread):
-    """Фоновый «сторож» topmost + детектор полноэкранного режима игры."""
+    """Фоновый «сторож» topmost + детектор exclusive DirectX fullscreen."""
 
     def __init__(
         self,
@@ -254,7 +288,7 @@ class TopmostKeeper(threading.Thread):
                 hwnd = self.hwnd_provider()
                 if hwnd:
                     keep_topmost(hwnd)
-                    state = foreground_fullscreen(exclude_hwnd=hwnd)
+                    state = d3d_exclusive_fullscreen()
                     if state != self.fullscreen:
                         self.fullscreen = state
                         if self.on_fullscreen is not None:

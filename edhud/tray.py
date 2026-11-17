@@ -14,13 +14,21 @@ from .i18n import t
 IS_WINDOWS = sys.platform == "win32"
 
 NIM_ADD = 0x00000000
+NIM_MODIFY = 0x00000001
 NIM_DELETE = 0x00000002
+NIM_SETVERSION = 0x00000004
 NIF_MESSAGE = 0x00000001
 NIF_ICON = 0x00000002
 NIF_TIP = 0x00000004
+NIF_INFO = 0x00000010
 NIF_SHOWTIP = 0x00000080
+NIIF_NONE = 0x00000000
+NIIF_INFO = 0x00000001
+NIIF_WARNING = 0x00000002
+NOTIFYICON_VERSION_4 = 4
 WM_APP = 0x8000
 WM_TRAY = WM_APP + 1
+WM_TRAY_NOTIFY = WM_APP + 2
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
 WM_LBUTTONDBLCLK = 0x0203
@@ -65,6 +73,8 @@ WNDPROC = ctypes.WINFUNCTYPE(LRESULT, HWND, wintypes.UINT, WPARAM, LPARAM)
 
 
 class NOTIFYICONDATA(ctypes.Structure):
+    """NOTIFYICONDATAW с полями balloon (szInfo / szInfoTitle)."""
+
     _fields_ = [
         ("cbSize", wintypes.DWORD),
         ("hWnd", HWND),
@@ -73,6 +83,12 @@ class NOTIFYICONDATA(ctypes.Structure):
         ("uCallbackMessage", wintypes.UINT),
         ("hIcon", HICON),
         ("szTip", wintypes.WCHAR * 128),
+        ("dwState", wintypes.DWORD),
+        ("dwStateMask", wintypes.DWORD),
+        ("szInfo", wintypes.WCHAR * 256),
+        ("uTimeoutOrVersion", wintypes.UINT),
+        ("szInfoTitle", wintypes.WCHAR * 64),
+        ("dwInfoFlags", wintypes.DWORD),
     ]
 
 
@@ -116,6 +132,8 @@ class TrayIcon(threading.Thread):
         self._thread_id: int | None = None
         self._hicon = None
         self._nid = None
+        self._pending_notify: tuple[str, str, int] | None = None
+        self._notify_lock = threading.Lock()
         self._wndproc = WNDPROC(self._on_wndproc)
 
     def start(self) -> bool:  # type: ignore[override]
@@ -131,6 +149,40 @@ class TrayIcon(threading.Thread):
         if self._hwnd:
             user32.PostMessageW(self._hwnd, WM_QUIT, 0, 0)
         user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
+
+    def notify(self, title: str, text: str, timeout_ms: int = 10000) -> bool:
+        """Balloon у иконки трея. Вызов из любого потока безопасен."""
+        if not self.available or not self._hwnd or self._nid is None:
+            return False
+        title = (title or "")[:63]
+        text = (text or "")[:255]
+        if not text:
+            return False
+        with self._notify_lock:
+            self._pending_notify = (title, text, max(1000, int(timeout_ms)))
+        user32 = ctypes.windll.user32
+        return bool(user32.PostMessageW(self._hwnd, WM_TRAY_NOTIFY, 0, 0))
+
+    def _show_pending_notify(self) -> None:
+        pending = None
+        with self._notify_lock:
+            pending = self._pending_notify
+            self._pending_notify = None
+        if not pending or self._nid is None:
+            return
+        title, text, timeout_ms = pending
+        shell32 = ctypes.windll.shell32
+        nid = self._nid
+        nid.szInfoTitle = title
+        nid.szInfo = text
+        nid.uTimeoutOrVersion = timeout_ms
+        nid.dwInfoFlags = NIIF_WARNING
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO
+        shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
+        # вернуть флаги без INFO, чтобы следующий MODIFY не повторял balloon
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        nid.szInfo = ""
+        nid.szInfoTitle = ""
 
     def run(self) -> None:  # pragma: no cover - только Windows
         user32 = ctypes.windll.user32
@@ -258,6 +310,9 @@ class TrayIcon(threading.Thread):
         shell32 = ctypes.windll.shell32
         if msg == getattr(self, "_taskbar_created", 0) and self._nid is not None:
             shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._nid))
+            return 0
+        if msg == WM_TRAY_NOTIFY:
+            self._show_pending_notify()
             return 0
         if msg == WM_TRAY:
             if lparam in (WM_RBUTTONUP, WM_LBUTTONUP):

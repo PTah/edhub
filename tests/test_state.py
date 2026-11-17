@@ -689,7 +689,7 @@ class RouteOpenedColumnTests(unittest.TestCase):
         from edhud.route import Route, RouteHop
 
         state = GameState()
-        state.cmdr = "PapaTramp"
+        state.cmdr = "jdoe"
         state.route = Route(
             hops=[
                 RouteHop(system="Home", star_class="K", discovered_by_me=True),
@@ -699,7 +699,7 @@ class RouteOpenedColumnTests(unittest.TestCase):
         )
         state.note_system_discoverer("Home", None, by_me=True)
         state.sync_route_discoverers()
-        self.assertEqual(state.route.hops[0].opened_label(), "Ваше открытие (PapaTramp)")
+        self.assertEqual(state.route.hops[0].opened_label(), "Ваше открытие (jdoe)")
         self.assertEqual(state.route.hops[1].opened_label(), "Redfoxxx")
         self.assertEqual(state.route.hops[2].opened_label(), "—")
 
@@ -716,7 +716,7 @@ class RouteOpenedColumnTests(unittest.TestCase):
             self.assertIn("bodies", columns)
             box = window._route_inner.grid_slaves(row=0, column=columns["opened"])[0]
             label = box.winfo_children()[0]
-            self.assertEqual(label.cget("text"), "Ваше открытие (PapaTramp)")
+            self.assertEqual(label.cget("text"), "Ваше открытие (jdoe)")
             # своё открытие — золотым, а не зелёным «ok»
             self.assertEqual(label.cget("fg").lower(), "#ffd700")
             box2 = window._route_inner.grid_slaves(row=1, column=columns["opened"])[0]

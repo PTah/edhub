@@ -30,7 +30,7 @@ class LocalRouteStatsTests(unittest.TestCase):
 
     def test_local_cache_overrides_stale_edsm_missing(self):
         state = GameState()
-        state.cmdr = "PapaTramp"
+        state.cmdr = "jdoe"
         state.route = Route(hops=[RouteHop(system="Alpha")])
         # до визита EDSM ответил «систему не знаем»
         state.note_system_body_stats("Alpha", missing=True)

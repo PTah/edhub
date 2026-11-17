@@ -137,6 +137,7 @@ class App:
         self._carrier_lookup_at = 0.0
         self._route_disc_busy = False
         self._route_disc_key: tuple | None = None
+        self._fullscreen_warned = False
 
     def _make_remote_client(self) -> remote.RemoteClient | None:
         if not self.cfg.remote_enabled:
@@ -355,6 +356,8 @@ class App:
                 self.overlay.set_grounded(self.state.grounded)
                 # открыто меню игры (карта, Carrier Management) — панели почти невидимы
                 self.overlay.set_gui_focus(self.state.status.gui_focus, self.state.music_track)
+                # exclusive мог пойматься до in_game — догоняем one-shot из тика
+                self._maybe_warn_exclusive_fullscreen()
             if self.mainwindow is not None:
                 self.mainwindow.update_state(self.state)
         except Exception:
@@ -515,6 +518,33 @@ class App:
             hints.append(t("hint.fullscreen"))
         return " · ".join(hints) if hints else None
 
+    def _on_exclusive_fullscreen(self, state: bool | None) -> None:
+        """Сброс сессии при выходе; вход — попытка one-shot (см. _maybe_warn_exclusive)."""
+        if state is not True:
+            self._fullscreen_warned = False
+            return
+        self._maybe_warn_exclusive_fullscreen()
+
+    def _maybe_warn_exclusive_fullscreen(self) -> None:
+        """Один раз за сессию exclusive: трей + голос (оверлей в exclusive не виден)."""
+        if self._fullscreen_warned or not self.cfg.warn_fullscreen:
+            return
+        if self.overlay is None or getattr(self.overlay, "fullscreen", None) is not True:
+            return
+        if not (self.state.in_game and self._game_alive()):
+            return
+        self._fullscreen_warned = True
+        if self.tray is not None:
+            try:
+                self.tray.notify(t("tray.fullscreen_title"), t("tray.fullscreen_body"))
+            except Exception:
+                pass
+        if self.cfg.voice_enabled:
+            try:
+                self.voice.speak(t("voice.fullscreen_borderless"))
+            except Exception:
+                pass
+
     def sync_system(self) -> None:
         """Кэш своих систем + запуск догрузки от других командиров."""
         address = self.state.system.address
@@ -631,6 +661,7 @@ class App:
             system_address_provider=lambda: self.state.system.address,
             carrier_system_provider=lambda: self.state.carrier.system,
             on_copy_carrier=self.copy_system_name,
+            on_fullscreen=self._on_exclusive_fullscreen,
         )
         bindings = {
             0x77: lambda: self._ui(self.toggle_expanded),  # F8
