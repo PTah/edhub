@@ -98,6 +98,8 @@ class App:
         self.state = GameState()
         self.state.mining.target = cfg.mining_target or ""
         self.store = SystemStore()
+        self.store.on_save = self.state.note_local_system
+        self._route_local_seen: set[str] = set()
         self.belt_store = BeltStore()
         self.hotspot_store = HotspotStore()
         self.stats = StatsStore()
@@ -287,6 +289,19 @@ class App:
                 self.prices.save()
         if event.get("event") in ("FSDJump", "Location", "CarrierJump"):
             self._load_canonn(event.get("StarSystem") or self.state.system.name)
+        if self.state.persist_needed:
+            self.state.persist_needed = False
+            self._save_system_now()
+        if event.get("event") != "FSDJump":
+            return
+        sphere = self.state.route.source == "sphere"
+        if not (self.cfg.copy_next_system or sphere) or self.overlay is None:
+            return
+        if self.state.route.source == "game":
+            return
+        hop = self.state.route.next_hop(self.state.system.name)
+        if hop is not None:
+            self.overlay.copy_to_clipboard(hop.system)
 
     def _load_canonn(self, system: str | None) -> None:
         """Чужие био-точки Canonn (prior scans) для радара — в фоне."""
@@ -305,19 +320,6 @@ class App:
                 self.state.set_canonn_bio(points)
 
         threading.Thread(target=run, name="edhud-canonn", daemon=True).start()
-        if self.state.persist_needed:
-            self.state.persist_needed = False
-            self._save_system_now()
-        if event.get("event") != "FSDJump":
-            return
-        sphere = self.state.route.source == "sphere"
-        if not (self.cfg.copy_next_system or sphere) or self.overlay is None:
-            return
-        if self.state.route.source == "game":
-            return
-        hop = self.state.route.next_hop(self.state.system.name)
-        if hop is not None:
-            self.overlay.copy_to_clipboard(hop.system)
 
     def _on_status(self) -> None:
         self.alerts.handle_status(self.state)
@@ -374,8 +376,25 @@ class App:
         except OSError:
             pass
 
+    def _sync_local_route(self, limit: int = 60) -> None:
+        """Хопы маршрута, которые уже есть в своём кэше систем: состав и «открыл я» оттуда."""
+        loaded = 0
+        for hop in self.state.route.hops:
+            key = hop.system.lower()
+            if key in self._route_local_seen:
+                continue
+            self._route_local_seen.add(key)
+            address = hop.address or self.store.find_address(hop.system)
+            cached = self.store.load(address, hop.system) if address else None
+            if cached is not None:
+                self.state.note_local_system(cached)
+            loaded += 1
+            if loaded >= limit:
+                break
+
     def _lookup_route_discoverers(self) -> None:
         """Для хопов маршрута без первооткрывателя — спросить EDSM (пакетами)."""
+        self._sync_local_route()
         if not self.cfg.allow_network or not self.cfg.remote_enabled:
             return
         if self._route_disc_busy:
@@ -384,7 +403,7 @@ class App:
         for hop in self.state.route.hops:
             key = hop.system.lower()
             need_disc = key not in self.state._systems_by_me and key not in self.state._discoverers
-            need_stats = key not in self.state._body_stats
+            need_stats = key not in self.state._body_stats and key not in self.state._local_stats
             if not need_disc and not need_stats:
                 continue
             pending.append(hop.system)

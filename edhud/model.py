@@ -764,8 +764,25 @@ class System:
             "remote_sources": list(self.remote_sources),
             "remote_scan_value": self.remote_scan_value,
             "remote_mapped_value": self.remote_mapped_value,
+            "discovered_by_me": bool(self.discovered_by_me),
             "bodies": [b.to_persist() for b in self.bodies.values()],
         }
+
+    def route_stats(self) -> tuple[int, int, int]:
+        """(звёзды, планеты, всего) по известным телам — для колонки «Тела» маршрута.
+
+        Кольца и Belt Cluster не считаем: EDSM их тоже не относит к звёздам/планетам.
+        """
+        stars = 0
+        planets = 0
+        for body in self.bodies.values():
+            if is_ring_body(body.name) or is_belt_body(body.name):
+                continue
+            if body.is_star:
+                stars += 1
+            else:
+                planets += 1
+        return stars, planets, stars + planets
 
     @classmethod
     def from_persist(cls, data: dict) -> "System":
@@ -781,6 +798,7 @@ class System:
             remote_sources=list(data.get("remote_sources") or []),
             remote_scan_value=data.get("remote_scan_value"),
             remote_mapped_value=data.get("remote_mapped_value"),
+            discovered_by_me=bool(data.get("discovered_by_me")),
         )
         for raw in data.get("bodies") or []:
             body = Body.from_persist(raw)
@@ -807,6 +825,8 @@ class System:
                     seen.add(src)
         self.remote_scan_value = self.remote_scan_value or other.remote_scan_value
         self.remote_mapped_value = self.remote_mapped_value or other.remote_mapped_value
+        if other.discovered_by_me:
+            self.discovered_by_me = True
         for body_id, cached in other.bodies.items():
             live = self.bodies.get(body_id)
             if live is None:
@@ -1102,6 +1122,8 @@ class GameState:
     _body_stats: dict[str, tuple[int | None, int | None, int | None, bool]] = field(
         default_factory=dict
     )
+    # имя системы → (stars, planets, bodies) из своего кэша на диске / живого журнала
+    _local_stats: dict[str, tuple[int, int, int]] = field(default_factory=dict)
 
     # ------------------------------------------------------------- события
     def apply(self, event: dict) -> None:
@@ -1635,6 +1657,11 @@ class GameState:
                 hop.discovered_by_me = False
                 hop.discovered_by = self._discoverers[key]
             stats = self._body_stats.get(key)
+            local = self._local_stats.get(key)
+            if local is not None and local[2] > 0:
+                # свой кэш (журнал + сохранённые сканы) свежее запроса EDSM «до визита»
+                if stats is None or stats[3] or local[2] >= (stats[2] or 0):
+                    stats = (local[0], local[1], local[2], False)
             if stats is None:
                 continue
             stars, planets, bodies, missing = stats
@@ -1642,6 +1669,18 @@ class GameState:
             hop.edsm_planets = planets
             hop.edsm_bodies = bodies
             hop.edsm_missing = bool(missing)
+
+    def note_local_system(self, system: "System") -> None:
+        """Система из своего кэша/журнала → хопы маршрута (состав и «открыл я»)."""
+        key = (system.name or "").strip().lower()
+        if not key or not system.bodies:
+            return
+        stars, planets, bodies = system.route_stats()
+        self._local_stats[key] = (stars, planets, bodies)
+        if system.discovered_by_me:
+            self.note_system_discoverer(system.name, None, by_me=True)
+        else:
+            self.sync_route_discoverers()
 
     def note_system_body_stats(
         self,

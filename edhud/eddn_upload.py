@@ -178,6 +178,13 @@ class EddnUploader:
                     code = None
                     try:
                         code = _post(envelope)
+                    except urllib.error.HTTPError as exc:
+                        # 400/413/426 — сообщение битое/устаревшее: выбросить, не повторять
+                        # (раньше HTTPError попадал в ветку «сеть» и вешал очередь навсегда)
+                        code = int(exc.code or 400)
+                        if code >= 500:
+                            time.sleep(RETRY_MIN)
+                            continue
                     except (urllib.error.URLError, TimeoutError, OSError):
                         # сеть: оставляем в очереди и ждём EDDN-минимум 60 c
                         time.sleep(RETRY_MIN)
