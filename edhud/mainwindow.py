@@ -438,7 +438,9 @@ class MainWindow:
         on_copy_carrier: Callable[[str], None] | None = None,
         on_plot_to_carrier: Callable[[], None] | None = None,
         price_index=None,
+        on_load_sphere_route: Callable[[list], int] | None = None,
     ) -> None:
+        self.on_load_sphere_route = on_load_sphere_route
         self.on_close = on_close
         self.cfg = cfg
         self.belt_store = belt_store if belt_store is not None else BeltStore()
@@ -1890,6 +1892,21 @@ class MainWindow:
             padx=10,
         )
         self.sphere_calc.pack(side="left")
+        self.sphere_load = tk.Button(
+            bar,
+            text=t("sphere.load"),
+            command=self._load_sphere_route,
+            state="disabled",
+            bg=COLORS["panel"],
+            fg=COLORS["fg"],
+            activebackground=COLORS["sel"],
+            activeforeground=COLORS["fg"],
+            disabledforeground=COLORS["muted"],
+            relief="flat",
+            font=font,
+            padx=10,
+        )
+        self.sphere_load.pack(side="left", padx=(8, 0))
         self.sphere_system.bind("<Return>", lambda _e: self._calc_sphere())
         self.sphere_distance.bind("<Return>", lambda _e: self._calc_sphere())
         self.sphere_status = tk.Label(
@@ -1953,7 +1970,26 @@ class MainWindow:
             activeforeground=COLORS["fg"],
             font=font,
         )
+        self.sphere_load.configure(
+            bg=COLORS["panel"],
+            fg=COLORS["fg"],
+            activebackground=COLORS["sel"],
+            activeforeground=COLORS["fg"],
+            disabledforeground=COLORS["muted"],
+            font=font,
+        )
         self.sphere_tree.tag_configure("back", foreground=COLORS["gold"])
+
+    def _load_sphere_route(self) -> None:
+        """Обход из таблицы → маршрут EDHUD (Route + HUD). В игру он не прокладывается."""
+        hops = list(self._sphere_hops)
+        if len(hops) < 2 or self.on_load_sphere_route is None:
+            return
+        count = self.on_load_sphere_route(hops)
+        if count:
+            self.sphere_status.configure(
+                text=t("sphere.loaded", n=count), fg=COLORS["ok"]
+            )
 
     def _calc_sphere(self) -> None:
         if self._sphere_busy:
@@ -1973,6 +2009,7 @@ class MainWindow:
             center = state.system.star_pos
         self._sphere_busy = True
         self.sphere_calc.configure(state="disabled")
+        self.sphere_load.configure(state="disabled")
         self.sphere_status.configure(
             text=t("sphere.searching", radius=radius, system=system),
             fg=COLORS["muted"],
@@ -2019,6 +2056,8 @@ class MainWindow:
             )
             total += hop.leg_ly or 0.0
         unique = sum(1 for hop in self._sphere_hops if not hop.returning)
+        can_load = unique > 1 and self.on_load_sphere_route is not None
+        self.sphere_load.configure(state="normal" if can_load else "disabled")
         if unique <= 1:
             text = t("sphere.alone", system=self._sphere_hops[0].name if self._sphere_hops else "—")
         else:

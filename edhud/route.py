@@ -104,8 +104,10 @@ def distance_ly(a: tuple[float, float, float] | None, b: tuple[float, float, flo
 @dataclass
 class Route:
     hops: list[RouteHop] = field(default_factory=list)
-    source: str = "game"  # game | locked | import | plotter
+    source: str = "game"  # game | locked | import | plotter | sphere
     locked: bool = False
+    # у замкнутого маршрута старт повторяется в конце: помним, где мы были в прошлый раз
+    _cursor: int = field(default=0, repr=False, compare=False)
 
     # ------------------------------------------------------------- загрузка
     @classmethod
@@ -181,6 +183,24 @@ class Route:
         return route
 
     @classmethod
+    def from_sphere(cls, tour) -> "Route":
+        """Замкнутый обход шара (edhud.sphere.SphereHop): старт … старт."""
+        hops = [
+            RouteHop(
+                system=hop.name,
+                address=hop.address,
+                star_pos=hop.pos,
+                star_class=hop.star_class,
+                jumps=0 if index == 0 else 1,
+            )
+            for index, hop in enumerate(tour)
+            if hop.name
+        ]
+        route = cls(hops=hops, source="sphere", locked=True)
+        route._recalc()
+        return route
+
+    @classmethod
     def from_names(cls, names: list[str], source: str = "import") -> "Route":
         route = cls(hops=[RouteHop(system=n.strip()) for n in names if n.strip()], source=source, locked=True)
         route._recalc()
@@ -217,10 +237,14 @@ class Route:
     def index_of(self, system: str | None) -> int | None:
         if not system:
             return None
-        for i, hop in enumerate(self.hops):
-            if hop.system.lower() == system.lower():
-                return i
-        return None
+        key = system.lower()
+        found = [i for i, hop in enumerate(self.hops) if hop.system.lower() == key]
+        if not found:
+            return None
+        # система в маршруте дважды (возврат в старт): берём ближайший впереди пройденного
+        idx = next((i for i in found if i >= self._cursor), found[-1])
+        self._cursor = idx
+        return idx
 
     def next_hop(self, system: str | None) -> RouteHop | None:
         idx = self.index_of(system)

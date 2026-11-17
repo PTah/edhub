@@ -111,6 +111,73 @@ class SphereWindowTests(unittest.TestCase):
             root.destroy()
 
 
+class SphereRouteLoadTests(unittest.TestCase):
+    def _tour(self):
+        return plan_tour(
+            [
+                SphereHop("Sol", (0, 0, 0), star_class="G"),
+                SphereHop("Barnard", (2, 0, 0), star_class="M", from_center=2),
+                SphereHop("Wolf", (2, 2, 0), star_class="M", from_center=2.8),
+            ]
+        )
+
+    def test_route_from_sphere_is_closed_and_tracks_return(self):
+        from edhud.route import Route
+
+        route = Route.from_sphere(self._tour())
+        names = [h.system for h in route.hops]
+        self.assertEqual(route.source, "sphere")
+        self.assertTrue(route.locked)
+        self.assertEqual(names[0], names[-1])
+        self.assertEqual(len(names), 4)
+        last = len(names) - 1
+        # в старте до тура — первый шаг впереди
+        self.assertEqual(route.index_of("Sol"), 0)
+        self.assertEqual(route.next_hop("Sol").system, names[1])
+        # идём по маршруту: возврат в Sol — это уже последний хоп, а не нулевой
+        for step in names[1:-1]:
+            route.index_of(step)
+        self.assertEqual(route.index_of("Sol"), last)
+        self.assertIsNone(route.next_hop("Sol"))
+        self.assertEqual(route.progress("Sol"), (last, last))
+
+    def test_mainwindow_button_loads_route(self):
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        loaded: list[list] = []
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root, on_load_sphere_route=lambda hops: loaded.append(hops) or len(hops))
+            self.assertEqual(str(window.sphere_load.cget("state")), "disabled")
+            window._show_sphere(self._tour(), None)
+            self.assertEqual(str(window.sphere_load.cget("state")), "normal")
+            window._load_sphere_route()
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(len(loaded[0]), 4)
+            self.assertIn("4", window.sphere_status.cget("text"))
+            window.destroy()
+        finally:
+            root.destroy()
+
+    def test_app_load_sphere_route_sets_state_and_copies_next(self):
+        from edhud.app import App
+
+        app = App.__new__(App)
+        app.state = GameState()
+        app.state.system.name = "Sol"
+        copied: list[str] = []
+        app.copy_system_name = copied.append
+        count = app.load_sphere_route(self._tour())
+        self.assertEqual(count, 4)
+        self.assertEqual(app.state.route.source, "sphere")
+        self.assertEqual(app.state.view_tab, "route")
+        self.assertEqual(copied, [app.state.route.hops[1].system])
+        self.assertEqual(app.load_sphere_route([]), 0)
+
+
 class DiscoveredMarkTests(unittest.TestCase):
     def test_gold_check_on_star_line_when_we_discovered_the_system(self):
         state = GameState()

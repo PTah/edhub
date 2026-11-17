@@ -310,7 +310,8 @@ class App:
             self._save_system_now()
         if event.get("event") != "FSDJump":
             return
-        if not self.cfg.copy_next_system or self.overlay is None:
+        sphere = self.state.route.source == "sphere"
+        if not (self.cfg.copy_next_system or sphere) or self.overlay is None:
             return
         if self.state.route.source == "game":
             return
@@ -625,6 +626,7 @@ class App:
             on_copy_system=self.copy_system_name,
             on_copy_carrier=self.copy_system_name,
             on_plot_to_carrier=self.plot_route_to_carrier,
+            on_load_sphere_route=self.load_sphere_route,
         )
         self.mainwindow.apply_look(self.cfg)
         self.mainwindow.show()
@@ -724,6 +726,23 @@ class App:
             self.overlay.copy_to_clipboard(text)
         elif self.mainwindow is not None:
             self.mainwindow._copy_text(text)
+
+    def load_sphere_route(self, tour) -> int:
+        """Обход шара → залоченный маршрут EDHUD; следующая система сразу в буфер.
+
+        Прокладки в игре нет: следующую цель вставляют в поиск карты галактики.
+        Возвращает число систем в маршруте (0 — нечего грузить).
+        """
+        route = Route.from_sphere(tour or [])
+        if len(route.hops) < 2:
+            return 0
+        self.state.route = route
+        self.state.sync_route_discoverers()
+        self.state.view_tab = "route"
+        hop = route.next_hop(self.state.system.name)
+        if hop is not None:
+            self.copy_system_name(hop.system)
+        return len(route.hops)
 
     def plot_route_to_carrier(self) -> None:
         """Маршрут Spansh до карриера в EDHUD (не прокладка в игре; из шапки убран)."""
