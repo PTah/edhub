@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:13:56
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 19:10:31
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:26:45
 """Тесты конвейера: журнал -> состояние -> HUD, кэш систем, залоченный маршрут."""
 from __future__ import annotations
 
@@ -1351,6 +1352,90 @@ class CarrierDistanceTests(unittest.TestCase):
             window.destroy()
         finally:
             root.destroy()
+
+    def test_ring_cell_tip_shows_ring_type(self):
+        """Наведение на символ кольца подсказывает тип: ледяное, металлическое…"""
+        import tkinter as tk
+
+        from edhud.mainwindow import MainWindow
+
+        state = GameState()
+        state.system.address = 7
+        state.system.name = "Ring Tip"
+        state.system.bodies[1] = Body(
+            body_id=1,
+            name="Ring Tip 1",
+            planet_class="Icy body",
+            has_rings=True,
+            ring_types=["Icy"],
+            distance_ls=10.0,
+        )
+        state.system.bodies[2] = Body(
+            body_id=2,
+            name="Ring Tip 2",
+            planet_class="Rocky body",
+            has_rings=True,
+            ring_types=["Metallic", "Rocky"],
+            distance_ls=20.0,
+        )
+        state.system.bodies[3] = Body(
+            body_id=3,
+            name="Ring Tip 3",
+            planet_class="Gas giant",
+            has_rings=True,
+            distance_ls=30.0,
+        )
+        state.system.bodies[4] = Body(
+            body_id=4,
+            name="Ring Tip Belt Cluster 1",
+            has_rings=True,
+            distance_ls=40.0,
+        )
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            window = MainWindow(root)
+            window.update_state(state)
+            window.win.update_idletasks()
+            icy = window._body_rows[1]["cells"]["belt"][1]
+            self.assertIsNotNone(icy.cget("image"))
+            self.assertEqual(icy.tip.text, "Кольца: ледяное")
+            both = window._body_rows[2]["cells"]["belt"][1]
+            self.assertEqual(both.tip.text, "Кольца: металлическое, каменное")
+            unknown = window._body_rows[3]["cells"]["belt"][1]
+            self.assertEqual(unknown.tip.text, "Кольца есть, тип пока неизвестен — нужен FSS/скан")
+            belt = window._body_rows[4]["cells"]["belt"][1]
+            self.assertIsNone(getattr(belt, "tip", None))
+            window.destroy()
+        finally:
+            root.destroy()
+
+    def test_metallic_ring_scan_marks_body(self):
+        """`eRingClass_Metalic` из журнала: значок кольца и тип в тултипе."""
+        from edhud.mainwindow import _rings_tip
+        from edhud.model import GameState
+
+        state = GameState()
+        state.system.address = 11
+        state.apply(
+            {
+                "event": "Scan",
+                "SystemAddress": 11,
+                "BodyID": 3,
+                "BodyName": "Metal Check 3",
+                "StarSystem": "Metal Check",
+                "PlanetClass": "Rocky body",
+                "Rings": [
+                    {"Name": "Metal Check 3 A Ring", "RingClass": "eRingClass_Metalic", "Mass": 1e18,
+                     "InnerRad": 1e6, "OuterRad": 2e6},
+                ],
+            }
+        )
+        body = state.system.body(3)
+        assert body is not None
+        self.assertEqual(body.ring_types, ["Metalic"])
+        self.assertTrue(body.has_rings)
+        self.assertEqual(_rings_tip(body), "Кольца: металлическое")
 
     def test_gas_giant_ring_dss_does_not_check_planet(self):
         """SAAScanComplete иногда на BodyID гиганта с EfficiencyTarget=0 — не ✔ DSS."""

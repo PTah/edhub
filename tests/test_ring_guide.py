@@ -1,4 +1,5 @@
 # Created by nc.ai 1.2.15 on Papasha 2026-11-15 16:44:44
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:28:06
 """Копание в кольцах: справочник по типам, плотность (edtools), двойные хотспоты."""
 from __future__ import annotations
 
@@ -48,6 +49,16 @@ class RingKindTests(unittest.TestCase):
         self.assertEqual(mining.normalize_ring_kind("metal rich"), "Metal-Rich")
         self.assertIsNone(mining.normalize_ring_kind("eRingClass_BeltCluster"))
         self.assertEqual(mining.ring_kinds(["eRingClass_Icy", "Icy", "eRingClass_Rocky"]), ["Icy", "Rocky"])
+
+    def test_game_spelling_metalic(self):
+        """В журнале металлическое кольцо — `eRingClass_Metalic` (одна «l»)."""
+        self.assertEqual(mining.normalize_ring_kind("eRingClass_Metalic"), "Metallic")
+        self.assertEqual(mining.normalize_ring_kind("Metalic"), "Metallic")
+        self.assertEqual(mining.normalize_ring_kind("MetalRich"), "Metal-Rich")
+        self.assertEqual(
+            mining.ring_kinds(["Metalic", "MetalRich", "eRingClass_Metalic"]),
+            ["Metallic", "Metal-Rich"],
+        )
 
 
 class RingMineralsTests(unittest.TestCase):

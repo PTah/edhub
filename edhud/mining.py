@@ -1,4 +1,5 @@
 # Edited by nc.ai 1.2.15 on Papasha 2026-11-15 12:11:56
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:27:34
 """Hotspot-минералы колец: средние рыночные цены и сортировка.
 
 Цены — ориентир galactic average (Inara / mining-гайды, ~2025), не live-рынок.
@@ -271,9 +272,12 @@ RING_KIND_ALIASES: dict[str, str] = {
     "icy": "Icy",
     "eringclass_icy": "Icy",
     "metallic": "Metallic",
+    "metalic": "Metallic",  # так пишет игра: eRingClass_Metalic
     "eringclass_metallic": "Metallic",
+    "eringclass_metalic": "Metallic",
     "metal rich": "Metal-Rich",
     "metal-rich": "Metal-Rich",
+    "metalrich": "Metal-Rich",
     "eringclass_metalrich": "Metal-Rich",
     "rocky": "Rocky",
     "eringclass_rocky": "Rocky",

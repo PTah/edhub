@@ -1,5 +1,6 @@
 # Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:16:06
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 17:45:12
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:27:34
 """Состояние игры: система, тела, биология, статус, маршрут.
 
 Модель собирается из событий журнала (как это делает EDMarketConnector в
@@ -52,11 +53,13 @@ _DSS_ALT_MIN_M = 25_000.0
 _DSS_PROBE_FLOOR = 0.25
 
 # Пояса, в которых можно добывать: ледяной, каменный, металлический, богатый металлами.
+# «Metalic» — не опечатка: игра пишет именно так (`eRingClass_Metalic`).
 _MINEABLE_RING = {
     "eRingClass_Icy",
     "eRingClass_Rocky",
     "eRingClass_MetalRich",
     "eRingClass_Metallic",
+    "eRingClass_Metalic",
 }
 
 

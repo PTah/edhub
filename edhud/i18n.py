@@ -1,4 +1,5 @@
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 14:35:25
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:25:45
 """Русский и английский интерфейс.
 
 Русский — если язык Windows русский (язык интерфейса или региональные
@@ -176,6 +177,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tip.save_belt": "ПКМ — сохранить пояс в базу",
         "tip.saved_belt": "★ уже в базе · ПКМ — обновить / удалить",
         "tip.rings_only": "Отсканирован пояс/кольца; поверхность планеты — нет",
+        "tip.rings_types": "Кольца: {kinds}",
+        "tip.rings_unknown": "Кольца есть, тип пока неизвестен — нужен FSS/скан",
+        "ring.kind.icy": "ледяное",
+        "ring.kind.rocky": "каменное",
+        "ring.kind.metallic": "металлическое",
+        "ring.kind.metal_rich": "богатое металлами",
         "tip.dss_alt": "DSS пробы примерно с высоты {rng}",
         "src.own": "своё",
         "win.system": "Система: {name}{opened}",
@@ -601,6 +608,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tip.save_belt": "Right-click to save the belt",
         "tip.saved_belt": "★ already saved · right-click to update / delete",
         "tip.rings_only": "Belt/rings scanned; the planet surface is not",
+        "tip.rings_types": "Rings: {kinds}",
+        "tip.rings_unknown": "Rings present, type unknown yet — needs FSS/scan",
+        "ring.kind.icy": "icy",
+        "ring.kind.rocky": "rocky",
+        "ring.kind.metallic": "metallic",
+        "ring.kind.metal_rich": "metal-rich",
         "tip.dss_alt": "DSS probes from about {rng}",
         "src.own": "own",
         "win.system": "System: {name}{opened}",

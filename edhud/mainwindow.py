@@ -1,5 +1,6 @@
 # Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:03
 # Edited by nc.ai 1.2.11 on Papasha 2026-11-14 16:44:56
+# Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:25:52
 """Основное окно EDHUD (стиль EDEB): вкладки Route, Bodies и Пояса."""
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from typing import Callable
 from . import bio, codex, icon, values, winapi
 from .belts import BeltStore, SavedBelt
 from .i18n import t
-from .mining import format_hotspots, format_hotspots_tip
+from .mining import format_hotspots, format_hotspots_tip, ring_kinds
 from .model import Body, GameState, format_dss_range, is_belt_body, is_ring_body
 from .route import Route
 from .sphere import SphereHop, fetch_sphere, plan_tour
@@ -344,6 +345,29 @@ def _ring_icon(master: tk.Misc) -> tk.PhotoImage:
             elif in_ring:
                 img.put(ring, (x, y))
     return img
+
+
+_RING_KIND_KEYS = {
+    "Icy": "ring.kind.icy",
+    "Rocky": "ring.kind.rocky",
+    "Metallic": "ring.kind.metallic",
+    "Metal-Rich": "ring.kind.metal_rich",
+}
+
+
+def _rings_tip(body: Body) -> str | None:
+    """Тултип символа кольца: какого типа кольцо — ледяное, металлическое и т. д."""
+    if not body.has_rings or is_belt_body(body.name):
+        return None
+    kinds: list[str] = []
+    for kind in ring_kinds(body.ring_types):
+        key = _RING_KIND_KEYS.get(kind)
+        text = t(key) if key else kind
+        if text not in kinds:
+            kinds.append(text)
+    if not kinds:
+        return t("tip.rings_unknown")
+    return t("tip.rings_types", kinds=", ".join(kinds))
 
 
 def _value_of(body: Body, odyssey: bool) -> str:
@@ -2229,10 +2253,11 @@ class MainWindow:
             dss_tip = t("tip.dss_alt", rng=format_dss_range(body.radius))
         styles: dict[str, tuple[str, str]] = {}
         tips: dict[str, str | None] = {}
+        rings_tip = _rings_tip(body)
         for key, _title, _width, _anchor in BODY_COLUMNS:
             if key == "belt":
                 styles[key] = (COLORS["text"], COLORS["row"])
-                tips[key] = None
+                tips[key] = rings_tip
                 continue
             paint = signal_colors(key, counts.get(key))
             if key == "first" and first == "✔":
@@ -2268,6 +2293,7 @@ class MainWindow:
             tip,
             minerals_tip,
             dss_tip,
+            rings_tip,
             guess_color,
         )
         return values, styles, tips, sig
@@ -2342,7 +2368,13 @@ class MainWindow:
                     if key == "belt":
                         icon = self._ring_icon if values["belt"] and self._ring_icon is not None else None
                         label = self._put_cell(
-                            "bodies", row_idx, col, widths[col], image=icon, anchor="center"
+                            "bodies",
+                            row_idx,
+                            col,
+                            widths[col],
+                            image=icon,
+                            anchor="center",
+                            tip=tips.get(key) if icon is not None else None,
                         )
                     else:
                         fg, bg = styles[key]
@@ -2374,6 +2406,7 @@ class MainWindow:
                         label.configure(image=icon or "", bg=bg)
                         if icon is not None:
                             label.image = icon
+                        self._set_cell_tip(box, label, tips.get(key) if icon is not None else None)
                     else:
                         label.configure(text=values[key], fg=fg, bg=bg, anchor=anchor)
                         box.configure(bg=bg)
