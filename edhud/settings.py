@@ -352,6 +352,7 @@ class SettingsDialog:
         self._spansh_busy = False
         self._stats_busy = False
         self.click_through = BooleanVar(value=bool(self.cfg.click_through))
+        self.warn_fullscreen = BooleanVar(value=bool(getattr(self.cfg, "warn_fullscreen", True)))
         self.edsm_api_key = StringVar(value=self.cfg.edsm_api_key or "")
         self.edsm_commander = StringVar(value=self.cfg.edsm_commander or "")
         self.eddn_upload = BooleanVar(value=bool(getattr(self.cfg, "eddn_upload", False)))
@@ -553,6 +554,9 @@ class SettingsDialog:
             anchor="w", padx=(20, 0), pady=(0, 4)
         )
         ttk.Checkbutton(box, text=t("set.click"), variable=self.click_through).pack(
+            anchor="w", pady=2
+        )
+        ttk.Checkbutton(box, text=t("set.warn_fullscreen"), variable=self.warn_fullscreen).pack(
             anchor="w", pady=2
         )
         ttk.Checkbutton(box, text=t("set.belts"), variable=self.show_belt_clusters).pack(
@@ -1028,6 +1032,7 @@ class SettingsDialog:
         self.cfg.spansh_db = bool(self.spansh_db.get())
         self.cfg.spansh_dump = self.spansh_dump.get() or spanshdb.DEFAULT_DUMP
         self.cfg.click_through = bool(self.click_through.get())
+        self.cfg.warn_fullscreen = bool(self.warn_fullscreen.get())
         self.cfg.edsm_api_key = self.edsm_api_key.get().strip()
         self.cfg.edsm_commander = self.edsm_commander.get().strip()
         self.cfg.eddn_upload = bool(self.eddn_upload.get())

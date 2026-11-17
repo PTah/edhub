@@ -52,6 +52,7 @@ class Overlay:
         system_address_provider=None,
         carrier_system_provider=None,
         on_copy_carrier=None,
+        on_fullscreen=None,
     ) -> None:
         import tkinter as tk
         from tkinter import font as tkfont
@@ -67,6 +68,7 @@ class Overlay:
         self.system_address_provider = system_address_provider
         self.carrier_system_provider = carrier_system_provider
         self.on_copy_carrier = on_copy_carrier
+        self.on_fullscreen = on_fullscreen
         self._fonts: dict[tuple[int, bool], tkfont.Font] = {}
         self._view: HudView | None = None
         self._queue: queue.Queue = queue.Queue(maxsize=2)
@@ -202,9 +204,15 @@ class Overlay:
             winapi.keep_topmost(winapi.hwnd_of(self.root))
             if getattr(self, "bio", None) is not None and self.bio.wants_topmost():
                 winapi.keep_topmost(self.bio.hwnd())
-            state = winapi.foreground_fullscreen(exclude_hwnd=winapi.hwnd_of(self.root))
+            state = winapi.d3d_exclusive_fullscreen()
             if state != self.fullscreen:
                 self.fullscreen = state
+                cb = getattr(self, "on_fullscreen", None)
+                if cb is not None:
+                    try:
+                        cb(state)
+                    except Exception:
+                        pass
         except Exception:
             pass
         try:
