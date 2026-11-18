@@ -204,7 +204,9 @@ class MiningMetrics:
         return bool(self.prospected or self.refined_total or self.cargo)
 
     def hud_text(self, now: float | None = None) -> str:
-        """Строка для верхнего HUD: «Alexandrite 32% · ср. 28% · 12 камней · 45 т/ч»."""
+        """Строка для верхнего HUD: «Alexandrite 32% · avg 28% · 12 rocks · 45 t/h»."""
+        from .i18n import t
+
         if not self.has_data():
             return ""
         parts: list[str] = []
@@ -212,20 +214,20 @@ class MiningMetrics:
         if rock is not None and rock.target:
             parts.append(f"{rock.target} {rock.share:.0f}%")
         if self.share_count >= 2:
-            parts.append(f"ср. {self.avg_share:.0f}%")
+            parts.append(t("mining.hud_avg", pct=f"{self.avg_share:.0f}"))
         if self.prospected:
-            parts.append(f"{self.prospected} камн.")
+            parts.append(t("mining.hud_rocks", n=self.prospected))
         if self.best_share > 0:
-            parts.append(f"лучший {self.best_share:.0f}%")
+            parts.append(t("mining.hud_best", pct=f"{self.best_share:.0f}"))
         if self.refined_total:
-            parts.append(f"{self.refined_total} т")
+            parts.append(t("mining.hud_tons", n=self.refined_total))
             rate = self.tons_per_hour
             if rate > 0:
-                parts.append(f"{rate:.0f} т/ч")
+                parts.append(t("mining.hud_tph", rate=f"{rate:.0f}"))
         if self.cargo:
-            parts.append(f"трюм {self.cargo}")
+            parts.append(t("mining.hud_cargo", n=self.cargo))
         if self.motherlodes:
-            parts.append(f"материнских {self.motherlodes}")
+            parts.append(t("mining.hud_motherlodes", n=self.motherlodes))
         return " · ".join(parts)
 
 

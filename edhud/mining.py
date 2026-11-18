@@ -78,17 +78,19 @@ def format_hotspots(hotspots: dict[str, int] | None) -> str:
 
 def format_hotspots_tip(hotspots: dict[str, int] | None) -> str | None:
     """Тултип: минерал, ×N, средняя цена на рынке (max → min)."""
+    from .i18n import t
+
     rows = sorted_hotspots(hotspots)
     if not rows:
         return None
-    lines = ["Hotspot в кольце (ср. цена рынка):"]
+    lines = [t("tip.hotspot_header")]
     for name, count, price in rows:
         label = name if count <= 1 else f"{name} ×{count}"
         if price > 0:
             price_txt = f"{price:,}".replace(",", " ")
-            lines.append(f"• {label} — ≈{price_txt} cr/t")
+            lines.append(t("tip.hotspot_line_price", label=label, price=price_txt))
         else:
-            lines.append(f"• {label}")
+            lines.append(t("tip.hotspot_line", label=label))
     return "\n".join(lines)
 
 

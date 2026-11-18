@@ -2,13 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.8"
+VERSION = "1.8.9"
 
-NOTES = """**1.8.8: fix startup crash on language refresh**
+NOTES = """**1.8.9: full EN refresh for Summary tabs**
 
-- `_refresh_tab_titles` used missing `BeltStore.items`; count belts via `len(store)`
+- Bodies/Route column headers, Belts hint, Mining labels refresh on language change
+- Hotspot tooltips, mining HUD metrics and sell-station jumps are translated
+- docs/i18n.md: both languages required for every new UI string
 
-Version 1.8.8."""
+Version 1.8.9."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

@@ -27,12 +27,14 @@ class SellChoice:
     score: float = 0.0
 
     def label(self) -> str:
-        """«Station (System) — 1 200 000 cr · 45.2 ly · 3 прыжка»."""
+        """«Station (System) — 1 200 000 cr · 45.2 ly · 3 jumps»."""
+        from .i18n import jumps_word, t
+
         parts = [f"{self.station or '—'} ({self.system or '—'})", f"{values.credits(self.price)}"]
         if self.distance_ly is not None:
             parts.append(f"{self.distance_ly:.1f} ly")
         if self.jumps:
-            parts.append(f"{self.jumps} прыж.")
+            parts.append(t("sell.jumps", n=self.jumps, word=jumps_word(self.jumps)))
         return " — ".join(parts[:1]) + " · " + " · ".join(parts[1:])
 
 

@@ -51,6 +51,9 @@ def _route_summary(route: Route) -> str:
 # --------------------------------------------------------------------- команды
 def cmd_run(args) -> int:
     cfg = config.Config.load()
+    from edhud.i18n import apply_config_language
+
+    apply_config_language(cfg.language)
     if args.journal_dir:
         cfg.journal_dir = args.journal_dir
     if args.no_click_through:
