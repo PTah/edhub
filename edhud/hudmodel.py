@@ -121,7 +121,6 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
                 row.segments.append(Segment(t("hud.jumps_short", n=state.jumps_in_route), "text"))
         else:
             row.segments.append(Segment(t("hud.route_unset"), "muted"))
-        _append_carrier(row, state)
         return row, (0, 0), [], "muted"
 
     done, total = route.progress(system)
@@ -153,7 +152,6 @@ def _route_row(state: GameState, cfg) -> tuple[Row, tuple[int, int], list[bool],
 
     if route.locked:
         row.segments.append(Segment(t("hud.locked"), "warn"))
-    _append_carrier(row, state)
 
     dots_total = max(1, total)
     dots = [i < done for i in range(min(dots_total, 40))]
@@ -188,6 +186,8 @@ def _body_row(state: GameState, cfg) -> Row:
         mark = _discovered_mark(state)
         if mark is not None:
             row.segments.append(mark)
+        # карриер — на строке STAR/ТЕЛО, чтобы не обрезать «scoopable» на маршруте
+        _append_carrier(row, state)
         return row
 
     body_class = body.planet_class or body.star_type or (t("hud.star") if body.is_star else "?")
@@ -256,6 +256,7 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment(t("hud.on_foot"), "accent"))
     if state.legacy:
         row.segments.append(Segment("   [Legacy 3.8]", "warn"))
+    _append_carrier(row, state)
     return row
 
 

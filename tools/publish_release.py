@@ -2,14 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.11"
+VERSION = "1.8.12"
 
-NOTES = """**1.8.11: Sphere Route stays open when a jump starts**
+NOTES = """**1.8.12: HUD scoop label + carrier on STAR line**
 
-- Opening Sphere Route no longer auto-switches to Route on FSD charge / StartJump
-- Manual sticky tabs also re-checked from the live Notebook selection
+- English scoop hint is now “scoopable” / “not scoopable” (no more “Next star - no sco…”)
+- Carrier location / distance / jump prep moved to the STAR/body line
+- Route line keeps progress and scoop status without being clipped by the carrier
 
-Version 1.8.11."""
+Version 1.8.12."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
