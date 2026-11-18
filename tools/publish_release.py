@@ -2,15 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.5"
+VERSION = "1.8.6"
 
-NOTES = """**1.8.5: UI language switcher**
+NOTES = """**1.8.6: EDSM/INARA setting tooltips**
 
-- Settings → Appearance and localization: Russian / English
-- Language applies to HUD, menus, voice and Summary tabs without restart
-- Overlay context menu uses the same translations
+- Hover tips on EDSM and INARA fields: what is uploaded and how to stop
+- Visible INARA hint under the API key fields
 
-Version 1.8.5."""
+Version 1.8.6."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
