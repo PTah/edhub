@@ -2,14 +2,13 @@
 import subprocess
 import sys
 
-VERSION = "1.8.13"
+VERSION = "1.8.14"
 
-NOTES = """**1.8.13: header body count matches FSS BodyCount**
+NOTES = """**1.8.14: tooltip on Sphere “To route”**
 
-- “bodies N/M” no longer counts Belt Cluster / Ring scans, so 13/12 no longer appears when a belt was scanned
-- Same rule for the Route “bodies” cell in the current system
+- Hover tip: load the calculated tour into the Route table (RU/EN)
 
-Version 1.8.13."""
+Version 1.8.14."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
