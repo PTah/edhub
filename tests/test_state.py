@@ -245,6 +245,50 @@ class JournalPipelineTests(unittest.TestCase):
         watcher.read_navroute()
         self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
 
+    def _sphere_vs_navroute(self, destination: str, newer: bool) -> list[str]:
+        import json
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = folder / "NavRoute.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "event": "NavRoute",
+                        "Route": [
+                            {"StarSystem": "Sol", "SystemAddress": 1, "StarPos": [0, 0, 0], "StarClass": "G"},
+                            {"StarSystem": destination, "SystemAddress": 9, "StarPos": [0, 0, 9], "StarClass": "K"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = GameState()
+            state.route = Route.from_names(["Sol", "Alpha", "Beta", "Sol"], source="sphere")
+            stamp = state.route.loaded_at + (60 if newer else -60)
+            os.utime(path, (stamp, stamp))
+            watcher = journal.JournalWatcher(folder, state)
+            watcher.read_navroute()
+            return [h.system for h in state.route.hops]
+
+    def test_sphere_route_yields_to_new_game_route(self):
+        """Новый маршрут из игры с целью вне обхода шара заменяет обход."""
+        self.assertEqual(self._sphere_vs_navroute("Far Away", newer=True), ["Sol", "Far Away"])
+
+    def test_sphere_route_kept_for_hop_inside_tour(self):
+        """Прокладка до следующей системы шара обход не заменяет."""
+        self.assertEqual(
+            self._sphere_vs_navroute("Beta", newer=True), ["Sol", "Alpha", "Beta", "Sol"]
+        )
+
+    def test_sphere_route_kept_for_stale_navroute(self):
+        """NavRoute.json старше загрузки обхода — игнорируем."""
+        self.assertEqual(
+            self._sphere_vs_navroute("Far Away", newer=False), ["Sol", "Alpha", "Beta", "Sol"]
+        )
+
     def test_session_values(self):
         # демо: скан тел + DSS по телу 1 → сессия считает и скан, и картографию
         self.assertGreater(self.state.session_scan_value, 0)

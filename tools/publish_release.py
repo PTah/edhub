@@ -2,15 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.18"
+VERSION = "1.8.19"
 
-NOTES = """**1.8.18: star lock / liftoff restore system bio; jump shows departure star**
+NOTES = """**1.8.19: new in-game route replaces finished sphere tour; route label clarified**
 
-- Locking the star (Destination.Body = 0) shows all bio signals on the left again
-- Liftoff / LeaveBody / SC entry ignore a sticky planet Destination until a new planet is locked
-- During hyperspace jump the BODY/STAR line shows the departure system star, not a sticky planet BodyID
+- A route plotted in the galaxy map after loading a sphere tour (destination outside the tour) replaces it in Route
+- HUD label "[залочен]" renamed to "[маршрут зафиксирован]" / "[route pinned]"
 
-Version 1.8.18."""
+Version 1.8.19."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
