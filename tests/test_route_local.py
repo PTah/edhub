@@ -103,7 +103,7 @@ class CarrierApproxPositionTests(unittest.TestCase):
         from edhud.config import Config
 
         view = hudmodel.build_view(state, Config(), expanded=False)
-        self.assertIn("≈", view.route_row.text)
+        self.assertIn("≈", view.body_row.text)
 
         # точные координаты (EDSM/журнал) заменяют приблизительные
         state._remember_star(address, "Sol", (0.0, 0.0, 0.0))
