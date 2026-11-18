@@ -221,6 +221,8 @@ class Config:
     settings_geometry: str | None = None
     bodies_columns: dict[str, int] = field(default_factory=dict)
     route_columns: dict[str, int] = field(default_factory=dict)
+    sphere_columns: dict[str, int] = field(default_factory=dict)
+    mining_columns: dict[str, int] = field(default_factory=dict)
     colors: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLORS))
 
     # ---------------------------------------------------------------- пути
@@ -241,7 +243,9 @@ class Config:
                 colors = dict(DEFAULT_COLORS)
                 colors.update({k: str(v) for k, v in value.items()})
                 self.colors = colors
-            elif key in ("bodies_columns", "route_columns") and isinstance(value, dict):
+            elif key in ("bodies_columns", "route_columns", "sphere_columns", "mining_columns") and isinstance(
+                value, dict
+            ):
                 cleaned: dict[str, int] = {}
                 for name, raw in value.items():
                     try:

@@ -376,6 +376,8 @@ class MiningTab:
         on_copy_system=None,
         on_status=None,
         default_radius: float = 25.0,
+        cfg=None,
+        on_columns_changed=None,
     ) -> None:
         self.colors = colors
         self.ui_family = ui_family
@@ -387,6 +389,18 @@ class MiningTab:
         self.on_target = on_target or (lambda _name: None)
         self.on_copy_system = on_copy_system
         self.on_status = on_status or (lambda _text: None)
+        self.cfg = cfg
+        self.on_columns_changed = on_columns_changed
+        self._column_widths = {key: width for key, _title, width, _a in COLUMNS}
+        saved = getattr(cfg, "mining_columns", None) if cfg is not None else None
+        if isinstance(saved, dict):
+            for key, raw in saved.items():
+                if key not in self._column_widths:
+                    continue
+                try:
+                    self._column_widths[key] = max(40, int(raw))
+                except (TypeError, ValueError):
+                    continue
         self.frame = ttk.Frame(parent, style="ED.TFrame", padding=8)
         self._state = None
         self._rows: list[MiningRow] = []
@@ -544,7 +558,13 @@ class MiningTab:
                 anchor=anchor,
                 command=lambda col=key: self.sort_by(col),
             )
-            self.tree.column(key, width=width, anchor=anchor, stretch=False)
+            self.tree.column(
+                key,
+                width=self._column_widths.get(key, width),
+                minwidth=40,
+                anchor=anchor,
+                stretch=False,
+            )
         scroll = ttk.Scrollbar(host, orient="vertical", command=self.tree.yview)
         xscroll = ttk.Scrollbar(host, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=scroll.set, xscrollcommand=xscroll.set)
@@ -552,6 +572,26 @@ class MiningTab:
         scroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.tree.bind("<Double-Button-1>", self._on_double_click)
+        self.tree.bind("<ButtonRelease-1>", self._on_column_release, add="+")
+
+    def _on_column_release(self, _event=None) -> None:
+        if getattr(self, "tree", None) is None:
+            return
+        changed = False
+        for key in self.tree["columns"]:
+            try:
+                width = max(40, int(self.tree.column(key, "width")))
+            except (tk.TclError, TypeError, ValueError):
+                continue
+            if self._column_widths.get(key) != width:
+                self._column_widths[key] = width
+                changed = True
+        if not changed:
+            return
+        if self.cfg is not None:
+            self.cfg.mining_columns = dict(self._column_widths)
+        if self.on_columns_changed is not None:
+            self.on_columns_changed(dict(self._column_widths))
 
     def refresh_i18n(self, cfg=None) -> None:
         """Кнопки, заголовки и строки таблицы после смены языка."""

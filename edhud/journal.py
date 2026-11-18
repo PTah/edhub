@@ -218,6 +218,10 @@ class JournalWatcher(threading.Thread):
         self.state.navroute_stale = False
         if self.state.route.locked:
             return
+        # Во время гиперпрыжка игра часто чистит/урезает NavRoute.json —
+        # не трогаем hop'ы, пока корабль не проявится в новой системе.
+        if self.state.jumping_away:
+            return
         route = Route.from_navroute(data)
         if route.hops:
             self.state.route = route

@@ -2,15 +2,16 @@
 import subprocess
 import sys
 
-VERSION = "1.8.9"
+VERSION = "1.8.10"
 
-NOTES = """**1.8.9: full EN refresh for Summary tabs**
+NOTES = """**1.8.10: Sphere/Route column widths + mid-jump route + Sphere progress**
 
-- Bodies/Route column headers, Belts hint, Mining labels refresh on language change
-- Hotspot tooltips, mining HUD metrics and sell-station jumps are translated
-- docs/i18n.md: both languages required for every new UI string
+- Sphere/Mining column widths resize and persist; System column no longer stretch-resets
+- Game NavRoute is not cleared while hyperspace jump is in progress
+- Sphere Route marks visited/current/next and fills star class after arrival
+- Clearer Sphere Route usage hint (Calculate → To route → paste → jump)
 
-Version 1.8.9."""
+Version 1.8.10."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
@@ -18,8 +19,19 @@ ASSETS = [
     rf"dist\EDHUD-Setup-{VERSION}.exe",
 ]
 
-cmd = ["gh", "release", "create", f"v{VERSION}", *ASSETS, "--repo", "PTah/edhub",
-       "--title", f"EDHUD {VERSION}", "--notes", NOTES]
+cmd = [
+    "gh",
+    "release",
+    "create",
+    f"v{VERSION}",
+    *ASSETS,
+    "--repo",
+    "PTah/edhud",
+    "--title",
+    f"EDHUD {VERSION}",
+    "--notes",
+    NOTES,
+]
 result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 print("exit:", result.returncode)
 print(result.stdout.strip())
