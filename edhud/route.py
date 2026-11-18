@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,6 +109,26 @@ class Route:
     locked: bool = False
     # у замкнутого маршрута старт повторяется в конце: помним, где мы были в прошлый раз
     _cursor: int = field(default=0, repr=False, compare=False)
+    # когда маршрут загружен в EDHUD: NavRoute.json старше этого момента — «чужой», старый
+    loaded_at: float = field(default_factory=time.time, repr=False, compare=False)
+
+    def has_system(self, name: str | None) -> bool:
+        key = (name or "").strip().lower()
+        return bool(key) and any(h.system.lower() == key for h in self.hops)
+
+    def yields_to_game(self, game: "Route", navroute_mtime: float) -> bool:
+        """Должен ли залоченный маршрут уступить новому маршруту из игры.
+
+        Только маршрут обхода шара: он залочен автоматически, а не пользователем.
+        Уступает, если игровой маршрут проложен уже после загрузки обхода и ведёт
+        в систему вне обхода. Прокладка «до следующей системы шара» (цель внутри
+        обхода) маршрут не заменяет.
+        """
+        if self.source != "sphere" or not game.hops:
+            return False
+        if navroute_mtime <= self.loaded_at:
+            return False
+        return not self.has_system(game.hops[-1].system)
 
     # ------------------------------------------------------------- загрузка
     @classmethod

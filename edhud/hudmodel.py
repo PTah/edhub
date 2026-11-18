@@ -177,7 +177,7 @@ def _discovered_mark(state: GameState) -> Segment | None:
 
 def _body_row(state: GameState, cfg) -> Row:
     row = Row()
-    body = state.body_for_status() or state.current_body()
+    body = state.hud_focus_body()
     row.segments.append(Segment(_body_kind_label(body), "dim"))
     if body is None:
         name = state.system.name or "—"
@@ -404,7 +404,7 @@ def _mining_row(state: GameState) -> Row | None:
 
 def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     rows: list[Row] = []
-    body = state.body_for_status() or state.current_body()
+    body = state.hud_focus_body()
     max_pred = max(1, int(cfg.max_predictions))
     # прыгаем в другую систему — всё про био этой системы из дашборда убираем
     bio_off = bool(getattr(state, "jumping_away", False))
@@ -738,35 +738,69 @@ def _has_bio(body: Body) -> bool:
     return bool(body.bio_signals or body.genuses or body.organisms)
 
 
+def _destination_bio_body(state: GameState, own: dict[int, Body]) -> Body | None:
+    """Лок именно био-планеты. Лок звезды (Body 0) / системы → None → сводка всех био."""
+    status = state.status
+    body_id = status.destination_body
+    if body_id is None or body_id == 0:
+        return None
+    body = own.get(body_id)
+    if body is None:
+        return None
+    if body.is_star or body.star_type:
+        return None
+    return body
+
+
+def _hard_on_body(state: GameState) -> bool:
+    status = state.status
+    return bool(status.landed or status.srv or status.glide or state.mode == "OnFoot")
+
+
 def _focus_bio_body(state: GameState) -> Body | None:
     """Планета, чьи виды показывать вместо сводки системы.
 
     Одна планета только если:
-    • реально на теле (посадка / SRV / атмосфера), или
-    • в Status есть Destination на био-тело (лок), или
+    • реально на поверхности (посадка / SRV / пешком / глид), или
+    • залочена био-планета (Destination.Body ≠ 0), или
     • открыт FSS (GuiFocus 9) и выбрана карточка тела.
 
-    DSS (GuiFocus 10) сам по себе не держит карточку: после снятия лока
-    снова сводка системы. Иначе last_fss_body_id залипал на одной планете.
+    Лок звезды (Body 0) / снятие лока / взлёт → все био системы.
     """
+    status = state.status
+    force_system = getattr(state, "bio_force_system", False)
+    own = {body.body_id: body for body in _own_bio_bodies(state)}
+
+    # поверхность — всегда карточка этой планеты (или None, если без био)
+    if _hard_on_body(state):
+        here = _player_body(state)
+        if here is not None:
+            return here if _has_bio(here) else None
+
+    if not own:
+        return None
+
+    # лок звезды / системы → сводка (не держим «атмосферную» карточку)
+    if status.destination_body == 0:
+        return None
+
+    # после взлёта игнорируем залипший Destination на старой планете
+    if force_system:
+        if status.gui_focus == 9:
+            last = own.get(state.last_fss_body_id or -1)
+            if last is not None:
+                return last
+        return None
+
+    locked = _destination_bio_body(state, own)
+    if locked is not None:
+        return locked
+
+    # мягкий «на теле» (атмосфера + lat) — только без лока звезды и без force
     here = _player_body(state)
     if here is not None:
         return here if _has_bio(here) else None
-    own = {body.body_id: body for body in _own_bio_bodies(state)}
-    if not own:
-        return None
-    status = state.status
-    # Лок цели — главный признак «смотрим одну планету» в космосе
-    if status.destination_body in own:
-        return own[status.destination_body]
-    dest = (status.destination_name or "").strip().lower()
-    if dest:
-        for body in own.values():
-            short = _short_body(body, state.system).lower()
-            full = (body.name or "").lower()
-            if dest == short or dest == full:
-                return body
-    # FSS: пока открыт сканер частот и есть карточка тела с биологией
+
     if status.gui_focus == 9:
         last = own.get(state.last_fss_body_id or -1)
         if last is not None:
@@ -1016,9 +1050,13 @@ def build_bio_board(state: GameState) -> BioBoard | None:
     if state.bio_panel_suppressed():
         return None
     focus = _focus_bio_body(state)
+    # после взлёта / лока звезды player_body может ещё «залипать» — сводку не прячем
     if focus is None and _player_body(state) is not None:
-        # стоим на теле без биологии: сводку системы здесь не показываем
-        return None
+        force = getattr(state, "bio_force_system", False)
+        star_lock = state.status.destination_body == 0
+        if not force and not star_lock:
+            # стоим на теле без биологии: сводку системы здесь не показываем
+            return None
     bodies = _own_bio_bodies(state)
     if not bodies and focus is None:
         return None

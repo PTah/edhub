@@ -125,6 +125,46 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertTrue(star.startswith("ЗВЕЗДА "))
         self.assertIn(" · M", star)
 
+    def test_hud_body_shows_star_while_jumping(self):
+        """В гиперпрыжке — звезда системы отлёта, не залипшая планета из Status.BodyID."""
+        from edhud.model import FLAG_FSD_JUMP
+
+        state = GameState()
+        state.system.name = "Syraluia BV-P d5-110"
+        state.system.address = 1
+        state.system.bodies[0] = Body(
+            body_id=0, name="Syraluia BV-P d5-110", is_star=True, star_type="K"
+        )
+        state.system.bodies[4] = Body(
+            body_id=4,
+            name="Syraluia BV-P d5-110 A 4 d",
+            planet_class="Rocky body",
+            landable=True,
+            dss_scanned=True,
+        )
+        state.apply(
+            {
+                "event": "StartJump",
+                "JumpType": "Hyperspace",
+                "StarSystem": "Syraluia KC-C c13-7",
+                "SystemAddress": 2,
+            }
+        )
+        state.apply_status(
+            {
+                "Flags": FLAG_FSD_JUMP,
+                "BodyID": 4,
+                "BodyName": "Syraluia BV-P d5-110 A 4 d",
+                "Destination": {"System": 2, "Body": 0, "Name": "Syraluia KC-C c13-7"},
+            }
+        )
+        self.assertTrue(state.jumping_away)
+        text = hudmodel.build_view(state, Config()).body_row.text
+        self.assertTrue(text.startswith("ЗВЕЗДА "), text)
+        self.assertIn("Syraluia BV-P d5-110", text)
+        self.assertNotIn("A 4 d", text)
+        self.assertNotIn("Rocky", text)
+
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SystemStore(Path(tmp))
@@ -204,6 +244,50 @@ class JournalPipelineTests(unittest.TestCase):
         state.route.locked = True
         watcher.read_navroute()
         self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+
+    def _sphere_vs_navroute(self, destination: str, newer: bool) -> list[str]:
+        import json
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = folder / "NavRoute.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "event": "NavRoute",
+                        "Route": [
+                            {"StarSystem": "Sol", "SystemAddress": 1, "StarPos": [0, 0, 0], "StarClass": "G"},
+                            {"StarSystem": destination, "SystemAddress": 9, "StarPos": [0, 0, 9], "StarClass": "K"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = GameState()
+            state.route = Route.from_names(["Sol", "Alpha", "Beta", "Sol"], source="sphere")
+            stamp = state.route.loaded_at + (60 if newer else -60)
+            os.utime(path, (stamp, stamp))
+            watcher = journal.JournalWatcher(folder, state)
+            watcher.read_navroute()
+            return [h.system for h in state.route.hops]
+
+    def test_sphere_route_yields_to_new_game_route(self):
+        """Новый маршрут из игры с целью вне обхода шара заменяет обход."""
+        self.assertEqual(self._sphere_vs_navroute("Far Away", newer=True), ["Sol", "Far Away"])
+
+    def test_sphere_route_kept_for_hop_inside_tour(self):
+        """Прокладка до следующей системы шара обход не заменяет."""
+        self.assertEqual(
+            self._sphere_vs_navroute("Beta", newer=True), ["Sol", "Alpha", "Beta", "Sol"]
+        )
+
+    def test_sphere_route_kept_for_stale_navroute(self):
+        """NavRoute.json старше загрузки обхода — игнорируем."""
+        self.assertEqual(
+            self._sphere_vs_navroute("Far Away", newer=False), ["Sol", "Alpha", "Beta", "Sol"]
+        )
 
     def test_session_values(self):
         # демо: скан тел + DSS по телу 1 → сессия считает и скан, и картографию
@@ -2335,6 +2419,94 @@ class BioBoardTests(unittest.TestCase):
         self.assertEqual(board.title, "биосигналы ×6")
         headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
         self.assertEqual(len(headers), 2)
+
+    def test_star_lock_shows_all_system_bio(self):
+        """Лок звезды (Destination.Body = 0) → слева все био системы, не одна планета."""
+        from edhud.model import FLAG_HAS_LAT_LONG
+
+        state = GameState()
+        state.system.bodies[0] = Body(body_id=0, name="Test A", star_type="K", is_star=True)
+        self._icy(state, 1, 4)
+        second = self._icy(state, 2, 2)
+        second.name = "Test 2"
+        # как после взлёта: BodyID + lat + атмосфера ещё могут быть, но лок — звезда
+        state.in_atmosphere = True
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 5_000,
+                "Destination": {"System": 1, "Body": 0, "Name": "Test A"},
+            }
+        )
+        self.assertTrue(state.in_atmosphere)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+        headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
+        self.assertEqual(len(headers), 2)
+
+    def test_liftoff_ignores_sticky_destination(self):
+        """После взлёта залипший Destination на планете не держит одну карточку."""
+        from edhud.model import FLAG_HAS_LAT_LONG
+
+        state = GameState()
+        self._icy(state, 1, 4)
+        second = self._icy(state, 2, 2)
+        second.name = "Test 2"
+        state.status.body_id = 1
+        state.status.body_name = "Test 1"
+        state.status.flags = 1 << 1  # landed
+        state.apply_status(
+            {
+                "Flags": (1 << 1) | FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 1, "Name": "Test 1"},
+            }
+        )
+        board = hudmodel.build_bio_board(state)
+        assert board is not None
+        self.assertTrue(board.title.startswith("1 · био ×4"), board.title)
+
+        state.apply({"event": "Liftoff", "Body": "Test 1", "BodyID": 1})
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 1, "Name": "Test 1"},
+            }
+        )
+        self.assertTrue(state.bio_force_system)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+
+        # лок другой планеты снимает сводку
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Test 2"},
+            }
+        )
+        self.assertFalse(state.bio_force_system)
+        board = hudmodel.build_bio_board(state)
+        assert board is not None
+        self.assertTrue(board.title.startswith("2 · био ×2"), board.title)
 
     def test_planet_without_bio_hides_the_system_summary(self):
         """На планете без биологии сводку системы не показываем."""

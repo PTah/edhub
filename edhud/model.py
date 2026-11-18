@@ -1084,6 +1084,10 @@ class GameState:
     _jump_idle_polls: int = 0
     # окно био закрыто с начала прыжка, пока в новой системе не будет своего FSS
     bio_hidden_until_fss: bool = False
+    # после взлёта: сводка био по системе, пока не залочат другую планету
+    # (игра часто оставляет Destination на старой планете)
+    bio_force_system: bool = False
+    _bio_ignored_dest_body: int | None = None
     jumps_in_route: int | None = None
     # журнал прислал NavRoute без списка — надо перечитать NavRoute.json
     navroute_stale: bool = False
@@ -1332,6 +1336,8 @@ class GameState:
         self.jump_dest = None
         self._jump_idle_polls = 0
         self.bio_hidden_until_fss = True
+        self.bio_force_system = False
+        self._bio_ignored_dest_body = None
 
     def _on_startjump(self, e: dict) -> None:
         """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
@@ -2053,8 +2059,39 @@ class GameState:
     _on_resurrect = _on_died
 
     # --- перемещения/режим
+    def _arm_bio_system_overview(self, body_id: int | None = None) -> None:
+        """Взлёт / уход с тела: слева снова все био, пока не будет нового лока планеты."""
+        ignored = body_id
+        if ignored is None:
+            ignored = self.status.destination_body
+        if ignored is None:
+            ignored = self.current_body_id
+        if ignored is None:
+            ignored = self.status.body_id
+        self.bio_force_system = True
+        self._bio_ignored_dest_body = int(ignored) if ignored is not None else None
+
+    def _sync_bio_system_overview(self) -> None:
+        """Снять «сводку после взлёта», когда залочили другую био-планету."""
+        if not self.bio_force_system:
+            return
+        body_id = self.status.destination_body
+        # нет цели / лок звезды (Body 0) — сводка остаётся, ждём новый лок планеты
+        if body_id is None or body_id == 0:
+            self._bio_ignored_dest_body = None
+            return
+        body = self.system.body(body_id)
+        if body is None or body.is_star or body.star_type or is_belt_body(body.name) or is_ring_body(body.name):
+            self._bio_ignored_dest_body = None
+            return
+        if body_id == self._bio_ignored_dest_body:
+            return
+        self.bio_force_system = False
+        self._bio_ignored_dest_body = None
+
     def _on_supercruiseentry(self, _e: dict) -> None:
         self.mode = "Ship"
+        self._arm_bio_system_overview()
 
     def _on_supercruiseexit(self, e: dict) -> None:
         self.mode = "Ship"
@@ -2072,8 +2109,11 @@ class GameState:
             self.current_body_name = name
         if body_id is not None:
             self.current_body_id = body_id
+        # bio_force_system снимает _sync_bio_system_overview при новом локе планеты
 
-    def _on_leavebody(self, _e: dict) -> None:
+    def _on_leavebody(self, e: dict) -> None:
+        left = _event_body_id(e)
+        self._arm_bio_system_overview(left)
         self.current_body_id = None
         self.current_body_name = None
         self.in_atmosphere = False
@@ -2081,10 +2121,13 @@ class GameState:
     def _on_touchdown(self, e: dict) -> None:
         self.mode = "Ship" if not e.get("OnFoot") else "OnFoot"
         self.in_atmosphere = True
+        self.bio_force_system = False
+        self._bio_ignored_dest_body = None
         self._on_approachbody(e)
 
-    def _on_liftoff(self, _e: dict) -> None:
+    def _on_liftoff(self, e: dict) -> None:
         self.mode = "Ship"
+        self._arm_bio_system_overview(_event_body_id(e))
 
     def _on_disembark(self, _e: dict) -> None:
         self.mode = "OnFoot"
@@ -2105,6 +2148,7 @@ class GameState:
         if self.status.body_name and not self.current_body_name:
             self.current_body_name = self.status.body_name
         self._sync_atmosphere()
+        self._sync_bio_system_overview()
         self._sync_travel_tab()
         self._sync_jump_arrow()
         if self.status.supercruise:
@@ -2353,6 +2397,23 @@ class GameState:
 
     def body_for_status(self) -> Body | None:
         return self.system.body(self.status.body_id) or self.current_body()
+
+    def hud_focus_body(self) -> Body | None:
+        """Тело для строки BODY/STAR оверлея.
+
+        В гиперпрыжке Status часто ещё держит BodyID планеты отлёта —
+        показываем главную звезду системы, откуда улетаем. То же при локе звезды.
+        """
+        if self.jumping_away or self.jump_dest:
+            return self.system.main_star()
+        dest_id = self.status.destination_body
+        if dest_id == 0:
+            return self.system.main_star()
+        if dest_id is not None:
+            locked = self.system.body(dest_id)
+            if locked is not None:
+                return locked
+        return self.body_for_status() or self.current_body()
 
     def current_system_name(self) -> str | None:
         return self.system.name

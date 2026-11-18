@@ -2,14 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.17"
+VERSION = "1.8.19"
 
-NOTES = """**1.8.17: bio panel no longer sticks after clearing target in DSS**
+NOTES = """**1.8.19: new in-game route replaces finished sphere tour; route label clarified**
 
-- DSS (GuiFocus 10) alone no longer keeps a single-planet bio card via last_fss_body_id
-- Single-planet view only for: surface/atmosphere, Destination lock, or open FSS card
+- A route plotted in the galaxy map after loading a sphere tour (destination outside the tour) replaces it in Route
+- HUD label "[залочен]" renamed to "[маршрут зафиксирован]" / "[route pinned]"
 
-Version 1.8.17."""
+Version 1.8.19."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
