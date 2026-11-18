@@ -48,6 +48,72 @@ def _clamp_alpha(value: float) -> float:
     return max(0.25, min(1.0, float(value)))
 
 
+class _HoverTip:
+    """Простой тултип при наведении (tk Label поверх окна)."""
+
+    def __init__(self, widget, text: str, delay_ms: int = 450) -> None:
+        self.widget = widget
+        self.text = text
+        self.delay_ms = delay_ms
+        self._after: str | None = None
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel()
+        self._after = self.widget.after(self.delay_ms, self._show)
+
+    def _cancel(self) -> None:
+        if self._after is not None:
+            try:
+                self.widget.after_cancel(self._after)
+            except tk.TclError:
+                pass
+            self._after = None
+
+    def _hide(self, _event=None) -> None:
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+    def _show(self) -> None:
+        self._after = None
+        if self._tip is not None or not self.text:
+            return
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        tip.attributes("-topmost", True)
+        label = tk.Label(
+            tip,
+            text=self.text,
+            justify="left",
+            background="#ffffe0",
+            foreground="#202020",
+            relief="solid",
+            borderwidth=1,
+            padx=8,
+            pady=6,
+            font=("Segoe UI", 9),
+            wraplength=420,
+        )
+        label.pack()
+        tip.update_idletasks()
+        x = self.widget.winfo_rootx() + 16
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tip = tip
+
+
+def _tip(widget, key: str) -> None:
+    _HoverTip(widget, t(key))
+
+
 class SettingsDialog:
     """Модальное окно настроек."""
 
@@ -447,17 +513,21 @@ class SettingsDialog:
         self.spansh_status.grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
         row += 1
 
-        ttk.Label(frm, text=t("set.cmdr")).grid(row=row, column=0, sticky="w", **pad)
+        edsm_cmdr_lbl = ttk.Label(frm, text=t("set.cmdr"))
+        edsm_cmdr_lbl.grid(row=row, column=0, sticky="w", **pad)
+        _tip(edsm_cmdr_lbl, "set.edsm_tip")
         row += 1
-        ttk.Entry(frm, textvariable=self.edsm_commander, width=40).grid(
-            row=row, column=0, sticky="w", **pad
-        )
+        edsm_cmdr_entry = ttk.Entry(frm, textvariable=self.edsm_commander, width=40)
+        edsm_cmdr_entry.grid(row=row, column=0, sticky="w", **pad)
+        _tip(edsm_cmdr_entry, "set.edsm_tip")
         row += 1
-        ttk.Label(frm, text=t("set.api")).grid(row=row, column=0, sticky="w", **pad)
+        edsm_api_lbl = ttk.Label(frm, text=t("set.api"))
+        edsm_api_lbl.grid(row=row, column=0, sticky="w", **pad)
+        _tip(edsm_api_lbl, "set.edsm_tip")
         row += 1
-        ttk.Entry(frm, textvariable=self.edsm_api_key, width=56, show="•").grid(
-            row=row, column=0, columnspan=2, sticky="ew", **pad
-        )
+        edsm_api_entry = ttk.Entry(frm, textvariable=self.edsm_api_key, width=56, show="•")
+        edsm_api_entry.grid(row=row, column=0, columnspan=2, sticky="ew", **pad)
+        _tip(edsm_api_entry, "set.edsm_tip")
         row += 1
         ttk.Label(
             frm,
@@ -480,19 +550,32 @@ class SettingsDialog:
 
         ttk.Separator(frm).grid(row=row, column=0, columnspan=2, sticky="ew", pady=8)
         row += 1
-        ttk.Label(frm, text=t("set.inara")).grid(row=row, column=0, sticky="w", **pad)
+        inara_hdr = ttk.Label(frm, text=t("set.inara"))
+        inara_hdr.grid(row=row, column=0, sticky="w", **pad)
+        _tip(inara_hdr, "set.inara_tip")
         row += 1
-        ttk.Label(frm, text=t("set.inara_cmdr")).grid(row=row, column=0, sticky="w", **pad)
+        inara_cmdr_lbl = ttk.Label(frm, text=t("set.inara_cmdr"))
+        inara_cmdr_lbl.grid(row=row, column=0, sticky="w", **pad)
+        _tip(inara_cmdr_lbl, "set.inara_tip")
         row += 1
-        ttk.Entry(frm, textvariable=self.inara_commander, width=40).grid(
-            row=row, column=0, sticky="w", **pad
-        )
+        inara_cmdr_entry = ttk.Entry(frm, textvariable=self.inara_commander, width=40)
+        inara_cmdr_entry.grid(row=row, column=0, sticky="w", **pad)
+        _tip(inara_cmdr_entry, "set.inara_tip")
         row += 1
-        ttk.Label(frm, text=t("set.inara_api")).grid(row=row, column=0, sticky="w", **pad)
+        inara_api_lbl = ttk.Label(frm, text=t("set.inara_api"))
+        inara_api_lbl.grid(row=row, column=0, sticky="w", **pad)
+        _tip(inara_api_lbl, "set.inara_tip")
         row += 1
-        ttk.Entry(frm, textvariable=self.inara_api_key, width=56, show="•").grid(
-            row=row, column=0, columnspan=2, sticky="ew", **pad
-        )
+        inara_api_entry = ttk.Entry(frm, textvariable=self.inara_api_key, width=56, show="•")
+        inara_api_entry.grid(row=row, column=0, columnspan=2, sticky="ew", **pad)
+        _tip(inara_api_entry, "set.inara_tip")
+        row += 1
+        ttk.Label(
+            frm,
+            text=t("set.inara_hint"),
+            foreground="#666",
+            justify="left",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
         row += 1
         ttk.Button(
             frm,
