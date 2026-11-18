@@ -4,11 +4,11 @@ import sys
 
 VERSION = "1.8.18"
 
-NOTES = """**1.8.18: star lock and liftoff restore full system bio list**
+NOTES = """**1.8.18: star lock / liftoff restore system bio; jump shows departure star**
 
 - Locking the star (Destination.Body = 0) shows all bio signals on the left again
 - Liftoff / LeaveBody / SC entry ignore a sticky planet Destination until a new planet is locked
-- Soft atmosphere/lat presence no longer keeps a single-planet card after takeoff
+- During hyperspace jump the BODY/STAR line shows the departure system star, not a sticky planet BodyID
 
 Version 1.8.18."""
 

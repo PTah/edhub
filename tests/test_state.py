@@ -125,6 +125,46 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertTrue(star.startswith("ЗВЕЗДА "))
         self.assertIn(" · M", star)
 
+    def test_hud_body_shows_star_while_jumping(self):
+        """В гиперпрыжке — звезда системы отлёта, не залипшая планета из Status.BodyID."""
+        from edhud.model import FLAG_FSD_JUMP
+
+        state = GameState()
+        state.system.name = "Syraluia BV-P d5-110"
+        state.system.address = 1
+        state.system.bodies[0] = Body(
+            body_id=0, name="Syraluia BV-P d5-110", is_star=True, star_type="K"
+        )
+        state.system.bodies[4] = Body(
+            body_id=4,
+            name="Syraluia BV-P d5-110 A 4 d",
+            planet_class="Rocky body",
+            landable=True,
+            dss_scanned=True,
+        )
+        state.apply(
+            {
+                "event": "StartJump",
+                "JumpType": "Hyperspace",
+                "StarSystem": "Syraluia KC-C c13-7",
+                "SystemAddress": 2,
+            }
+        )
+        state.apply_status(
+            {
+                "Flags": FLAG_FSD_JUMP,
+                "BodyID": 4,
+                "BodyName": "Syraluia BV-P d5-110 A 4 d",
+                "Destination": {"System": 2, "Body": 0, "Name": "Syraluia KC-C c13-7"},
+            }
+        )
+        self.assertTrue(state.jumping_away)
+        text = hudmodel.build_view(state, Config()).body_row.text
+        self.assertTrue(text.startswith("ЗВЕЗДА "), text)
+        self.assertIn("Syraluia BV-P d5-110", text)
+        self.assertNotIn("A 4 d", text)
+        self.assertNotIn("Rocky", text)
+
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SystemStore(Path(tmp))

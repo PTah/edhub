@@ -177,7 +177,7 @@ def _discovered_mark(state: GameState) -> Segment | None:
 
 def _body_row(state: GameState, cfg) -> Row:
     row = Row()
-    body = state.body_for_status() or state.current_body()
+    body = state.hud_focus_body()
     row.segments.append(Segment(_body_kind_label(body), "dim"))
     if body is None:
         name = state.system.name or "—"
@@ -404,7 +404,7 @@ def _mining_row(state: GameState) -> Row | None:
 
 def _detail_rows(state: GameState, cfg, now: float) -> list[Row]:
     rows: list[Row] = []
-    body = state.body_for_status() or state.current_body()
+    body = state.hud_focus_body()
     max_pred = max(1, int(cfg.max_predictions))
     # прыгаем в другую систему — всё про био этой системы из дашборда убираем
     bio_off = bool(getattr(state, "jumping_away", False))

@@ -2398,6 +2398,23 @@ class GameState:
     def body_for_status(self) -> Body | None:
         return self.system.body(self.status.body_id) or self.current_body()
 
+    def hud_focus_body(self) -> Body | None:
+        """Тело для строки BODY/STAR оверлея.
+
+        В гиперпрыжке Status часто ещё держит BodyID планеты отлёта —
+        показываем главную звезду системы, откуда улетаем. То же при локе звезды.
+        """
+        if self.jumping_away or self.jump_dest:
+            return self.system.main_star()
+        dest_id = self.status.destination_body
+        if dest_id == 0:
+            return self.system.main_star()
+        if dest_id is not None:
+            locked = self.system.body(dest_id)
+            if locked is not None:
+                return locked
+        return self.body_for_status() or self.current_body()
+
     def current_system_name(self) -> str | None:
         return self.system.name
 
