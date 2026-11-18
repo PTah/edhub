@@ -711,10 +711,10 @@ def _own_bio_bodies(state: GameState) -> list[Body]:
 
 
 def _player_body(state: GameState) -> Body | None:
-    """Тело, на котором стоит командир (пешком, в SRV или на площадке).
+    """Тело, на котором командир реально «сидит» (посадка / SRV / пешком / атмосфера).
 
-    Высоту (`Altitude`) намеренно не учитываем: она есть и в обычном полёте
-    над планетой, а панель должна переключаться только при реальном спуске.
+    Одних Latitude/BodyID мало: они есть в орбитальном круизе и при наведении
+    цели. Иначе после снятия цели панель био так и остаётся на одной планете.
     """
     status = state.status
     body = state.system.bodies.get(status.body_id) if status.body_id is not None else None
@@ -727,7 +727,9 @@ def _player_body(state: GameState) -> Body | None:
                     break
     if body is None:
         return None
-    if status.landed or status.srv or status.lat is not None:
+    if status.landed or status.srv or status.glide or state.mode == "OnFoot":
+        return body
+    if state.in_atmosphere and status.has_lat_long:
         return body
     return None
 
@@ -737,9 +739,12 @@ def _has_bio(body: Body) -> bool:
 
 
 def _focus_bio_body(state: GameState) -> Body | None:
-    """Планета, чьи виды показывать вместо сводки системы."""
-    # На поверхности показываем ТОЛЬКО своё тело: сводка всей системы на планете
-    # бесполезна и сбивает — командир работает здесь, а не в системе.
+    """Планета, чьи виды показывать вместо сводки системы.
+
+    Сводка всей системы — по умолчанию после FSS. Одна планета: цель
+    (Destination), FSS/DSS-карточка или реальная посадка/заход в атмосферу.
+    Сняли цель в космосе → снова вся система.
+    """
     here = _player_body(state)
     if here is not None:
         return here if _has_bio(here) else None

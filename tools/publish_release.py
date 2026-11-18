@@ -2,14 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.15"
+VERSION = "1.8.16"
 
-NOTES = """**1.8.15: jump always opens Route, arrival Bodies**
+NOTES = """**1.8.16: bio panel restores system list after clearing target**
 
-- Any tab (including Sphere Route) switches to Route when a hyperspace jump starts
-- Arrival always opens Bodies; Sphere Route is only for planning/copy, not sticky in flight
+- Locking a body still shows that planet’s bio card
+- Clearing the target in space returns the full FSS-style system bio list
+- Lat/BodyID alone no longer keep single-planet focus (need landing / SRV / atmosphere)
 
-Version 1.8.15."""
+Version 1.8.16."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

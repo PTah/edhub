@@ -2271,6 +2271,56 @@ class BioBoardTests(unittest.TestCase):
         self.assertNotIn("Test 4", text)
         self.assertNotIn("×2", text)
 
+    def test_target_lock_focuses_one_body_clear_restores_system(self):
+        """Цель на био-планете → одна карточка; сняли цель → снова сводка системы."""
+        from edhud.model import FLAG_HAS_LAT_LONG
+
+        state = GameState()
+        self._icy(state, 1, 4)
+        second = self._icy(state, 2, 2)
+        second.name = "Test 2"
+        # как в полёте: BodyID + координаты есть, но это ещё не посадка
+        state.status.body_id = 1
+        state.status.body_name = "Test 1"
+        state.status.lat = 10.0
+        state.status.lon = 20.0
+        state.status.flags = FLAG_HAS_LAT_LONG
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 1, "Name": "Test 1"},
+            }
+        )
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertTrue(board.title.startswith("1 · био ×4"), board.title)
+        self.assertNotIn("Test 2", "\n".join(board.plain()))
+
+        # сняли цель — Destination пропал, BodyID/lat могут остаться
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+            }
+        )
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+        text = "\n".join(board.plain())
+        self.assertIn("×4", text)
+        self.assertIn("×2", text)
+        headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
+        self.assertEqual(len(headers), 2)
+
     def test_planet_without_bio_hides_the_system_summary(self):
         """На планете без биологии сводку системы не показываем."""
         state = GameState()
