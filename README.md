@@ -1,461 +1,193 @@
-<!-- Edited by nc.ai 0.8.8.0 on macbook 2026-10-17 20:15:49 -->
-<!-- Edited by nc.ai 1.2.9 on new-admin-pc 2026-11-13 14:26:27 -->
-<!-- Edited by nc.ai 1.2.11 on Papasha 2026-11-14 14:35:39 -->
-# EDHUD — один оверлей из трёх программ
+**Languages:** [English](README.md) · [Русский](README.ru.md)
 
-Оверлей-полоса в верхней части экрана (как у SrvSurvey), которая показывает
-маршрут (как Exploration Buddy/EDEB), наличие биологии и геологии на теле,
-виды-предсказания, прогресс проб, дистанцию до «клональной колонии» и стоимость
-данных с множителями первооткрывателя. Работает под Windows (основная цель),
-запускается и на macOS/Linux в терминальном режиме.
+# EDHUD — one overlay from three tools
+
+A top-of-screen overlay strip (like SrvSurvey) that shows your route (like
+Exploration Buddy / EDEB), biology and geology on the current body, predicted
+species, sample progress, distance to the next clonal colony, and exploration
+data value with first-discovery multipliers. Primary target is Windows; macOS
+and Linux run in terminal (TUI) mode.
 
 ```
-███████████████·······························   ← прогресс маршрута
-МАРШРУТ 1/3  →  HIP 36601 (A · 50.0 ly)   осталось 2 · 115.4 ly  Следующая звезда — заправка
-ТЕЛО Synuefe GG-O c22-4 1 · Icy body · 1 180 ls   БИО 2 (Bacterium, Fungoida) · гео 1   DSS ✔   ≈1.42 Mcr ×2.6
+███████████████·······························   ← route progress
+ROUTE 1/3  →  HIP 36601 (A · 50.0 ly)   left 2 · 115.4 ly  Next star — scoopable
+BODY Synuefe GG-O c22-4 1 · Icy body · 1 180 ls   BIO 2 (Bacterium, Fungoida) · geo 1   DSS ✔   ≈1.42 Mcr ×2.6
 ────────────────────────────────────────────────────────────────────────
 ● Bacterium Cerbrus - Lime  2/3  ≈1.69 Mcr
-стоимость: скан ≈120 Kcr · с DSS ≈1.42 Mcr · ×2.6 за первое открытие
-предсказание: Bacterium
+value: scan ≈120 Kcr · with DSS ≈1.42 Mcr · ×2.6 first discovery
+prediction: Bacterium
 ≈ Bacterium Acies - Lime  1.00 Mcr
-био в системе: 2
-• Synuefe GG-O c22-4 2 a  1 сигн. (Osseus)   DSS ✗   [spansh]   2 410 ls
-система: 12 тел · данных ≈3.4 Mcr · с DSS ≈9.8 Mcr · EDSM ≈7.7 Mcr / с картами ≈9.1 Mcr
-сессия: 2 прыжк. · скан 120 Kcr · DSS 1.3 Mcr · био ≈1.69 Mcr
+bio in system: 2
+• Synuefe GG-O c22-4 2 a  1 sig. (Osseus)   DSS ✗   [spansh]   2 410 ls
+system: 12 bodies · data ≈3.4 Mcr · with DSS ≈9.8 Mcr · EDSM ≈7.7 Mcr / mapped ≈9.1 Mcr
+session: 2 jumps · scan 120 Kcr · DSS 1.3 Mcr · bio ≈1.69 Mcr
 ```
 
-## Что взято из каждого проекта
+## What was taken from each project
 
-| Проект | Что взято |
+| Project | Taken |
 |---|---|
-| **EDMarketConnector** (EDCD, Python) | Чтение `Journal*.log` (самый свежий файл, дочитывание с позиции, replay при старте), `Status.json`/`NavRoute.json` по mtime, поиск каталога журналов, разбор битов `Flags` статуса. |
-| **SrvSurvey** (njthomson, C#) | Оверлей: окно без рамки, always-on-top, сквозное для мыши (`WS_EX_TRANSPARENT`/`WS_EX_NOACTIVATE`). Движок предсказания биологии (`BioCriteria`/`BioPredictor`) и **данные** `bio-criteria/*.json`, таблица родов и дистанции проб, карта галактических регионов, справочник кодекса (имена и стоимость Vista Genomics), **формула стоимости скана** (`Util.GetBodyValue`), Guardian bubble, кэш систем. |
-| **EDDiscovery** (C#) | Идеи по маршрутам: `NavRoute.json` как источник, прогресс/остаток, плоттеры (Spansh Galaxy Plotter), маршрут отдельно от игры. |
-| **EDEB / Exploration Buddy** (CMDR Panostrede) | Набор функций и вид HUD: маршрут с прогрессом, блокировка/импорт маршрута, предсказание видов, статус анализа (1/3 → готово), индикатор клональной колонии, ценность проб, HUD поверх игры, **догрузка тел, открытых другими командирами**, «?» для тел без данных. |
+| **EDMarketConnector** (EDCD, Python) | Reading `Journal*.log` (newest file, resume from offset, startup replay), `Status.json` / `NavRoute.json` by mtime, journal folder discovery, `Flags` bit parsing. |
+| **SrvSurvey** (njthomson, C#) | Overlay: borderless always-on-top click-through window. Biology prediction engine and `bio-criteria/*.json`, genus sample distances, galactic regions, codex reference, scan value formula, Guardian bubble, system cache. |
+| **EDDiscovery** (C#) | Route ideas: `NavRoute.json`, progress/remaining, Spansh Galaxy Plotter, route independent of the game. |
+| **EDEB / Exploration Buddy** | HUD feature set: route with progress, lock/import, species prediction, analysis status, clonal colony indicator, sample value, bodies discovered by other commanders, `?` for unknown bodies. |
 
-## Возможности
+## Features
 
-* **Оверлей сверху экрана**: полоса по центру верхнего края, прозрачность, цвета и
-  шрифт в конфиге. Windows: иконка в трее (ПКМ: оверлей, карта Spansh/EDSM,
-  настройки, выход); `F8` — подробности, `F9` — сквозной режим мыши, `F10` —
-  скрыть/показать, `F12` — выход; при выключенном сквозном режиме — кнопка × и
-  ПКМ по полоске. Окно удерживается поверх всех каждые 2 секунды,
-  DPI-awareness (Per-Monitor v2), не забирает фокус у игры.
-  Панели показываются **только в игре и в космосе**: пока Elite не запущена или
-  открыто главное меню, окно «Биосигналы» скрыто, а верхний дашборд не виден;
-  на поверхности планеты, в ТРП и пешком дашборд приглушается (alpha 0.10),
-  био-панель при этом остаётся — она там и нужна. «Игра запущена» определяется по
-  свежести `Status.json` (игра пишет его каждую секунду): журнал заканчивается
-  `Shutdown` только при аккуратном выходе, поэтому одного журнала мало.
-  В таком состоянии остаётся только окно **«Сводка»** со списком тел и маршрутом.
-  Как только начинается зарядка FSD в другую систему, вся био-часть уходит из
-  дашборда: строка «био» у тела, список организмов с ценами, предсказание и
-  «био в системе» (прыжок отменили — вернулось).
-  Прозрачность: в атмосфере 0.12–0.28, на станции/авианосце HUD скрыт полностью,
-  а под меню игры — карта, Carrier Management, кодекс, эскадрильи, сервисы
-  станции — панели уходят в alpha 0.10, чтобы не закрывать менюшки. Открытые
-  экраны определяются по `GuiFocus` в `Status.json` и по треку `Music` в журнале
-  (для Carrier Management `GuiFocus` остаётся нулём).
-* **Биосигналы** (окно слева): виды с ценами, «итого» и «с первым шагом»
-  (множитель 5× за first logged), радар образцов, отметка чужих точек.
-  **Первый шаг виден по каждой планете**: `FF+` — на планету ещё никто не
-  ступал (бонус за first footfall реально получить), `FF` — уже ступали;
-  значения берутся из `WasFootfalled` в журнальном `Scan`, расшифровка — сноска
-  внизу панели.
-* **Настройки** (трей → Настройки): каталог журналов, сеть, EDSM/Spansh/EDDN,
-  необязательные EDSM и INARA API key, голос, прозрачность/ширина оверлея,
-  **вкладка «Статистика»** — по каждому входу в игру (файл журнала) и суммарная:
-  прыжки, ly, новые системы и тела, сканы, DSS, био-анализы, продано кредитов,
-  добыча. Сессия начинается заново при смене файла журнала (`Fileheader`), время
-  начала берётся из имени журнала, поэтому продажи прошлой сессии в новую не
-  переезжают. Кнопки «Пересобрать из журналов» (пересчитать всю историю по файлам
-  журналов) и «Сбросить статистику».
-  Размер и положение окна настроек запоминаются (`settings_geometry`). Файл:
-  `%LOCALAPPDATA%\EliteDangerousHUD\config.json`; история сессий — `stats.json`.
-  **База Spansh** — галочка «База хотспотов колец из дампа Spansh», по умолчанию
-  выключена. Включили и нажали «Обновить базу» — качается выбранный дамп
-  (`galaxy_1day` ≈1.1 ГБ … `galaxy_populated` ≈4.5 ГБ), из него в SQLite
-  `spansh.db` кладутся только кольца с хотспотами (система, координаты, тип,
-  плотность, запас, состав). Дальше «Мои кольца» ищет по этой базе офлайн, без
-  API-лимитов; скачивание можно не повторять месяцами.
-  Настройки → «Окна» → блок **«Верхний оверлей»**: положение X/Y, прозрачность,
-  стрелки подгонки, галочка **«Показывать маршрут и статистику»** (по умолчанию
-  включена — как раньше: маршрут, карриер, система, скан, био, сессия; выкл. —
-  только маршрут, карриер и текущая система/тело), сквозные клики, метки поясов,
-  чужое био и ширина панели. Раньше эти галочки лежали на вкладке «Общее».
-  Вкладка **«О программе»** — версия, что это за программа и куда она пишет
-  файлы, ссылки на релизы и README, режим обновлений («авто»/«вручную») и
-  кнопка «Проверить обновления». Окно загрузки обновления — обычное окно с
-  рамкой (можно двигать и растягивать), с прогресс-баром, процентами, скоростью
-  и таймером; если сервер молчит 15 с, появляется предупреждение «нет данных»,
-  а кнопка «Отменить» прерывает загрузку и удаляет недокачанный файл.
-  Там же `edhud.log` — строки о старте (система, тела, файл журнала) и ошибки
-  чтения событий: если система «застряла», причина видна в этом файле.
-* **Сводка** (трей → «Сводка: Route / Bodies / Пояса / Добыча», окно так и
-  называется, F8 — подробности): вкладки Route, Bodies, Пояса и Добыча —
-  список тел системы (тип, атмосфера, био/гео, DSS, оценка Cr, первооткрытие,
-  дистанция).
-  Автопереключение: при зарядке прыжка открывается Route, после входа в систему —
-  Bodies. Вручную выбранная вкладка («Добыча», «Пояса») не отбирается, но прыжок
-  в новую систему возвращает окно на Bodies/Route.
-  Своё открытие помечается золотым «Ваше открытие (<CMDR>)», чужое — именем
-  командира из EDSM. Оверлей сверху экрана при этом остаётся.
-* **Добыча** (вкладка «Добыча»): где копать и что именно — в кольцах и на
-  поверхности.
-  По кольцу видно тип (`Icy`/`Metallic`/`Metal-Rich`/`Rocky`), запас
-  (`Pristine`…), **плотность по формуле edtools** `M/π(Rout²−Rin²)`, полный
-  состав хотспотов и способ добычи каждого минерала (ядро / лазер). Под таблицей
-  подсказка: «Icy · Pristine · плотн. 10.01 — ядро: Void Opals, Alexandrite;
-  лазер: Low Temperature Diamonds, Tritium» и **лучший сбыт** по выбранному
-  минералу из своего индекса цен (станция + система + cr/t).
-  «Текущая система» обновляется сама после DSS, «Мои кольца» ищет по своей базе
-  хотспотов (минерал + радиус), «Искать у Spansh» — тела в радиусе (состав колец
-  Spansh не отдаёт). Двойной клик — скопировать систему, «В Пояса» — сохранить
-  кольцо. Цены: журнал `Market` + поток EDDN `commodity`, иначе средняя «≈».
-  **Метрики добычи** (строка в верхнем HUD и в статусе вкладки): процент
-  целевого минерала в последнем камне (`ProspectedAsteroid`), среднее и лучший
-  камень за сессию, счётчик выработки (`MiningRefined` → т, т/ч), трюм из
-  `Cargo`, деньги за проданное (`MarketSell`). Целевой минерал — тот, что выбран
-  в выпадающем списке вкладки.
-  **Лучший сбыт** учитывает расстояние: цена штрафуется за прыжки
-  (`Loadout.MaxJumpRange`), в статусе — станция, система, cr/t, ly и число
-  прыжков; альтернативные станции хранятся в индексе цен (до 5 на товар).
-* **Голос** (Windows SAPI, русский): «Биологический сигнал найден на <планета>» —
-  только факт находки, без перечисления видов и счётчика сигналов;
-  «Звёздная система открыта вами». Включается после дочитывания журнала
-  (replay не озвучивается). Флаги в настройках.
-* **Маршрут** (как Buddy): прогресс `1/3`, следующая система, класс звезды,
-  расстояние, остаток прыжков/ly, «Следующая звезда — заправка», топливо, метка
-  залоченного маршрута. Lock/import/export маршрута, Spansh Galaxy Plotter.
-* **Биология на теле**: био/гео-сигналы, роды после DSS, статус DSS, предсказание
-  genus/species/variant по данным тела (атмосфера, температура, давление,
-  гравитация, вулканизм, материалы, тип звезды, регион, расстояние до туманностей,
-  Guardian bubble).
-* **Пробы**: `1/3 → 2/3 → готово`, дистанция от предыдущей пробы и нужный интервал
-  рода (`605 м/500 м`, зелёным когда можно брать следующую).
-* **Радар под панелью био** — это схема *интервалов проб*, а не поиск образцов:
-  игра не публикует координаты организмов, поэтому на круг попадают только
-  ваши снятые пробы и точки, записанные в кодексе. Радар развёрнут по курсу
-  (метка «С» на ободе), у каждой отметки подписано расстояние, а при слишком
-  близкой пробе сверху пишется «отойди ещё N м».
-* **Носитель в шапке окна**: «Карриер ABC-123: A → B · через 12:34 · тритий 512/1000 т».
-  Отсчёт идёт из `CarrierJumpRequest.DepartureTime` (тикает раз в секунду),
-  тритий — из `CarrierStats.FuelLevel` / `CarrierDepositFuel.Total` (в тоннах).
-  Если данных в журнале нет — подпись просто не выводится.
-* **Чужие био-точки (Canonn)**: если кто-то уже отмечал биосигналы на этом теле,
-  они приходят из публичной базы Canonn POI (`getSystemPoi`) и рисуются на радаре
-  золотыми ромбами с названием вида — в пределах 1.5 км. Это то же, что
-  «prior scans» в SRVSurvey: сама игра координат образцов не отдаёт.
-  Отключается: настройки → «Радар: чужие био-точки Canonn».
-* **Данные других командиров**: EDSM + Spansh (`remote/`) и **живой фид EDDN**
-  (`edhud/eddn.py`): собственный ZMTP-клиент подписывается на
-  `tcp://eddn.edcd.io:9500`, фильтрует сообщения по текущей системе и сразу
-  подмешивает `Scan`, `FSSBodySignals`, `SAASignalsFound`, `SAAScanComplete`.
-  pyzmq не обязателен (если установлен — используется он). Тела из чужих данных
-  помечаются `[EDSM]` / `[spansh]` / `[EDDN]`, тела без данных — «?» (как в EDEB).
-  Кэш на диск, работа офлайн по кэшу, флаги `--offline`, `--no-remote`, `--no-eddn`.
-* **Отправка своих данных**:
-  - **EDSM** — `api-journal-v1`: прыжки с координатами и сканы (нужны Commander + API key).
-  - **EDDN** — `https://eddn.edcd.io:4430/upload/`: `Scan`/`FSDJump`/`SAASignalsFound` →
-    `journal/1`, `FSSBodySignals` → `fssbodysignals/1`, `CodexEntry` → `codexentry/1`.
-    Без ключа; отсюда данные разбирают Spansh, EDSM, INARA, edastro.
-  - **INARA** — `https://inara.cz/inapi/v1/`: `FSDJump`/`Location`/`CarrierJump`/`Touchdown`
-    (нужны Commander + персональный API key). Сканы тел INARA берёт из EDDN, а не из своего API.
-  - **Spansh** публичного API записи не даёт — получает данные из EDDN.
-* **Стоимость**: скан и скан+DSS для каждого тела, множители первооткрывателя
-  (×2.6) и картографии (×3.33/×8.1/×3.7 + бонус Odyssey и +25 % за эффективный
-  DSS), итоги по системе, суммы за сессию, реальные выплаты из
-  `SellExplorationData`/`SellOrganicData`.
-* **Биология: бонус First Logged**. Vista Genomics платит базовую стоимость вида,
-  а если пробу ещё никто не сдавал — **×5** (это не «первый футфол»: футфол даёт
-  только метку на планете). Признак берётся из журнала
-  (`ScanOrganic.WasLogged`), поэтому в HUD видно `≈8.45 Mcr ×5 First Logged` или
-  `(base, First Logged ?)`, если игра поле не прислала. Фактические суммы с
-  бонусами всегда видны после продажи (`SellOrganicData`).
-* **Legacy 3.8**: определяется по `Fileheader/LoadGame` (`gameversion` 3.x) —
-  отключаются Odyssey-бонус в стоимости, био-прогноз и догрузка EDSM/EDDN
-  (там только Live-данные), в HUD появляется метка `[Legacy 3.8]`.
-* **Память**: просканированные системы кэшируются в `…/EliteDangerousHUD/systems/*.json`.
-* **Терминальный режим** (`--tui`) и демо-режим на синтетическом журнале.
+* **Top overlay**: centered strip, transparency/colors/font in config. Windows tray
+  icon (overlay, Spansh/EDSM map, settings, quit); `F8` details, `F9` click-through,
+  `F10` show/hide, `F12` quit. Panels show **only in-game in space**; on planet /
+  SRV / on-foot the dashboard dims; bio panel stays visible. Game-running is
+  detected via fresh `Status.json`. Summary window keeps bodies + route.
+* **Bio signals** (left panel): species with prices, first-logged ×5, sample radar,
+  foreign Canonn points. Per-planet first footfall: `FF+` / `FF` from
+  `WasFootfalled` in journal `Scan`.
+* **Settings** (tray → Settings): journal folder, network, EDSM/Spansh/EDDN,
+  optional EDSM and INARA API keys, voice, overlay geometry, **Statistics** tab,
+  Spansh hotspot dump DB, update checks. Config:
+  `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
+* **Summary** (Route / Bodies / Belts / Mining): system bodies, auto tab switch
+  on jump charge / arrival. Own discoveries highlighted.
+* **Mining**: ring type/reserve/density (edtools formula), hotspot composition,
+  core vs laser, sell suggestions from local price index (`Market` + EDDN
+  commodity), prospecting metrics (`ProspectedAsteroid` / `MiningRefined`).
+* **Voice** (Windows SAPI): bio found / system first discovery (after journal
+  catch-up; replay is silent).
+* **Route**: progress, next system, scoopable hint, lock/import/export, Spansh
+  plotter.
+* **Other commanders’ data**: EDSM + Spansh cache and live EDDN subscribe
+  (`tcp://eddn.edcd.io:9500`). Bodies tagged `[EDSM]` / `[spansh]` / `[EDDN]`.
+* **Uploading your own data** (see [docs/data-uploads.md](docs/data-uploads.md)):
+  - **EDSM** — journal API (commander + API key).
+  - **EDDN** — live upload, no key; feeds Spansh / EDSM / INARA / edastro.
+  - **INARA** — travel events (commander + personal API key). App name `EDHUD`
+    must be whitelisted by INARA. Body scans reach INARA via EDDN, not INARA API.
+  - **Spansh** has no public write API — it consumes EDDN.
+* **Values**: scan / DSS / first discovery ×2.6 / mapping multipliers / Odyssey
+  bonus / First Logged ×5 for organics.
+* **Legacy 3.8**: Odyssey bonus, bio prediction and remote feeds disabled;
+  HUD shows `[Legacy 3.8]`.
+* **Terminal mode** (`--tui`) and `--demo` synthetic journal.
 
-## Установка и запуск (Windows)
+More detail (Russian, full): [README.ru.md](README.ru.md).
 
-Нужен Python 3.10+ с tkinter (официальный установщик python.org, галочка «tcl/tk»).
-Внешних пакетов нет.
+## Quick start (Windows)
+
+Python 3.10+ with tkinter (python.org installer, enable tcl/tk). No third-party
+packages.
 
 ```bat
-python run.py                 :: оверлей, каталог журналов ищется сам
-python run.pyw                :: то же без консольного окна (двойной клик)
+python run.py
+python run.pyw
 python run.py run --journal-dir "C:\Users\me\Saved Games\Frontier Developments\Elite Dangerous"
-python run.py run --tui       :: HUD в терминале
-python run.py run --demo      :: демо на синтетическом журнале
-python run.py run --offline   :: без сети (нет EDSM/Spansh/EDDN и каталога туманностей)
-python run.py dump            :: один кадр HUD в консоль
-python run.py remote "HIP 36601"   :: что EDSM/Spansh знают о системе
-python run.py eddn --seconds 20    :: проверить живую подписку EDDN
-python run.py eddn --system "Sol"  :: только сообщения по системе
+python run.py run --tui
+python run.py run --demo
+python run.py run --offline
+python run.py dump
+python run.py remote "HIP 36601"
+python run.py eddn --seconds 20
 ```
 
-Каталог журналов по умолчанию:
+Default journal folders:
 
 * Windows: `%USERPROFILE%\Saved Games\Frontier Developments\Elite Dangerous`
 * macOS: `~/Library/Application Support/Frontier Developments/Elite Dangerous`
 * Linux/Proton: `…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`
 
-Настройки: `config.json` (Windows `%LOCALAPPDATA%\EliteDangerousHUD`), там же кэш
-систем (`systems/`), ответы EDSM/Spansh (`remote/`), база хотспотов колец
-(`hotspots.json`), база из дампа Spansh (`spansh.db`), пояса (`belts.json`),
-статистика сессий (`stats.json`), индекс цен (`prices.json`) и залоченный маршрут.
+Settings and caches live under `%LOCALAPPDATA%\EliteDangerousHUD`
+(`config.json`, `systems/`, `remote/`, `spansh.db`, `stats.json`, `prices.json`, …).
 
-### Эксклюзивный fullscreen
+Step-by-step: [docs/install-windows.md](docs/install-windows.md).
 
-Полноэкранный режим DirectX не позволяет рисовать поверх себя никаким сторонним
-окнам — это ограничение драйвера, а не приложения. Сделано всё, что можно без
-инжекта в процесс игры:
+### Exclusive fullscreen
 
-* окно помечается `WS_EX_TOPMOST` и **переставляется поверх каждые 2 секунды**;
-* exclusive fullscreen детектируется через `SHQueryUserNotificationState`
-  (`QUNS_RUNNING_D3D_FULL_SCREEN`) — Borderless туда не попадает и лишних
-  предупреждений не даёт;
-* при входе в exclusive один раз за сессию: balloon в трее и (если голос
-  включён) голосовая подсказка переключить **Graphics → Display Mode → Borderless**
-  (или `Alt+Enter`); в HUD та же строка, если оверлей снова виден после Alt+Tab.
+DirectX exclusive fullscreen blocks third-party overlays. Use **Borderless**
+(or `Alt+Enter`). EDHUD reasserts topmost every 2 s and can warn once per
+session when exclusive mode is detected.
 
-В Borderless/Windowed оверлей виден всегда. Предупреждение можно отключить в
-настройках («Окна» → верхний оверлей).
+### Build exe (portable + setup)
 
-### Сборка exe (portable + установщик)
-
-Нужен Python 3.10+ с tkinter. Для установщика — [Inno Setup 6](https://jrsoftware.org/isdl.php)
-(`winget install --id JRSoftware.InnoSetup -e`).
+Python 3.10+ with tkinter. For the installer: [Inno Setup 6](https://jrsoftware.org/isdl.php).
 
 ```bat
 build_windows.bat
 ```
 
-На выходе в `dist\`:
+Output in `dist\`:
 
-| Файл | Назначение |
+| File | Purpose |
 |---|---|
-| `EDHUD-portable\EDHUD.exe` | Portable standalone: один файл, копируешь на другой ПК и запускаешь |
-| `EDHUD-portable.zip` | То же в архиве |
-| `EDHUD\` | Папка с exe + библиотеками (основа для установщика) |
-| `EDHUD-Setup-<ver>.exe` | Windows-установщик (ярлыки, опционально автозапуск) |
+| `EDHUD-portable\EDHUD.exe` | Single-file portable |
+| `EDHUD-portable.zip` | Same, zipped |
+| `EDHUD\` | Folder build (installer input) |
+| `EDHUD-Setup-<ver>.exe` | Windows installer |
 
-Python на целевом ПК **не нужен**: внутри — интерпретатор, tkinter и `data/`.
-Настройки и кэш пишутся в `%LOCALAPPDATA%\EliteDangerousHUD` (не в папку программы).
-Автозапуск без установщика: ярлык на `EDHUD.exe` в `shell:startup`.
+Target PC does **not** need Python. Autostart without installer: shortcut to
+`EDHUD.exe` in `shell:startup`.
 
-## Маршруты
+## Routes
 
 ```bash
-python run.py lock                    # залочить текущий маршрут игры
-python run.py unlock                  # снова показывать маршрут игры
-python run.py import-route route.csv  # импорт текста/CSV Galaxy Plotter
+python run.py lock
+python run.py unlock
+python run.py import-route route.csv
 python run.py plot "Sol" "Colonia" --range 60 --efficiency 60
 python run.py export-route route.json
 ```
 
-Залоченный/построенный маршрут живёт в `route_locked.json` и имеет приоритет над
-маршрутом игры; прогресс считается по нему. `plot` работает через
-`https://spansh.co.uk/api/route` (асинхронная задача + опрос результата).
+Locked/plotted routes live in `route_locked.json` and override the game route.
+`plot` uses `https://spansh.co.uk/api/route`.
 
-## Стоимость данных
-
-Формула и множители — из темы «Exploration Value Formulae» (порт
-`Util.GetBodyValue` из SrvSurvey):
-
-```
-value = (k + k*q*mass^0.2) * mappingMultiplier
-mappingMultiplier = 3.6996 (первый открыватель + первый картограф)
-                  | 8.0956 (первый картограф)
-                  | 3.3333 (картография не первая)
-+ бонус Odyssey (30 % или минимум 555), ×1.25 за эффективный DSS,
-не ниже 500, затем ×2.6 за первое открытие.
-Звёзды: value = kk + mass*kk/66.25 (kk: 1200 / 22628 для NS/BH / 14057 для W*).
-```
-
-HUD показывает для текущего тела `≈скан` (или `≈` после DSS) и `×2.6`, если тело
-ещё никем не открыто; в подробностях — разбивку, кто открыл/картографировал; в
-строке «система» — суммы по своим данным и оценку EDSM; в строке «сессия» —
-накопленные скан/DSS/биология и реально проданные данные. Для тел, известных
-только по EDSM/Spansh/EDDN, множитель первого картографа не применяется (мы не
-знаем, картографировали ли их уже), поэтому оценка консервативная.
-
-### Биология: First Logged
-
-Vista Genomics платит базовую стоимость вида; если пробу ещё никто не сдавал, за
-«First Logged» начисляется ещё четыре базовые стоимости, то есть **×5**. Это не
-«первый футфол»: футфол только ставит метку на планете и денег не даёт (в HUD он
-показывается отдельно — «чужого футфола нет: шанс на ×5 First Logged»).
-Признак берётся из журнала `ScanOrganic.WasLogged` (`false` → бонус будет).
-Если игра поле не прислала, HUD пишет `(base, First Logged ?)`; после продажи
-показываются фактические суммы из `SellOrganicData` (`Value` + `Bonus`).
-
-## Как это устроено
+## Architecture
 
 ```
 Journal*.log / Status.json / NavRoute.json
         │  edhud/journal.py
         ▼
-edhud/model.py   GameState: система, тела, сигналы, пробы, статус, маршрут, деньги
-        │        ├── edhud/bio.py     критерии -> предсказания (небулы, Guardian)
-        │        ├── edhud/values.py  стоимость скана/картографии + множители
-        │        ├── edhud/remote.py  EDSM + Spansh -> тела других командиров
-        │        ├── edhud/eddn.py    живой фид EDDN (+ edhud/zmtp.py, если нет pyzmq)
-        │        ├── edhud/galaxy.py  туманности и Guardian bubble
-        │        ├── edhud/codex.py   имена/стоимость/дистанции родов
-        │        ├── edhud/regions.py регион галактики по координатам
-        │        └── edhud/store.py   кэш систем на диске
+edhud/model.py   GameState
+        │        ├── bio / values / remote / eddn / galaxy / codex / regions / store
         ▼
-edhud/hudmodel.py  HudView: строки и сегменты (без UI)
-        │
-        ├── edhud/overlay.py  tkinter-окно сверху экрана (+ edhud/winapi.py)
-        └── edhud/tui.py      тот же вид в терминале
+edhud/hudmodel.py  HudView (no UI)
+        ├── edhud/overlay.py  (+ winapi.py)
+        └── edhud/tui.py
 ```
 
-`edhud/app.py` — связка: watcher, кэш, фоновая догрузка EDSM/Spansh, поток EDDN,
-цикл обновления, горячие клавиши. `edhud/winapi.py` — DPI, click-through, удержание
-topmost, детект полноэкранного окна.
+Uploads: `edhud/edsm_upload.py`, `edhud/eddn_upload.py`, `edhud/inara_upload.py`
+(wired from `edhud/app.py` on each live journal event).
 
-### EDDN
+EDDN subscribe check: `python run.py eddn --seconds 20`.
 
-`edhud/zmtp.py` — минимальный ZMTP 3.1-подписчик (приветствие, READY, SUBSCRIBE,
-PING/PONG): EDDN отдаёт zlib-сжатый JSON, поэтому pyzmq не нужен. Если pyzmq
-установлен, `edhud/eddn.py` использует его. Фильтр по системе строится по
-`SystemAddress`/`StarSystem`, применяются `Scan`, `FSSBodySignals`,
-`SAASignalsFound`, `SAAScanComplete` — только для дополнения недостающего, свои
-данные никогда не перезаписываются. Проверка: `python run.py eddn --seconds 20`.
-
-### Legacy 3.8
-
-Версия берётся из `Fileheader`/`LoadGame` (`gameversion`: `3.8.x` → Legacy,
-`4.x` → Live/Odyssey). В Legacy: нет Odyssey-бонуса в стоимости (множители
-картографии и ×2.6 остаются), био-прогноз отключён, EDSM/Spansh/EDDN не
-догружаются (там только Live-данные) — при желании включается
-`remote_in_legacy` в `config.json`. В HUD — метка `[Legacy 3.8]` и подсказка.
-
-### Предсказание биологии
-
-`data/bio-criteria/*.json` — дерево условий на каждый род (SrvSurvey, GPLv3).
-Клаузы: `temp [146 ~ 196]`, `atmosType [Neon]`, `mats &[Carbon,Sulphur]`,
-`mats ![Iron,Nickel]`, `atmosComp [Neon >= 100 | Nitrogen >= 46]` (внутри одной
-клаузы составы объединяются через «или»), `regions [...]`, `nebulae [ ~ 160]`,
-`guardian [true]`, `# комментарий`. Свойства берутся из `Scan`, у тел из EDSM —
-из ответа API (гравитация g → м/с², давление bar → Па, температуры K).
-
-Каталог туманностей (`edastro.com/mapcharts/files/nebulae-coordinates.csv`)
-скачивается один раз в кэш; Guardian bubble — две большие сферы по 750 ly
-(Gamma Velorum, HEN 2-333) и шесть по 100 ly.
-
-## Добыча в кольцах: что есть у других
-
-Обзор софта по хотспотам/кольцам (август 2026, всё проверено по README проектов):
-
-| Проект | Что делает | Чем полезен нам |
-|---|---|---|
-| [EliteMining](https://github.com/Viper-Dude/EliteMining) (Python, GPL) | Hotspot finder на 80 000+ локаций + Spansh API, поиск по всей галактике, overlaps, RES-сайты, PowerPlay-майнинг, текстовый оверлей, VoiceAttack, рынок, мины-миссии | Самый близкий аналог. Идея «база локаций + поиск у Spansh» и таблица «кольцо → минерал → цена» — то, к чему мы идём |
-| [ED Hotspots Finder — Rings & Planets](https://github.com/LittleJacket99/ED-Hotspots-Finder-Rings-and-Planets) (Windows, GPL-3.0, есть EDMC-плагин) | Массовый перебор систем под требования (в т.ч. PowerPlay), анализ колец и планет | Пакетная проверка систем и EDMC-плагин как источник данных |
-| [ed-hotspot-mining](https://github.com/creativeSloth/ed-hotspot-mining) (Python, в разработке) | Качает дамп Spansh `galaxy_populated.json.gz` (~3.6 ГБ) в SQLite, ищет **double/triple overlap** и лучшие станции сбыта по прыжковому радиусу | Готовая архитектура «дамп → SQLite → офлайн-поиск без лимитов API». Это единственный легальный способ получить хотспоты по всей галактике |
-| [EDMC Mining Analytics](https://github.com/SweetJonnySauce/EDMC-Mining-Analytics) (плагин EDMC) | Живые метрики добычи: т/ч, качество камня, история сессий | `ProspectedAsteroid` → «качество камня» и счётчик выработки; у нас пока нет |
-| [Mining Analyser](https://gitlab.com/fankserver/elite-dangerous/mining-analyser) (GitLab) | Прародитель анализа refinery yield и качества астероидов | Формулы оценки камня по `ProspectedAsteroid` |
-
-Веб-сервисы (не GitHub, но по теме): [edtools.cc/hotspot](https://edtools.cc/hotspot)
-(hotspots по типам колец, только Pristine), [edmining.com/overlap](https://edmining.com/overlap)
-(база известных double/triple overlaps), [ed.patyi.org/hotspot](https://ed.patyi.org/en/hotspot),
-[spansh.co.uk/bodies](https://spansh.co.uk/bodies), Discord-боты Gerhard и Elite Tracker.
-
-Что стоит забрать себе (по убыванию пользы):
-1. **База хотспотов по галактике** — либо дамп Spansh в SQLite (как ed-hotspot-mining),
-   либо наш `hotspots.json`, накопленный из своих сканов (уже сделано).
-2. **Качество камня и выработка** — `ProspectedAsteroid` даёт состав каждого астероида,
-   отсюда «% целевого минерала» и т/ч. Единственный поток, который у нас не разобран.
-3. **Overlaps** — позиции хотспотов игра не отдаёт вообще (в `SAASignalsFound` только
-   типы и количество), поэтому overlaps у всех собираются руками/волонтёрами;
-   автоматизировать нельзя, можно только импортировать чужую базу.
-4. **RES-сайты и запас кольца** — `Scan` уже даёт `ReserveLevel`, добавлено в таблицу.
-5. **Станции сбыта** — у нас есть свой индекс цен; осталось связать «кольцо → лучшая станция».
-
-### Что уже взято (1.6.0)
-
-Исходники всех пяти проектов лежат локально в `reference/mining/` — **только для
-изучения**, каталог в `.gitignore` и в репозиторий не попадает (GPL и чужие лицензии).
-
-| Откуда | Что взяли |
-|---|---|
-| EliteMining, `app/ring_guide_tab.py` + `docs/Commodities by Ring Type.xlsx` | Справочник «тип кольца → минералы» с разделением на ядро/лазер и дорогие/дешёвые — `mining.RING_MINERALS`, колонка «Способ» (ядро/лазер) |
-| EliteMining, `docs/implementation/RING_DENSITY_IMPLEMENTATION.md` | **Формула edtools**: `Density = M[MT] / π(Rout² − Rin²) [км²]` — `mining.ring_density`, колонка «Плотн.», из журнального `Scan.Rings` |
-| ed-hotspot-mining (README, кода в репо нет) | Идея приоритета двойных/тройных хотспотов и подбора станции сбыта под прыжковый радиус — реализовано как «лучший сбыт» по своему индексу цен |
-| EDMC Mining Analytics | `ProspectedAsteroid` → **процент целевого минерала в камне**, среднее и лучший за сессию, камни/материнские жилы — `edhud/miningstats.py`, строка «добыча:» в HUD |
-| Mining Analyser (GitLab, PHP/JS) | `MiningRefined` + `Cargo` → **выработка (т, т/ч), трюм и оценка партии** — тот же `miningstats.py` |
-| EDMC Mining Analytics (`integrations/`) | Идея «цена × достижимость»: ранги станций сбыта по прыжковому радиусу — `edhud/sellstations.py`, `Loadout.MaxJumpRange` |
-| ed-hotspot-mining (архитектура) | **Импорт дампа Spansh в SQLite** — `edhud/spanshdb.py`, галочка в настройках (по умолчанию выкл.), потоковый парсер 1–4 ГБ без зависимостей |
-
-Не взято сознательно: 80-тысячная база локаций EliteMining и дамп Spansh —
-это гигабайты чужого кэша, а не алгоритм.
-
-## Тесты и разработка
+## Tests
 
 ```bash
-python -m unittest discover -s tests     # 307 тестов: критерии, регионы, стоимость,
-                                         # EDSM/Spansh, EDDN/ZMTP, Legacy, хотспоты,
-                                         # статистика сессий, вкладки, приглушение панелей,
-                                         # справочник колец и плотность, метрики добычи,
-                                         # база Spansh, станции сбыта, видимость панелей
-python tools/inspect_bio.py              # свойства тела и предсказания по журналу
-python tools/inspect_remote.py "HIP 36601"  # предсказания по чужим данным
-python tools/debug_bio.py Bacterium      # трассировка критериев
-python tools/render_test.py              # отрисовка оверлея без игры (canvas -> postscript)
-python tools/eddn_probe.py               # что идёт в живом фиде EDDN (нужен pyzmq)
-python tools/check_imports.py            # неиспользуемые импорты
-python tools/make_icon.py                # data/edhud.ico и .png из data/edhud-icon.svg
+python -m unittest discover -s tests
+python tools/inspect_bio.py
+python tools/eddn_probe.py
 ```
 
-## Данные, лицензии, благодарности
+## Data, licenses, credits
 
-* `data/bio-criteria/*.json` — из [SrvSurvey](https://github.com/njthomson/SrvSurvey)
-  (GPL-3.0), автор njthomson и сообщество.
-* `data/galaxy_regions.json` — карта регионов из
-  [klightspeed/EliteDangerousRegionMap](https://github.com/klightspeed/EliteDangerousRegionMap)
-  (MIT), упакована в RLE.
-* `data/codex_ref.json` — выжимка из справочника кодекса Canonn (через SrvSurvey).
-* Формула стоимости — [Exploration Value Formulae](https://forums.frontier.co.uk/threads/exploration-value-formulae.232000).
-* Данные систем — EDSM (`edsm.net/api-system-v1/*`), Spansh
-  (`spansh.co.uk/api/bodies/search`) и живой EDDN (`tcp://eddn.edcd.io:9500`).
-* Идеи и форматы журналов — [EDMarketConnector](https://github.com/EDCD/EDMarketConnector),
-  [EDDiscovery](https://github.com/EDDiscovery/EDDiscovery),
-  [Exploration Buddy](https://www.panostrede.de/EDEB/).
+* `data/bio-criteria/*.json` — [SrvSurvey](https://github.com/njthomson/SrvSurvey) (GPL-3.0)
+* `data/galaxy_regions.json` — [EliteDangerousRegionMap](https://github.com/klightspeed/EliteDangerousRegionMap) (MIT)
+* `data/codex_ref.json` — Canonn / SrvSurvey codex extract
+* Exploration value formulae — Frontier forums thread
+* System data — EDSM, Spansh, live EDDN
+* Journal ideas — EDMarketConnector, EDDiscovery, Exploration Buddy
 
-Код распространяется по GPL-3.0 (из-за данных критериев), см. `LICENSE`.
-Пересобрать `data/`: `sh tools/fetch_reference.sh && python tools/vendor_data.py`.
+Code is **GPL-3.0** (because of the criteria data); see `LICENSE`.
 
-## Чего пока нет
+Rebuild vendored data: `sh tools/fetch_reference.sh && python tools/vendor_data.py`.
 
-* **Встроенной галактической карты нет** — Spansh/EDSM открываются в браузере из
-  трея. API: догрузка тел и Galaxy Plotter (`python run.py plot A B`). Ключ EDSM
-  для чтения тел **не нужен** (поле в настройках — для личных API EDSM).
-* Вкладки Surroundings / History (как в EDEB) пока нет — Route, Bodies, Пояса и
-  Добыча. Статистика — в настройках, отдельной вкладкой окна.
-* Приглушение панелей держится на двух сигналах: `GuiFocus` из `Status.json` и
-  трек `Music` из журнала (`FleetCarrier_Managment`, `GalaxyMap`, `SystemMap`,
-  `Codex`, `Squadrons`, `GalacticPowers`, `MainMenu`, `Starport`). Для части
-  экранов (Carrier Management) игра держит `GuiFocus` нулём, поэтому одного
-  `Status.json` не хватало. FSS/DSS (`SystemAndSurfaceScanner`, focus 9/10)
-  намеренно не приглушаются.
-* **Состав колец по чужим данным недоступен**: в `bodies/search` у Spansh и в
-  `api-system-v1/bodies` у EDSM кольцо — это только тип/масса/радиус, хотспотов
-  там нет (проверено запросами; фильтры по ним Spansh игнорирует). Поэтому
-  «где александрит в 40 ly» отвечает только своя база сканов (кнопка «Мои
-  кольца») или дамп Spansh на несколько гигабайт.
-* Качества камня (`ProspectedAsteroid` → % минерала, т/ч) и overlaps пока нет:
-  overlaps вообще не автоматизируются — игра отдаёт только типы и количество
-  хотспотов, без координат.
-* Био-прогноз опирается на Odyssey-критерии: в Legacy он отключён (там другой
-  набор организмов), в Live работает как подсказка, а не гарантия.
-* Оценка стоимости скана звезды не включает бонус «эффективного» DSS (у звёзд
-  его нет), а у тел, известных только по чужим данным, не применяется множитель
-  первого картографа — намеренно консервативно.
-* EDSM/Spansh/EDDN содержат только Live-данные: в Legacy догрузка выключена
-  (можно включить `remote_in_legacy`, но данные будут от Live-вселенной).
-* Каталог туманностей и Guardian bubble нужны для части критериев: сам каталог
-  качается с edastro.com, без сети критерии `nebulae [...]` не срабатывают.
+## Not included (yet)
+
+* Built-in galaxy map (opens Spansh/EDSM in the browser)
+* EDEB-style Surroundings / History tabs
+* Automated hotspot overlaps (game does not publish hotspot coordinates)
+* Full Spansh dump is optional and large — enable in Settings when needed
+
+## Links
+
+* Releases: https://github.com/PTah/edhub/releases
+* Source: https://github.com/PTah/edhub
+* Russian README: [README.ru.md](README.ru.md)
+* Data uploads (EDSM / EDDN / INARA): [docs/data-uploads.md](docs/data-uploads.md)
