@@ -2,16 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.10"
+VERSION = "1.8.11"
 
-NOTES = """**1.8.10: Sphere/Route column widths + mid-jump route + Sphere progress**
+NOTES = """**1.8.11: Sphere Route stays open when a jump starts**
 
-- Sphere/Mining column widths resize and persist; System column no longer stretch-resets
-- Game NavRoute is not cleared while hyperspace jump is in progress
-- Sphere Route marks visited/current/next and fills star class after arrival
-- Clearer Sphere Route usage hint (Calculate → To route → paste → jump)
+- Opening Sphere Route no longer auto-switches to Route on FSD charge / StartJump
+- Manual sticky tabs also re-checked from the live Notebook selection
 
-Version 1.8.10."""
+Version 1.8.11."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

@@ -105,6 +105,39 @@ class ManualTabTests(unittest.TestCase):
         self.assertEqual(self.state.view_tab, "bodies")
         self.assertEqual(w.nb.select(), str(w.tab_bodies))
 
+    def test_sphere_tab_stays_open_when_jump_starts(self):
+        w = self.window
+        w.update_state(self.state)
+        w.win.update()
+        w.nb.select(w.tab_sphere)
+        w.win.update()
+        w._on_tab_changed()
+        self.assertEqual(w._shown_tab, "sphere")
+
+        self.state.apply(
+            {
+                "event": "StartJump",
+                "JumpType": "Hyperspace",
+                "StarSystem": "There",
+                "SystemAddress": 2,
+            }
+        )
+        w.update_state(self.state)
+        w.win.update()
+        self.assertEqual(self.state.view_tab, "route")
+        self.assertEqual(w.nb.select(), str(w.tab_sphere))
+        self.assertEqual(w._shown_tab, "sphere")
+
+        self.state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        w.update_state(self.state)
+        w.win.update()
+        self.assertEqual(w.nb.select(), str(w.tab_sphere))
+
 
 if __name__ == "__main__":
     unittest.main()

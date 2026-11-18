@@ -1755,19 +1755,43 @@ class MainWindow:
         if tab is not None:
             tab.spansh_index = index
 
+    def _sticky_manual_tab(self) -> str | None:
+        """Ручные вкладки, которые авто Route/Bodies не отбирает в той же системе."""
+        if self._shown_tab in ("mining", "belts", "sphere"):
+            return self._shown_tab
+        try:
+            current = self.nb.select()
+        except tk.TclError:
+            return None
+        mapping = (
+            (getattr(self, "tab_sphere", None), "sphere"),
+            (getattr(self, "tab_mining", None), "mining"),
+            (getattr(self, "tab_belts", None), "belts"),
+        )
+        for frame, name in mapping:
+            if frame is not None and current == str(frame):
+                self._shown_tab = name
+                return name
+        return None
+
     def _apply_tab(self, state: GameState) -> None:
         """Автопереключение Route/Bodies: срабатывает на смену системы и на смену маршрута.
 
-        Ручной выбор вкладки (например «Добыча») живёт до прыжка — после входа
-        в новую систему окно снова показывает Bodies (или Route, если проложен
-        маршрут), иначе автопереключение «залипало» навсегда.
+        Ручной выбор вкладки (Добыча / Пояса / Sphere Route) живёт до прибытия
+        в новую систему — зарядка и туннель гиперпрыжка её не отбирают.
+        После FSDJump/Location окно снова следует за view_tab (обычно Bodies).
         """
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
         address = state.system.address
+        sticky = self._sticky_manual_tab()
         if address == self._tab_address and tab == self._tab_view:
             return
-        # та же система + ручная вкладка (Добыча/Пояса/шар) — не отбирать
-        if address == self._tab_address and self._shown_tab not in (None, "route", "bodies"):
+        # та же система + ручная вкладка — не уводить на Route при старте прыжка
+        if address == self._tab_address and sticky is not None:
+            self._tab_view = tab
+            return
+        # во время прыжка Sphere Route не трогаем даже если адрес ещё не сменился в UI
+        if sticky == "sphere" and state.jumping_away:
             self._tab_view = tab
             return
         self._tab_address = address
