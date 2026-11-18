@@ -894,6 +894,19 @@ class RouteOpenedColumnTests(unittest.TestCase):
         self.assertAlmostEqual(state.system.fss_progress or 0, 0.25)
         self.assertEqual(state.view_tab, "bodies")
 
+    def test_fss_known_count_skips_belt_and_ring(self):
+        """Шапка тел N/M не должна считать Belt Cluster и Ring как FSS-тело."""
+        state = GameState()
+        state.system.body_count = 12
+        state.system.bodies[0] = Body(body_id=0, name="Sys A", is_star=True, star_type="L")
+        state.system.bodies[1] = Body(body_id=1, name="Sys B", is_star=True, star_type="T")
+        for i in range(2, 12):
+            state.system.bodies[i] = Body(body_id=i, name=f"Sys A {i - 1}", planet_class="Icy body")
+        state.system.bodies[20] = Body(body_id=20, name="Sys A A Belt Cluster")
+        state.system.bodies[21] = Body(body_id=21, name="Sys A 1 A Ring")
+        self.assertEqual(len(state.system.bodies), 14)
+        self.assertEqual(state.system.fss_known_count(), 12)
+
 
 class JumpTabTests(unittest.TestCase):
     def test_hyperspace_opens_route_and_arrival_opens_bodies(self):

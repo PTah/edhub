@@ -786,6 +786,14 @@ class System:
                 planets += 1
         return stars, planets, stars + planets
 
+    def fss_known_count(self) -> int:
+        """Сколько тел известно для сравнения с FSS BodyCount.
+
+        В журнал часто попадают Belt Cluster и «… Ring» отдельными Scan — их нет
+        (или не так считают) в BodyCount хонка, из‑за чего в шапке вылезало 13/12.
+        """
+        return self.route_stats()[2]
+
     @classmethod
     def from_persist(cls, data: dict) -> "System":
         pos = data.get("star_pos")
