@@ -1549,6 +1549,9 @@ class MainWindow:
                 widget.configure(text=t(key))
             except tk.TclError:
                 pass
+        tip = getattr(self, "_sphere_load_tip", None)
+        if tip is not None:
+            tip.text = t("sphere.load_tip")
 
     def _paint_chrome(self) -> None:
         font = (self._ui_family, self._ui_size, "bold")
@@ -2074,6 +2077,7 @@ class MainWindow:
             padx=10,
         )
         self.sphere_load.pack(side="left", padx=(8, 0))
+        self._sphere_load_tip = _CellTip(self.sphere_load, text=t("sphere.load_tip"))
         self.sphere_system.bind("<Return>", lambda _e: self._calc_sphere())
         self.sphere_distance.bind("<Return>", lambda _e: self._calc_sphere())
         self.sphere_status = tk.Label(
