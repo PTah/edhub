@@ -2336,6 +2336,94 @@ class BioBoardTests(unittest.TestCase):
         headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
         self.assertEqual(len(headers), 2)
 
+    def test_star_lock_shows_all_system_bio(self):
+        """Лок звезды (Destination.Body = 0) → слева все био системы, не одна планета."""
+        from edhud.model import FLAG_HAS_LAT_LONG
+
+        state = GameState()
+        state.system.bodies[0] = Body(body_id=0, name="Test A", star_type="K", is_star=True)
+        self._icy(state, 1, 4)
+        second = self._icy(state, 2, 2)
+        second.name = "Test 2"
+        # как после взлёта: BodyID + lat + атмосфера ещё могут быть, но лок — звезда
+        state.in_atmosphere = True
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Altitude": 5_000,
+                "Destination": {"System": 1, "Body": 0, "Name": "Test A"},
+            }
+        )
+        self.assertTrue(state.in_atmosphere)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+        headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
+        self.assertEqual(len(headers), 2)
+
+    def test_liftoff_ignores_sticky_destination(self):
+        """После взлёта залипший Destination на планете не держит одну карточку."""
+        from edhud.model import FLAG_HAS_LAT_LONG
+
+        state = GameState()
+        self._icy(state, 1, 4)
+        second = self._icy(state, 2, 2)
+        second.name = "Test 2"
+        state.status.body_id = 1
+        state.status.body_name = "Test 1"
+        state.status.flags = 1 << 1  # landed
+        state.apply_status(
+            {
+                "Flags": (1 << 1) | FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 1, "Name": "Test 1"},
+            }
+        )
+        board = hudmodel.build_bio_board(state)
+        assert board is not None
+        self.assertTrue(board.title.startswith("1 · био ×4"), board.title)
+
+        state.apply({"event": "Liftoff", "Body": "Test 1", "BodyID": 1})
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 1, "Name": "Test 1"},
+            }
+        )
+        self.assertTrue(state.bio_force_system)
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+
+        # лок другой планеты снимает сводку
+        state.apply_status(
+            {
+                "Flags": FLAG_HAS_LAT_LONG,
+                "BodyID": 1,
+                "BodyName": "Test 1",
+                "Latitude": 10.0,
+                "Longitude": 20.0,
+                "Destination": {"System": 1, "Body": 2, "Name": "Test 2"},
+            }
+        )
+        self.assertFalse(state.bio_force_system)
+        board = hudmodel.build_bio_board(state)
+        assert board is not None
+        self.assertTrue(board.title.startswith("2 · био ×2"), board.title)
+
     def test_planet_without_bio_hides_the_system_summary(self):
         """На планете без биологии сводку системы не показываем."""
         state = GameState()

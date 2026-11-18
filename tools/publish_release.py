@@ -2,14 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.17"
+VERSION = "1.8.18"
 
-NOTES = """**1.8.17: bio panel no longer sticks after clearing target in DSS**
+NOTES = """**1.8.18: star lock and liftoff restore full system bio list**
 
-- DSS (GuiFocus 10) alone no longer keeps a single-planet bio card via last_fss_body_id
-- Single-planet view only for: surface/atmosphere, Destination lock, or open FSS card
+- Locking the star (Destination.Body = 0) shows all bio signals on the left again
+- Liftoff / LeaveBody / SC entry ignore a sticky planet Destination until a new planet is locked
+- Soft atmosphere/lat presence no longer keeps a single-planet card after takeoff
 
-Version 1.8.17."""
+Version 1.8.18."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
