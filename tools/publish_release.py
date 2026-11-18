@@ -24,7 +24,7 @@ cmd = [
     f"v{VERSION}",
     *ASSETS,
     "--repo",
-    "PTah/edhud",
+    "PTah/edhub",
     "--title",
     f"EDHUD {VERSION}",
     "--notes",
