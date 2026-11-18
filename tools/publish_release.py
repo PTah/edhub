@@ -2,14 +2,13 @@
 import subprocess
 import sys
 
-VERSION = "1.8.7"
+VERSION = "1.8.8"
 
-NOTES = """**1.8.7: cancel FSD charge returns to Bodies**
+NOTES = """**1.8.8: fix startup crash on language refresh**
 
-- Cancelling a hyperspace charge switches Summary back from Route to Bodies
-- Manual Mining/Belts tabs are not stolen while staying in the same system
+- `_refresh_tab_titles` used missing `BeltStore.items`; count belts via `len(store)`
 
-Version 1.8.7."""
+Version 1.8.8."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

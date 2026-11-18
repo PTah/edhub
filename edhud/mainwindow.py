@@ -1438,7 +1438,7 @@ class MainWindow:
             self.nb.tab(self.tab_route, text=t("win.tab_route"))
             self.nb.tab(self.tab_sphere, text=t("win.tab_sphere"))
             self.nb.tab(self.tab_bodies, text=t("win.tab_bodies"))
-            count = len(self.belt_store.items) if self.belt_store is not None else 0
+            count = len(self.belt_store) if self.belt_store is not None else 0
             self.nb.tab(
                 self.tab_belts,
                 text=t("win.tab_belts_n", n=count) if count else t("win.tab_belts"),
