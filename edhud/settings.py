@@ -11,7 +11,7 @@ from tkinter import BooleanVar, DoubleVar, IntVar, StringVar, colorchooser, file
 import tkinter as tk
 
 from . import __version__, config, icon, spanshdb, values
-from .i18n import t
+from .i18n import apply_config_language, language, t
 from .mainwindow import _geometry_xy
 
 # Подписи цветов в разделе оформления. Значение — ключ перевода.
@@ -893,14 +893,35 @@ class SettingsDialog:
     def _build_look(self, frm: ttk.Frame) -> None:
         families = self._font_names()
         self.theme = StringVar(value=self.cfg.theme if self.cfg.theme in config.THEMES else "dark")
+        current_lang = (self.cfg.language or "").strip().lower()
+        if current_lang not in ("ru", "en"):
+            current_lang = language()
+        self.ui_language = StringVar(value=current_lang)
         self.font_family = StringVar(value=self.cfg.font_family or "Consolas")
         self.font_size = IntVar(value=int(self.cfg.font_size or 11))
         self.ui_font_family = StringVar(value=self.cfg.ui_font_family or "Segoe UI")
         self.ui_font_size = IntVar(value=int(self.cfg.ui_font_size or 9))
         self.color_vars: dict[str, StringVar] = {}
         self._swatches: dict[str, tk.Label] = {}
+        self._lang_labels = {"ru": t("set.language_ru"), "en": t("set.language_en")}
 
         row = 0
+        ttk.Label(frm, text=t("set.language")).grid(row=row, column=0, sticky="w", padx=8, pady=4)
+        self._lang_display = StringVar(value=self._lang_labels[current_lang])
+        lang_box = ttk.Combobox(
+            frm,
+            textvariable=self._lang_display,
+            values=(self._lang_labels["ru"], self._lang_labels["en"]),
+            state="readonly",
+            width=18,
+        )
+        lang_box.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        lang_box.bind("<<ComboboxSelected>>", self._on_language_picked)
+        ttk.Label(frm, text=t("set.language_hint"), foreground="#666").grid(
+            row=row, column=2, columnspan=2, sticky="w"
+        )
+        row += 1
+
         ttk.Label(frm, text=t("set.theme")).grid(row=row, column=0, sticky="w", padx=8, pady=4)
         theme = ttk.Combobox(
             frm,
@@ -979,6 +1000,13 @@ class SettingsDialog:
             if key in colors:
                 var.set(colors[key])
 
+    def _on_language_picked(self, _event=None) -> None:
+        label = self._lang_display.get()
+        for code, text in self._lang_labels.items():
+            if text == label:
+                self.ui_language.set(code)
+                return
+
     def _read_look(self) -> str | None:
         theme = self.theme.get().strip()
         if theme not in config.THEMES:
@@ -998,6 +1026,12 @@ class SettingsDialog:
             if parsed is None:
                 return t("set.err_color", title=t(title))
             colors[key] = parsed
+        self._on_language_picked()
+        lang = self.ui_language.get().strip().lower()
+        if lang not in ("ru", "en"):
+            lang = language()
+        self.cfg.language = lang
+        apply_config_language(lang)
         self.cfg.theme = theme
         self.cfg.font_family = family
         self.cfg.font_size = max(8, min(32, size))

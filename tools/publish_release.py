@@ -2,15 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.4"
+VERSION = "1.8.5"
 
-NOTES = """**1.8.4: English README and docs**
+NOTES = """**1.8.5: UI language switcher**
 
-- English `README.md` (Russian full text → `README.ru.md`)
-- `docs/install-windows.md`, `docs/data-uploads.md` (EDSM / EDDN / INARA)
+- Settings → Appearance and localization: Russian / English
+- Language applies to HUD, menus, voice and Summary tabs without restart
+- Overlay context menu uses the same translations
 
-Version 1.8.4."""
-ASSETS = [
+Version 1.8.5."""ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
     rf"dist\EDHUD-{VERSION}-windows.zip",
     rf"dist\EDHUD-Setup-{VERSION}.exe",

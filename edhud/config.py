@@ -147,6 +147,8 @@ class Config:
     ui_font_family: str = "Segoe UI"
     ui_font_size: int = 9
     theme: str = "dark"
+    # интерфейс: "" = как у Windows; "ru" / "en" — принудительно
+    language: str = ""
     expanded: bool = False
     show_predictions: bool = True
     max_predictions: int = 6

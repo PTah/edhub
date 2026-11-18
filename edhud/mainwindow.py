@@ -597,9 +597,9 @@ class MainWindow:
         self.tab_bodies = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_belts = ttk.Frame(nb, style="ED.TFrame", padding=8)
         self.tab_mining = ttk.Frame(nb, style="ED.TFrame", padding=0)
-        nb.add(self.tab_route, text="Route")
+        nb.add(self.tab_route, text=t("win.tab_route"))
         nb.add(self.tab_sphere, text=t("win.tab_sphere"))
-        nb.add(self.tab_bodies, text="Bodies")
+        nb.add(self.tab_bodies, text=t("win.tab_bodies"))
         nb.add(self.tab_belts, text=t("win.tab_belts"))
         nb.add(self.tab_mining, text=t("win.tab_mining"))
         nb.select(self.tab_bodies)
@@ -1404,6 +1404,9 @@ class MainWindow:
         """Шрифт и палитра окна из настроек. Цвета таблицы живут в COLORS."""
         from .config import DARK_COLORS
 
+        global BODY_COLUMNS, ROUTE_COLUMNS
+        BODY_COLUMNS = _columns(_BODY_SPEC)
+        ROUTE_COLUMNS = _columns(_ROUTE_SPEC)
         self.cfg = cfg
         for key in list(COLORS):
             if key == "grid":
@@ -1419,12 +1422,60 @@ class MainWindow:
             self._set_col_width("route", index, self._col_width("route", key, default_w))
         self._style()
         self._paint_chrome()
+        self._refresh_tab_titles()
+        self._refresh_sphere_headings()
         self.apply_opacity()
         self._apply_saved_position()
         self._last_key = None
         self._clear_body_rows()
         if self._state is not None:
             self.update_state(self._state)
+
+    def _refresh_tab_titles(self) -> None:
+        if not hasattr(self, "nb"):
+            return
+        try:
+            self.nb.tab(self.tab_route, text=t("win.tab_route"))
+            self.nb.tab(self.tab_sphere, text=t("win.tab_sphere"))
+            self.nb.tab(self.tab_bodies, text=t("win.tab_bodies"))
+            count = len(self.belt_store.items) if self.belt_store is not None else 0
+            self.nb.tab(
+                self.tab_belts,
+                text=t("win.tab_belts_n", n=count) if count else t("win.tab_belts"),
+            )
+            self.nb.tab(self.tab_mining, text=t("win.tab_mining"))
+        except tk.TclError:
+            pass
+
+    def _refresh_sphere_headings(self) -> None:
+        tree = getattr(self, "sphere_tree", None)
+        if tree is None:
+            return
+        headings = {
+            "idx": (t("sphere.col_idx"), "center"),
+            "system": (t("sphere.col_system"), "w"),
+            "star": (t("sphere.col_star"), "center"),
+            "leg": (t("sphere.col_leg"), "e"),
+            "center": (t("sphere.col_center"), "e"),
+        }
+        try:
+            for key, (title, anchor) in headings.items():
+                tree.heading(key, text=title, anchor=anchor)
+        except tk.TclError:
+            pass
+        for widget, key in (
+            (getattr(self, "sphere_system_lbl", None), "sphere.system"),
+            (getattr(self, "sphere_distance_lbl", None), "sphere.distance"),
+            (getattr(self, "sphere_calc", None), "sphere.calc"),
+            (getattr(self, "sphere_load", None), "sphere.load"),
+            (getattr(self, "sphere_status", None), "sphere.hint"),
+        ):
+            if widget is None:
+                continue
+            try:
+                widget.configure(text=t(key))
+            except tk.TclError:
+                pass
 
     def _paint_chrome(self) -> None:
         font = (self._ui_family, self._ui_size, "bold")

@@ -44,8 +44,9 @@ session: 2 jumps · scan 120 Kcr · DSS 1.3 Mcr · bio ≈1.69 Mcr
   `WasFootfalled` in journal `Scan`.
 * **Settings** (tray → Settings): journal folder, network, EDSM/Spansh/EDDN,
   optional EDSM and INARA API keys, voice, overlay geometry, **Statistics** tab,
-  Spansh hotspot dump DB, update checks. Config:
-  `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
+  Spansh hotspot dump DB, update checks. **Appearance and localization** —
+  theme/fonts/colors and **UI language** (Russian / English; default follows
+  Windows). Config: `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
 * **Summary** (Route / Bodies / Belts / Mining): system bodies, auto tab switch
   on jump charge / arrival. Own discoveries highlighted.
 * **Mining**: ring type/reserve/density (edtools formula), hotspot composition,
