@@ -741,9 +741,13 @@ def _has_bio(body: Body) -> bool:
 def _focus_bio_body(state: GameState) -> Body | None:
     """Планета, чьи виды показывать вместо сводки системы.
 
-    Сводка всей системы — по умолчанию после FSS. Одна планета: цель
-    (Destination), FSS/DSS-карточка или реальная посадка/заход в атмосферу.
-    Сняли цель в космосе → снова вся система.
+    Одна планета только если:
+    • реально на теле (посадка / SRV / атмосфера), или
+    • в Status есть Destination на био-тело (лок), или
+    • открыт FSS (GuiFocus 9) и выбрана карточка тела.
+
+    DSS (GuiFocus 10) сам по себе не держит карточку: после снятия лока
+    снова сводка системы. Иначе last_fss_body_id залипал на одной планете.
     """
     here = _player_body(state)
     if here is not None:
@@ -751,12 +755,8 @@ def _focus_bio_body(state: GameState) -> Body | None:
     own = {body.body_id: body for body in _own_bio_bodies(state)}
     if not own:
         return None
-    # FSS: карточка последнего тела, и только если на нём есть биология.
-    if state.status.gui_focus == 9:
-        last = own.get(state.last_fss_body_id or -1)
-        if last is not None:
-            return last
     status = state.status
+    # Лок цели — главный признак «смотрим одну планету» в космосе
     if status.destination_body in own:
         return own[status.destination_body]
     dest = (status.destination_name or "").strip().lower()
@@ -766,8 +766,11 @@ def _focus_bio_body(state: GameState) -> Body | None:
             full = (body.name or "").lower()
             if dest == short or dest == full:
                 return body
-    if state.status.gui_focus == 10 and state.last_fss_body_id in own:
-        return own[state.last_fss_body_id]
+    # FSS: пока открыт сканер частот и есть карточка тела с биологией
+    if status.gui_focus == 9:
+        last = own.get(state.last_fss_body_id or -1)
+        if last is not None:
+            return last
     return None
 
 
