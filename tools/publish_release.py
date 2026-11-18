@@ -2,15 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.16"
+VERSION = "1.8.17"
 
-NOTES = """**1.8.16: bio panel restores system list after clearing target**
+NOTES = """**1.8.17: bio panel no longer sticks after clearing target in DSS**
 
-- Locking a body still shows that planet’s bio card
-- Clearing the target in space returns the full FSS-style system bio list
-- Lat/BodyID alone no longer keep single-planet focus (need landing / SRV / atmosphere)
+- DSS (GuiFocus 10) alone no longer keeps a single-planet bio card via last_fss_body_id
+- Single-planet view only for: surface/atmosphere, Destination lock, or open FSS card
 
-Version 1.8.16."""
+Version 1.8.17."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

@@ -2321,6 +2321,21 @@ class BioBoardTests(unittest.TestCase):
         headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
         self.assertEqual(len(headers), 2)
 
+    def test_dss_without_destination_shows_system_bio(self):
+        """DSS (GuiFocus 10) без лока не должен залипать на last_fss_body_id."""
+        state = GameState()
+        self._icy(state, 1, 4)
+        self._icy(state, 2, 2)
+        state.last_fss_body_id = 1
+        state.status.gui_focus = 10
+        state.status.body_id = 1
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        self.assertEqual(board.title, "биосигналы ×6")
+        headers = [line for line in board.lines if "×" in line.text and "итого" not in line.text]
+        self.assertEqual(len(headers), 2)
+
     def test_planet_without_bio_hides_the_system_summary(self):
         """На планете без биологии сводку системы не показываем."""
         state = GameState()
