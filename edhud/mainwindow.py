@@ -123,7 +123,13 @@ def _temp(value: float | None) -> str:
 def _route_bodies_cell(hop, *, here: bool, system) -> str:
     """Текст колонки «Тела»: для текущей системы — FSS/сканы, иначе EDSM."""
     if here and system is not None and system.body_count:
-        local = sum(1 for b in system.bodies.values() if not getattr(b, "remote", False))
+        local = sum(
+            1
+            for b in system.bodies.values()
+            if not getattr(b, "remote", False)
+            and not is_belt_body(b.name)
+            and not is_ring_body(b.name)
+        )
         text = f"{local}/{int(system.body_count)}"
         if system.nonbody_count:
             text += t("route.signals", n=int(system.nonbody_count))
@@ -1805,9 +1811,16 @@ class MainWindow:
     def _update_header(self, state: GameState) -> None:
         name = state.system.name or "—"
         self._system_name = state.system.name
-        known = len(state.system.bodies)
+        # как FSS BodyCount: без Belt Cluster и колец (иначе бывает 13/12)
+        known = state.system.fss_known_count()
         total = state.system.body_count or known
-        bio = sum(1 for b in state.system.bodies.values() if (b.bio_signals or 0) > 0)
+        bio = sum(
+            1
+            for b in state.system.bodies.values()
+            if (b.bio_signals or 0) > 0
+            and not is_belt_body(b.name)
+            and not is_ring_body(b.name)
+        )
         opened = t("win.opened") if state.system.discovered_by_me else ""
         if not opened and state.system.name:
             who = state.discoverer_of(state.system.name)
