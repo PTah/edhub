@@ -38,3 +38,10 @@ class LanguageTests(unittest.TestCase):
         script = voice_script("привет", 0, "ru")
         self.assertIn("0419", script)
         self.assertIn("привет", script)
+
+    def test_apply_config_language(self) -> None:
+        self.assertEqual(i18n.apply_config_language("en"), "en")
+        self.assertEqual(i18n.t("set.tab_look"), "Appearance and localization")
+        self.assertEqual(i18n.apply_config_language("ru"), "ru")
+        self.assertEqual(i18n.t("set.tab_look"), "Оформление и локализация")
+        i18n.apply_config_language("")

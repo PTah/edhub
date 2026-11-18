@@ -292,16 +292,22 @@ class Overlay:
         self.canvas.bind("<Button-3>", self._show_menu)
 
     def _build_menu(self) -> None:
+        from .i18n import t
+
         menu = self.tk.Menu(self.root, tearoff=0)
-        menu.add_command(label="Подробности (F8)", command=self._toggle_expanded)
-        menu.add_command(label="Сквозной режим мыши (F9)", command=self._toggle_click_through)
-        menu.add_command(label="Скрыть оверлей (F10)", command=self._toggle_visible)
+        menu.add_command(label=t("overlay.menu_details"), command=self._toggle_expanded)
+        menu.add_command(label=t("overlay.menu_click"), command=self._toggle_click_through)
+        menu.add_command(label=t("overlay.menu_hide"), command=self._toggle_visible)
         menu.add_separator()
-        menu.add_command(label="Открыть систему на Spansh…", command=self._open_spansh)
-        menu.add_command(label="Настройки…", command=self._open_settings)
+        menu.add_command(label=t("overlay.menu_spansh"), command=self._open_spansh)
+        menu.add_command(label=t("overlay.menu_settings"), command=self._open_settings)
         menu.add_separator()
-        menu.add_command(label="Выход (F12)", command=self._request_quit)
+        menu.add_command(label=t("overlay.menu_quit"), command=self._request_quit)
         self._menu = menu
+
+    def rebuild_menu(self) -> None:
+        """Пересобрать ПКМ-меню после смены языка."""
+        self._build_menu()
 
     def _show_menu(self, event) -> None:
         if self.cfg.click_through or self._menu is None:

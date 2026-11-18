@@ -2,8 +2,8 @@
 # Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:25:45
 """Русский и английский интерфейс.
 
-Русский — если язык Windows русский (язык интерфейса или региональные
-параметры). Во всех остальных случаях — английский.
+По умолчанию: русский на русской Windows, иначе английский.
+В настройках можно зафиксировать язык («ru» / «en»).
 """
 from __future__ import annotations
 
@@ -284,9 +284,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         "set.save": "Сохранить",
         "set.tab_general": "Общее",
         "set.tab_windows": "Окна",
-        "set.tab_look": "Оформление",
+        "set.tab_look": "Оформление и локализация",
+        "set.language": "Язык интерфейса",
+        "set.language_ru": "Русский",
+        "set.language_en": "English",
+        "set.language_hint": "После сохранения HUD, меню и голос переключаются сразу",
         "set.tab_stats": "Статистика",
         "set.tab_about": "О программе",
+        "win.tab_route": "Route",
+        "win.tab_bodies": "Bodies",
+        "overlay.menu_details": "Подробности (F8)",
+        "overlay.menu_click": "Сквозной режим мыши (F9)",
+        "overlay.menu_hide": "Скрыть оверлей (F10)",
+        "overlay.menu_spansh": "Открыть систему на Spansh…",
+        "overlay.menu_settings": "Настройки…",
+        "overlay.menu_quit": "Выход (F12)",
         "about.tagline": "HUD для Elite Dangerous: маршрут, тела, биосигналы, добыча, статистика.",
         "about.about_text": "Работает только по журналу игры и Status.json, данные не отправляются\nбез вашего согласия (EDSM/Spansh/EDDN включаются галочками).\nЛицензия MIT, исходники на GitHub.",
         "about.releases": "Релизы на GitHub",
@@ -730,9 +742,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         "set.save": "Save",
         "set.tab_general": "General",
         "set.tab_windows": "Windows",
-        "set.tab_look": "Appearance",
+        "set.tab_look": "Appearance and localization",
+        "set.language": "Interface language",
+        "set.language_ru": "Русский",
+        "set.language_en": "English",
+        "set.language_hint": "After saving, HUD, menus and voice switch immediately",
         "set.tab_stats": "Statistics",
         "set.tab_about": "About",
+        "win.tab_route": "Route",
+        "win.tab_bodies": "Bodies",
+        "overlay.menu_details": "Details (F8)",
+        "overlay.menu_click": "Click-through mouse (F9)",
+        "overlay.menu_hide": "Hide overlay (F10)",
+        "overlay.menu_spansh": "Open system on Spansh…",
+        "overlay.menu_settings": "Settings…",
+        "overlay.menu_quit": "Quit (F12)",
         "about.tagline": "Elite Dangerous HUD: route, bodies, bio signals, mining, statistics.",
         "about.about_text": "Works from the game journal and Status.json only; nothing is sent\nanywhere unless you tick EDSM/Spansh/EDDN yourself.\nMIT licence, sources on GitHub.",
         "about.releases": "Releases on GitHub",
@@ -963,10 +987,27 @@ def language() -> str:
 
 
 def set_language(lang: str) -> None:
-    """Принудительный язык (тесты)."""
+    """Принудительный язык (настройки / тесты)."""
     global _LANG
     _LANG = "ru" if str(lang).lower().startswith("ru") else "en"
     os.environ["EDHUD_LANG"] = _LANG
+
+
+def clear_language_override() -> None:
+    """Сбросить принудительный язык — снова брать из Windows / EDHUD_LANG."""
+    global _LANG
+    _LANG = None
+    os.environ.pop("EDHUD_LANG", None)
+
+
+def apply_config_language(lang: str | None) -> str:
+    """Применить язык из config.json. Пусто = автодетект ОС."""
+    value = (lang or "").strip().lower()
+    if value in ("ru", "en"):
+        set_language(value)
+        return value
+    clear_language_override()
+    return language()
 
 
 def t(key: str, **kwargs) -> str:

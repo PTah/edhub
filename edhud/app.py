@@ -26,7 +26,7 @@ from .spanshdb import SpanshIndex
 from .stats import StatsStore
 from .store import SystemStore
 from .tui import run_tui
-from .i18n import t
+from .i18n import apply_config_language, language, t
 from .voice import Voice
 
 SAVE_INTERVAL = 20.0
@@ -92,6 +92,7 @@ class App:
         demo_speed: float | None = None,
     ) -> None:
         self.cfg = cfg
+        apply_config_language(cfg.language)
         self.ui = ui
         self.expanded = cfg.expanded if expanded is None else expanded
         self.journal_dir = Path(journal_dir) if journal_dir else cfg.resolved_journal_dir()
@@ -115,7 +116,7 @@ class App:
         self.demo_player: demo.DemoPlayer | None = None
         self.demo_speed = demo_speed
         self.eddn: eddn.EddnListener | None = None
-        self.voice = Voice(rate=int(cfg.voice_rate or 0))
+        self.voice = Voice(rate=int(cfg.voice_rate or 0), lang=language())
         self._update_busy = False
         self.alerts = AlertEngine(on_alert=self._on_alert)
         self.alerts.configure(cfg)
@@ -934,7 +935,9 @@ class App:
                 )
                 self.watcher.start()
         self.alerts.configure(self.cfg)
+        apply_config_language(self.cfg.language)
         self.voice.rate = int(self.cfg.voice_rate or 0)
+        self.voice.lang = language()
         if self.cfg.voice_enabled:
             self.voice.start()
         if self.overlay is not None:
@@ -950,6 +953,7 @@ class App:
             if self.cfg.bio_x is not None or self.cfg.bio_y is not None:
                 self.overlay.bio.move_to(self.cfg.bio_x, self.cfg.bio_y)
             self.overlay.refresh_look()
+            self.overlay.rebuild_menu()
         if self.mainwindow is not None:
             self.mainwindow.apply_look(self.cfg)
         self._apply_window_layout()
