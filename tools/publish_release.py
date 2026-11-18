@@ -2,14 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.6"
+VERSION = "1.8.7"
 
-NOTES = """**1.8.6: EDSM/INARA setting tooltips**
+NOTES = """**1.8.7: cancel FSD charge returns to Bodies**
 
-- Hover tips on EDSM and INARA fields: what is uploaded and how to stop
-- Visible INARA hint under the API key fields
+- Cancelling a hyperspace charge switches Summary back from Route to Bodies
+- Manual Mining/Belts tabs are not stolen while staying in the same system
 
-Version 1.8.6."""
+Version 1.8.7."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

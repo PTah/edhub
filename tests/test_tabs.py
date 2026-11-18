@@ -70,15 +70,39 @@ class ManualTabTests(unittest.TestCase):
         w.nb.select(w.tab_mining)
         w.win.update()
         w._on_tab_changed()
-        # маршрут проложен: игра сама переключает на Route (см. model._on_fsdjump)
+        # авто Route в той же системе ручную «Добычу» не отбирает
         self.state.view_tab = "route"
         w.update_state(self.state)
         w.win.update()
-        self.assertEqual(w.nb.select(), str(w.tab_route))
-        # после прыжка модель отдаёт Bodies — окно следует за ней, а не остаётся на «Добыче»
+        self.assertEqual(w.nb.select(), str(w.tab_mining))
+        # после прыжка модель отдаёт Bodies — окно следует за ней
         self.jump(3, "Elsewhere")
         w.update_state(self.state)
         w.win.update()
+        self.assertEqual(w.nb.select(), str(w.tab_bodies))
+
+    def test_cancel_charge_returns_route_tab_to_bodies(self):
+        w = self.window
+        w.update_state(self.state)
+        w.win.update()
+        self.state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        w.update_state(self.state)
+        w.win.update()
+        self.assertEqual(w.nb.select(), str(w.tab_route))
+        self.state.apply_status(
+            {
+                "Flags": 0,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        w.update_state(self.state)
+        w.win.update()
+        self.assertEqual(self.state.view_tab, "bodies")
         self.assertEqual(w.nb.select(), str(w.tab_bodies))
 
 
