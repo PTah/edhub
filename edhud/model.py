@@ -1280,6 +1280,7 @@ class GameState:
     def _on_location(self, e: dict) -> None:
         self._set_system(e)
         self.view_tab = "bodies"
+        self._jump_tab_latched = False
         if e.get("Docked"):
             self.mode = "Ship"
 
@@ -1301,6 +1302,7 @@ class GameState:
     def _on_fsdjump(self, e: dict) -> None:
         self._set_system(e)
         self.view_tab = "bodies"
+        self._jump_tab_latched = False
         now = time.time()
         if self.last_jump_ts:
             self._jump_times.append(now - self.last_jump_ts)
@@ -1324,6 +1326,7 @@ class GameState:
         """Гиперпрыжок — смотрим маршрут. Разгон в суперкруиз вкладку не трогает."""
         if (e.get("JumpType") or "").lower() == "hyperspace":
             self.view_tab = "route"
+            self._jump_tab_latched = True
             self.bio_hidden_until_fss = True
             dest = e.get("StarSystem")
             if dest:
@@ -2103,17 +2106,27 @@ class GameState:
             self.in_atmosphere = False
 
     def _sync_travel_tab(self) -> None:
-        """Route на разгоне к другой системе; Bodies в FSS/DSS. Ручной клик пишет view_tab сам."""
+        """Route на разгоне к другой системе; Bodies в FSS/DSS / после отмены зарядки."""
         focus = self.status.gui_focus
         if focus in (9, 10):  # FSS / SAA (DSS)
             self.view_tab = "bodies"
+            self._jump_tab_latched = False
             return
         spool = self._hyperspace_spool()
-        if spool and not self._jump_tab_latched:
-            self.view_tab = "route"
-            self._jump_tab_latched = True
+        if spool:
+            if not self._jump_tab_latched:
+                self.view_tab = "route"
+                self._jump_tab_latched = True
+            return
+        # туннель гиперпрыжка: вкладку снимет FSDJump/Location, не Status
+        if self.status.flag(FLAG_FSD_JUMP):
+            return
+        was_latched = self._jump_tab_latched
         if not self.status.fsd_charging:
             self._jump_tab_latched = False
+        # отмена зарядки (кнопку прыжка отпустили) — обратно на Bodies
+        if was_latched:
+            self.view_tab = "bodies"
 
     def _sync_jump_arrow(self) -> None:
         """Стрелка с первого опроса Status, не дожидаясь StartJump/FSDTarget.

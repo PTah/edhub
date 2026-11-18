@@ -918,6 +918,28 @@ class JumpTabTests(unittest.TestCase):
         )
         self.assertEqual(state.system.bodies[2].materials.get("Iron"), 11.5)
 
+    def test_cancel_fsd_charging_returns_to_bodies(self):
+        state = GameState()
+        state.system.address = 1
+        state.system.name = "Here"
+        state.apply_status(
+            {
+                "Flags": 1 << 17,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        self.assertEqual(state.view_tab, "route")
+        self.assertTrue(state._jump_tab_latched)
+        # отмена зарядки: бит FSDCharging снят, прыжка не было
+        state.apply_status(
+            {
+                "Flags": 0,
+                "Destination": {"System": 2, "Body": 0, "Name": "There"},
+            }
+        )
+        self.assertEqual(state.view_tab, "bodies")
+        self.assertFalse(state._jump_tab_latched)
+
     def test_fss_opens_bodies_even_if_route_was_open(self):
         state = GameState()
         state.system.address = 1

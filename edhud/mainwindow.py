@@ -1692,6 +1692,10 @@ class MainWindow:
         address = state.system.address
         if address == self._tab_address and tab == self._tab_view:
             return
+        # та же система + ручная вкладка (Добыча/Пояса/шар) — не отбирать
+        if address == self._tab_address and self._shown_tab not in (None, "route", "bodies"):
+            self._tab_view = tab
+            return
         self._tab_address = address
         self._tab_view = tab
         self._shown_tab = tab
