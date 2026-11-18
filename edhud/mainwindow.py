@@ -89,8 +89,21 @@ MIN_COL_WIDTHS = {
     "system": 140,
     "bodies": 100,
     "opened": 90,
+    "idx": 40,
+    "star": 60,
+    "leg": 70,
+    "center": 70,
 }
 RESIZE_EDGE = 6
+
+# Колонки таблицы Sphere Route (Treeview): ключ → ширина по умолчанию.
+SPHERE_COLUMN_DEFAULTS: dict[str, int] = {
+    "idx": 48,
+    "system": 220,
+    "star": 90,
+    "leg": 100,
+    "center": 110,
+}
 
 
 def _ls(value: float | None) -> str:
@@ -474,6 +487,9 @@ class MainWindow:
         self._route_header_labels: list[tk.Label] = []
         self._body_widths = {key: width for key, _title, width, _anchor in BODY_COLUMNS}
         self._route_widths = {key: width for key, _title, width, _anchor in ROUTE_COLUMNS}
+        self._sphere_widths = dict(SPHERE_COLUMN_DEFAULTS)
+        self._sphere_cursor = 0
+        self._sphere_progress_sig: tuple | None = None
         self._load_column_widths()
         self._col_drag: tuple[str, int, int, int] | None = None  # table, index, start_x, start_w
         self._save_after: str | None = None
@@ -635,8 +651,16 @@ class MainWindow:
             on_copy_system=self._copy_belt_system,
             on_status=self._flash_status,
             default_radius=radius,
+            cfg=self.cfg,
+            on_columns_changed=self._on_mining_columns_changed,
         )
         self.mining_tab.frame.pack(fill="both", expand=True)
+
+    def _on_mining_columns_changed(self, widths: dict[str, int]) -> None:
+        if self.cfg is None:
+            return
+        self.cfg.mining_columns = dict(widths)
+        self._schedule_save()
 
     def _load_column_widths(self) -> None:
         if self.cfg is None:
@@ -647,6 +671,9 @@ class MainWindow:
         for key, width in (getattr(self.cfg, "route_columns", None) or {}).items():
             if key in self._route_widths:
                 self._route_widths[key] = max(self._min_col_width(key), int(width))
+        for key, width in (getattr(self.cfg, "sphere_columns", None) or {}).items():
+            if key in self._sphere_widths:
+                self._sphere_widths[key] = max(self._min_col_width(key), int(width))
 
     def _enable_layout_persist(self) -> None:
         """После первой отрисовки: починить рамку и разрешить запись геометрии."""
@@ -683,6 +710,7 @@ class MainWindow:
             return
         self.cfg.bodies_columns = dict(self._body_widths)
         self.cfg.route_columns = dict(self._route_widths)
+        self.cfg.sphere_columns = dict(self._sphere_widths)
         try:
             geom = self.win.geometry()
             self.cfg.main_geometry = geom
@@ -1586,6 +1614,7 @@ class MainWindow:
             self._last_route_key = route_key
             self._update_route(state)
         self._update_bodies(state)
+        self._sync_sphere_progress(state)
 
     def _route_key(self, state: GameState) -> tuple:
         route = tuple(
@@ -1670,6 +1699,7 @@ class MainWindow:
             state.carrier.jump_departure,
             state.fsd_target,
             state.jump_dest,
+            bool(state.jumping_away),
             None if dist is None else round(dist, 1),
             state.view_tab,
             bool(getattr(self.cfg, "show_belt_clusters", True)) if self.cfg is not None else True,
@@ -1698,6 +1728,11 @@ class MainWindow:
         if current == str(self.tab_belts):
             self._shown_tab = "belts"
             self._refresh_belts_list()
+            return
+        if current == str(self.tab_sphere):
+            self._shown_tab = "sphere"
+            if self._state is not None:
+                self._sync_sphere_progress(self._state, force=True)
             return
         if current == str(self.tab_mining):
             self._shown_tab = "mining"
@@ -2021,24 +2056,37 @@ class MainWindow:
         columns = ("idx", "system", "star", "leg", "center")
         self.sphere_tree = ttk.Treeview(host, columns=columns, show="headings", style="ED.Treeview")
         headings = {
-            "idx": (t("sphere.col_idx"), 48),
-            "system": (t("sphere.col_system"), 280),
-            "star": (t("sphere.col_star"), 120),
-            "leg": (t("sphere.col_leg"), 110),
-            "center": (t("sphere.col_center"), 120),
+            "idx": (t("sphere.col_idx"), "center"),
+            "system": (t("sphere.col_system"), "w"),
+            "star": (t("sphere.col_star"), "center"),
+            "leg": (t("sphere.col_leg"), "e"),
+            "center": (t("sphere.col_center"), "e"),
         }
-        for key, (title, width) in headings.items():
-            anchor = "w" if key in ("system", "star") else "e"
-            if key == "idx":
-                anchor = "center"
+        for key, (title, anchor) in headings.items():
+            width = self._sphere_widths.get(key, SPHERE_COLUMN_DEFAULTS.get(key, 80))
             self.sphere_tree.heading(key, text=title, anchor=anchor)
-            self.sphere_tree.column(key, width=width, minwidth=40, anchor=anchor, stretch=key == "system")
+            # stretch=False: иначе «Система» растягивается на остаток и сбрасывает ручную ширину
+            self.sphere_tree.column(
+                key,
+                width=max(self._min_col_width(key), int(width)),
+                minwidth=self._min_col_width(key),
+                anchor=anchor,
+                stretch=False,
+            )
         scroll = ttk.Scrollbar(host, orient="vertical", command=self.sphere_tree.yview)
-        self.sphere_tree.configure(yscrollcommand=scroll.set)
+        xscroll = ttk.Scrollbar(host, orient="horizontal", command=self.sphere_tree.xview)
+        self.sphere_tree.configure(yscrollcommand=scroll.set, xscrollcommand=xscroll.set)
         self.sphere_tree.grid(row=0, column=0, sticky="nsew")
         scroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(0, weight=1)
         self.sphere_tree.tag_configure("back", foreground=COLORS["gold"])
+        self.sphere_tree.tag_configure("done", foreground=COLORS["muted"])
+        self.sphere_tree.tag_configure("here", foreground=COLORS["ok"])
+        self.sphere_tree.tag_configure("next", foreground=COLORS["accent"])
         self.sphere_tree.bind("<Double-Button-1>", self._on_sphere_double)
+        self.sphere_tree.bind("<ButtonRelease-1>", self._on_sphere_column_release, add="+")
 
     def _paint_sphere(self) -> None:
         bar = getattr(self, "_sphere_bar", None)
@@ -2074,6 +2122,27 @@ class MainWindow:
             font=font,
         )
         self.sphere_tree.tag_configure("back", foreground=COLORS["gold"])
+        self.sphere_tree.tag_configure("done", foreground=COLORS["muted"])
+        self.sphere_tree.tag_configure("here", foreground=COLORS["ok"])
+        self.sphere_tree.tag_configure("next", foreground=COLORS["accent"])
+
+    def _on_sphere_column_release(self, _event=None) -> None:
+        """Сохранить ширины колонок Sphere после ручного ресайза разделителя."""
+        tree = getattr(self, "sphere_tree", None)
+        if tree is None:
+            return
+        changed = False
+        for key in tree["columns"]:
+            try:
+                width = int(tree.column(key, "width"))
+            except (tk.TclError, TypeError, ValueError):
+                continue
+            width = max(self._min_col_width(key), width)
+            if self._sphere_widths.get(key) != width:
+                self._sphere_widths[key] = width
+                changed = True
+        if changed:
+            self._schedule_save()
 
     def _load_sphere_route(self) -> None:
         """Обход из таблицы → маршрут EDHUD (Route + HUD). В игру он не прокладывается."""
@@ -2135,20 +2204,13 @@ class MainWindow:
         except tk.TclError:
             return
         self._sphere_hops = list(hops or [])
+        self._sphere_cursor = 0
+        self._sphere_progress_sig = None
         if error:
             self.sphere_status.configure(text=t("sphere.error", error=error), fg=COLORS["bad"])
             return
         total = 0.0
-        for index, hop in enumerate(self._sphere_hops):
-            leg = "—" if index == 0 else f"{hop.leg_ly:,.2f}".replace(",", " ")
-            center = f"{hop.from_center:,.2f}".replace(",", " ")
-            mark = "↩" if hop.returning else str(index + 1)
-            tree.insert(
-                "",
-                "end",
-                values=(mark, hop.name, hop.star_class or "—", leg, center),
-                tags=("back",) if hop.returning else (),
-            )
+        for hop in self._sphere_hops:
             total += hop.leg_ly or 0.0
         unique = sum(1 for hop in self._sphere_hops if not hop.returning)
         can_load = unique > 1 and self.on_load_sphere_route is not None
@@ -2160,7 +2222,113 @@ class MainWindow:
             text = t("sphere.done", n=unique, ly=ly)
             if unique > 250:
                 text += t("sphere.approx")
+            text += " · " + t("sphere.howto_short")
         self.sphere_status.configure(text=text, fg=COLORS["muted"])
+        if self._state is not None:
+            self._sync_sphere_progress(self._state, force=True)
+        else:
+            self._render_sphere_rows(here_idx=None, next_idx=None)
+
+    def _sphere_index_of(self, system: str | None) -> int | None:
+        if not system or not self._sphere_hops:
+            return None
+        key = system.lower()
+        found = [i for i, hop in enumerate(self._sphere_hops) if hop.name.lower() == key]
+        if not found:
+            return None
+        idx = next((i for i in found if i >= self._sphere_cursor), found[-1])
+        self._sphere_cursor = idx
+        return idx
+
+    def _apply_star_to_sphere(self, system: str | None, star_class: str | None) -> bool:
+        klass = (star_class or "").strip()
+        name = (system or "").strip()
+        if not klass or not name or not self._sphere_hops:
+            return False
+        key = name.lower()
+        changed = False
+        for hop in self._sphere_hops:
+            if hop.name.lower() == key and hop.star_class != klass:
+                hop.star_class = klass
+                changed = True
+        return changed
+
+    def _sync_sphere_progress(self, state: GameState, *, force: bool = False) -> None:
+        """Отметить посещённые/текущую/следующую и подтянуть класс звезды после прибытия."""
+        if not self._sphere_hops or getattr(self, "sphere_tree", None) is None:
+            return
+        # класс звезды — только когда уже в системе (не во время туннеля)
+        if not state.jumping_away:
+            star = state.system.main_star()
+            if star and star.star_type:
+                self._apply_star_to_sphere(state.system.name, str(star.star_type))
+            for hop in state.route.hops:
+                if hop.star_class:
+                    self._apply_star_to_sphere(hop.system, hop.star_class)
+
+        here_idx = self._sphere_index_of(state.system.name)
+        next_idx = here_idx + 1 if here_idx is not None and here_idx + 1 < len(self._sphere_hops) else None
+        # во время прыжка «следующая» — цель Jump, если она в туре
+        if state.jumping_away:
+            dest = state.jump_arrow_system() or state.jump_dest or state.fsd_target
+            if dest:
+                dest_key = dest.lower()
+                for i, hop in enumerate(self._sphere_hops):
+                    if hop.name.lower() == dest_key:
+                        next_idx = i
+                        break
+
+        classes = tuple(hop.star_class or "" for hop in self._sphere_hops)
+        sig = (
+            state.system.name,
+            state.system.address,
+            here_idx,
+            next_idx,
+            bool(state.jumping_away),
+            classes,
+        )
+        if not force and sig == self._sphere_progress_sig:
+            return
+        self._sphere_progress_sig = sig
+        self._render_sphere_rows(here_idx=here_idx, next_idx=next_idx)
+
+    def _render_sphere_rows(self, *, here_idx: int | None, next_idx: int | None) -> None:
+        tree = getattr(self, "sphere_tree", None)
+        if tree is None:
+            return
+        try:
+            tree.delete(*tree.get_children())
+        except tk.TclError:
+            return
+        for index, hop in enumerate(self._sphere_hops):
+            leg = "—" if index == 0 else f"{hop.leg_ly:,.2f}".replace(",", " ")
+            center = f"{hop.from_center:,.2f}".replace(",", " ")
+            mark = "↩" if hop.returning else str(index + 1)
+            if hop.returning:
+                tags: tuple[str, ...] = ("back",)
+            elif here_idx is not None and index == here_idx:
+                tags = ("here",)
+            elif next_idx is not None and index == next_idx:
+                tags = ("next",)
+            elif here_idx is not None and index < here_idx:
+                tags = ("done",)
+            else:
+                tags = ()
+            tree.insert(
+                "",
+                "end",
+                values=(mark, hop.name, hop.star_class or "—", leg, center),
+                tags=tags,
+            )
+        # прокрутить к текущей / следующей
+        focus = here_idx if here_idx is not None else next_idx
+        if focus is not None:
+            children = tree.get_children()
+            if 0 <= focus < len(children):
+                try:
+                    tree.see(children[focus])
+                except tk.TclError:
+                    pass
 
     def _on_sphere_double(self, event) -> None:
         row = self.sphere_tree.identify_row(event.y)

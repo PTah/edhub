@@ -490,6 +490,68 @@ class RouteFileTests(unittest.TestCase):
             self.assertFalse(state.navroute_stale)
             self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
 
+    def test_navroute_not_wiped_during_hyperspace(self):
+        """Пока идёт гиперпрыжок — пустой/урезанный NavRoute не стирает hop'ы."""
+        import json
+
+        from edhud.model import FLAG_FSD_JUMP
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            payload = {
+                "event": "NavRoute",
+                "Route": [
+                    {"StarSystem": "Sol", "SystemAddress": 1, "StarPos": [0, 0, 0], "StarClass": "G"},
+                    {"StarSystem": "Alpha", "SystemAddress": 2, "StarPos": [0, 0, 10], "StarClass": "K"},
+                ],
+            }
+            (folder / "NavRoute.json").write_text(json.dumps(payload), encoding="utf-8")
+            (folder / "Journal.2026-11-01T000000.01.log").write_text("", encoding="utf-8")
+            state = GameState()
+            state.system.name = "Sol"
+            state.system.address = 1
+            watcher = journal.JournalWatcher(folder, state, replay=True)
+            watcher.read_navroute()
+            self.assertEqual(len(state.route.hops), 2)
+
+            state.apply(
+                {
+                    "event": "StartJump",
+                    "JumpType": "Hyperspace",
+                    "StarSystem": "Alpha",
+                    "SystemAddress": 2,
+                }
+            )
+            state.apply_status({"Flags": FLAG_FSD_JUMP, "Destination": {"System": 2, "Name": "Alpha"}})
+            self.assertTrue(state.jumping_away)
+
+            (folder / "NavRoute.json").write_text(
+                json.dumps({"event": "NavRoute", "Route": []}), encoding="utf-8"
+            )
+            watcher.read_navroute()
+            self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+
+            state.apply({"event": "NavRouteClear"})
+            self.assertEqual([h.system for h in state.route.hops], ["Sol", "Alpha"])
+
+    def test_fsdjump_stamps_route_star_class(self):
+        state = GameState()
+        state.route = Route.from_names(["Sol", "Alpha", "Beta"])
+        state.route.locked = True
+        state.route.source = "sphere"
+        state.apply(
+            {
+                "event": "FSDJump",
+                "StarSystem": "Alpha",
+                "SystemAddress": 2,
+                "StarPos": [0, 0, 10],
+                "JumpDist": 10,
+                "StarClass": "K",
+            }
+        )
+        self.assertEqual(state.route.hops[1].star_class, "K")
+        self.assertIsNone(state.route.hops[0].star_class)
+
 
 class FirstDiscoveryTests(unittest.TestCase):
     def _jump(self, state: GameState, name: str, address: int) -> None:

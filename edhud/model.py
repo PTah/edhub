@@ -1316,6 +1316,9 @@ class GameState:
             self.status.fuel_main = float(e.get("FuelLevel") or 0.0)
         self.current_body_id = None
         self.current_body_name = None
+        star_class = e.get("StarClass")
+        if star_class:
+            self.stamp_route_star_class(e.get("StarSystem") or self.system.name, str(star_class))
         self.fsd_target = None
         self.fsd_target_class = None
         self.jump_dest = None
@@ -1498,7 +1501,7 @@ class GameState:
         return math.dist(pos, self.system.star_pos)
 
     def _on_navroute(self, e: dict) -> None:
-        if self.route.locked:
+        if self.route.locked or self.jumping_away:
             return
         # Игра часто пишет в журнал только {"event":"NavRoute"} без массива Route.
         # Полный список систем лежит в NavRoute.json — его перечитает журнал-вотчер.
@@ -1510,7 +1513,9 @@ class GameState:
             self.navroute_stale = True
 
     def _on_navrouteclear(self, _e: dict) -> None:
-        if not self.route.locked and self.route.source == "game":
+        if self.route.locked or self.jumping_away:
+            return
+        if self.route.source == "game":
             self.route = Route()
 
     def _on_fsdtarget(self, e: dict) -> None:
@@ -1592,6 +1597,8 @@ class GameState:
                         if isinstance(value, int):
                             ids.append(value)
             body.parent_ids = ids
+        if body.is_star and body.star_type and (body_id == 0 or not body.parent_ids):
+            self.stamp_route_star_class(self.system.name, str(body.star_type))
         body.terraform_state = e.get("TerraformState") or body.terraform_state
         rings = e.get("Rings")
         # Пояс у звезды в журнале висит на самой звезде, но добывают его в кластерах.
@@ -1665,6 +1672,17 @@ class GameState:
         if key in self._systems_by_me:
             return self.cmdr or None
         return self._discoverers.get(key)
+
+    def stamp_route_star_class(self, system: str | None, star_class: str | None) -> None:
+        """Проставить класс звезды на hop'ах маршрута (FSDJump / Scan)."""
+        name = (system or "").strip()
+        klass = (star_class or "").strip()
+        if not name or not klass or not self.route.hops:
+            return
+        key = name.lower()
+        for hop in self.route.hops:
+            if hop.system.lower() == key:
+                hop.star_class = klass
 
     def sync_route_discoverers(self) -> None:
         for hop in self.route.hops:
