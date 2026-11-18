@@ -2,13 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.14"
+VERSION = "1.8.15"
 
-NOTES = """**1.8.14: tooltip on Sphere “To route”**
+NOTES = """**1.8.15: jump always opens Route, arrival Bodies**
 
-- Hover tip: load the calculated tour into the Route table (RU/EN)
+- Any tab (including Sphere Route) switches to Route when a hyperspace jump starts
+- Arrival always opens Bodies; Sphere Route is only for planning/copy, not sticky in flight
 
-Version 1.8.14."""
+Version 1.8.15."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",

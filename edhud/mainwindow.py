@@ -1765,15 +1765,17 @@ class MainWindow:
             tab.spansh_index = index
 
     def _sticky_manual_tab(self) -> str | None:
-        """Ручные вкладки, которые авто Route/Bodies не отбирает в той же системе."""
-        if self._shown_tab in ("mining", "belts", "sphere"):
+        """Добыча/Пояса: не уводить на Bodies в той же системе (FSS и т.п.).
+
+        Sphere Route не удерживаем — справочник; на прыжке всегда Route.
+        """
+        if self._shown_tab in ("mining", "belts"):
             return self._shown_tab
         try:
             current = self.nb.select()
         except tk.TclError:
             return None
         mapping = (
-            (getattr(self, "tab_sphere", None), "sphere"),
             (getattr(self, "tab_mining", None), "mining"),
             (getattr(self, "tab_belts", None), "belts"),
         )
@@ -1784,25 +1786,22 @@ class MainWindow:
         return None
 
     def _apply_tab(self, state: GameState) -> None:
-        """Автопереключение Route/Bodies: срабатывает на смену системы и на смену маршрута.
+        """Прыжок → Route; прибытие → Bodies. Sphere не держит вкладку.
 
-        Ручной выбор вкладки (Добыча / Пояса / Sphere Route) живёт до прибытия
-        в новую систему — зарядка и туннель гиперпрыжка её не отбирают.
-        После FSDJump/Location окно снова следует за view_tab (обычно Bodies).
+        Добыча/Пояса могут остаться в той же системе, пока нет прыжка и модель
+        не требует Route (зарядка / StartJump / «В маршрут»).
         """
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
         address = state.system.address
-        sticky = self._sticky_manual_tab()
         if address == self._tab_address and tab == self._tab_view:
             return
-        # та же система + ручная вкладка — не уводить на Route при старте прыжка
-        if address == self._tab_address and sticky is not None:
-            self._tab_view = tab
-            return
-        # во время прыжка Sphere Route не трогаем даже если адрес ещё не сменился в UI
-        if sticky == "sphere" and state.jumping_away:
-            self._tab_view = tab
-            return
+        # старт прыжка / явный Route / смена системы — всегда слушаем модель
+        travel = bool(state.jumping_away) or tab == "route" or address != self._tab_address
+        if not travel:
+            sticky = self._sticky_manual_tab()
+            if sticky is not None and address == self._tab_address:
+                self._tab_view = tab
+                return
         self._tab_address = address
         self._tab_view = tab
         self._shown_tab = tab

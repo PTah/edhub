@@ -63,19 +63,19 @@ class ManualTabTests(unittest.TestCase):
         self.assertEqual(w.nb.select(), str(w.tab_bodies))
         self.assertEqual(w._shown_tab, "bodies")
 
-    def test_jump_always_returns_to_bodies_even_with_route(self):
+    def test_route_view_overrides_mining_tab(self):
         w = self.window
         w.update_state(self.state)
         w.win.update()
         w.nb.select(w.tab_mining)
         w.win.update()
         w._on_tab_changed()
-        # авто Route в той же системе ручную «Добычу» не отбирает
+        # модель просит Route (прыжок / «В маршрут») — Добычу не держим
         self.state.view_tab = "route"
         w.update_state(self.state)
         w.win.update()
-        self.assertEqual(w.nb.select(), str(w.tab_mining))
-        # после прыжка модель отдаёт Bodies — окно следует за ней
+        self.assertEqual(w.nb.select(), str(w.tab_route))
+        # после прыжка — Bodies
         self.jump(3, "Elsewhere")
         w.update_state(self.state)
         w.win.update()
@@ -105,7 +105,7 @@ class ManualTabTests(unittest.TestCase):
         self.assertEqual(self.state.view_tab, "bodies")
         self.assertEqual(w.nb.select(), str(w.tab_bodies))
 
-    def test_sphere_tab_stays_open_when_jump_starts(self):
+    def test_sphere_tab_switches_to_route_when_jump_starts(self):
         w = self.window
         w.update_state(self.state)
         w.win.update()
@@ -125,18 +125,13 @@ class ManualTabTests(unittest.TestCase):
         w.update_state(self.state)
         w.win.update()
         self.assertEqual(self.state.view_tab, "route")
-        self.assertEqual(w.nb.select(), str(w.tab_sphere))
-        self.assertEqual(w._shown_tab, "sphere")
+        self.assertEqual(w.nb.select(), str(w.tab_route))
+        self.assertEqual(w._shown_tab, "route")
 
-        self.state.apply_status(
-            {
-                "Flags": 1 << 17,
-                "Destination": {"System": 2, "Body": 0, "Name": "There"},
-            }
-        )
+        self.jump(2, "There")
         w.update_state(self.state)
         w.win.update()
-        self.assertEqual(w.nb.select(), str(w.tab_sphere))
+        self.assertEqual(w.nb.select(), str(w.tab_bodies))
 
 
 if __name__ == "__main__":
