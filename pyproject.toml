@@ -4,8 +4,8 @@
 # Edited by nc.ai 1.2.15 on new-admin-pc 2026-11-17 16:15:33
 [project]
 name = "edhud"
-version = "1.8.3"
-description = "Оверлей исследователя Elite Dangerous: маршрут, биология, пробы"
+version = "1.8.4"
+description = "Elite Dangerous exploration overlay: route, biology, samples (EDHUD)"
 requires-python = ">=3.9"
 dependencies = []
 readme = "README.md"

@@ -2,18 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.3"
+VERSION = "1.8.4"
 
-NOTES = """**1.8.3: предупреждение об exclusive fullscreen**
+NOTES = """**1.8.4: English README and docs**
 
-- Точный детект exclusive DirectX через `SHQueryUserNotificationState`
-  (Borderless больше не даёт ложную подсказку).
-- Один раз за сессию exclusive: balloon в трее + голос (если включён) —
-  переключить Graphics → Display Mode → Borderless / Alt+Enter.
-- Чекбокс предупреждения в настройках оверлея.
+- English `README.md` (Russian full text → `README.ru.md`)
+- `docs/install-windows.md`, `docs/data-uploads.md` (EDSM / EDDN / INARA)
 
-Версия 1.8.3."""
-
+Version 1.8.4."""
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
     rf"dist\EDHUD-{VERSION}-windows.zip",
