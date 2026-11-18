@@ -45,3 +45,15 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(i18n.apply_config_language("ru"), "ru")
         self.assertEqual(i18n.t("set.tab_look"), "Оформление и локализация")
         i18n.apply_config_language("")
+
+    def test_hotspot_tip_follows_language(self) -> None:
+        from edhud.mining import format_hotspots_tip
+
+        i18n.set_language("en")
+        tip = format_hotspots_tip({"Alexandrite": 2})
+        self.assertIsNotNone(tip)
+        self.assertIn("Ring hotspot", tip)
+        self.assertNotRegex(tip, r"[А-Яа-яЁё]")
+        i18n.set_language("ru")
+        tip_ru = format_hotspots_tip({"Alexandrite": 2})
+        self.assertIn("Хотспот", tip_ru)

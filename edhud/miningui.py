@@ -409,13 +409,14 @@ class MiningTab:
 
         radius_box = tk.Frame(bar, bg=self.colors["bg"])
         radius_box.pack(side="left", padx=(0, 10))
-        tk.Label(
+        self.radius_label = tk.Label(
             radius_box,
             text=t("mining.radius"),
             bg=self.colors["bg"],
             fg=self.colors["muted"],
             font=(self.ui_family, self.ui_size),
-        ).pack(side="left")
+        )
+        self.radius_label.pack(side="left")
         tk.Spinbox(
             radius_box,
             from_=1,
@@ -429,13 +430,14 @@ class MiningTab:
             relief="flat",
         ).pack(side="left", padx=(4, 0))
 
-        tk.Label(
+        self.material_label = tk.Label(
             bar,
             text=t("mining.material"),
             bg=self.colors["bg"],
             fg=self.colors["muted"],
             font=(self.ui_family, self.ui_size),
-        ).pack(side="left")
+        )
+        self.material_label.pack(side="left")
         self.material_combo = ttk.Combobox(
             bar,
             textvariable=self._material,
@@ -550,6 +552,38 @@ class MiningTab:
         scroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.tree.bind("<Double-Button-1>", self._on_double_click)
+
+    def refresh_i18n(self, cfg=None) -> None:
+        """Кнопки, заголовки и строки таблицы после смены языка."""
+        if cfg is not None:
+            self.cfg = cfg
+            self.ui_family = getattr(cfg, "ui_font_family", None) or self.ui_family
+            self.ui_size = int(getattr(cfg, "ui_font_size", None) or self.ui_size)
+        for widget, key in (
+            (getattr(self, "radius_label", None), "mining.radius"),
+            (getattr(self, "material_label", None), "mining.material"),
+            (getattr(self, "search_button", None), "mining.search"),
+            (getattr(self, "local_button", None), "mining.here"),
+            (getattr(self, "db_button", None), "mining.db_search"),
+            (getattr(self, "save_button", None), "mining.save_belt"),
+        ):
+            if widget is None:
+                continue
+            try:
+                widget.configure(text=t(key))
+            except tk.TclError:
+                pass
+        if getattr(self, "tree", None) is not None:
+            for key, title_key, _width, anchor in COLUMNS:
+                try:
+                    self.tree.heading(key, text=t(title_key), anchor=anchor)
+                except tk.TclError:
+                    pass
+        self._signature = None
+        if self._source == "here":
+            self.refresh(quiet=True)
+        elif self._rows:
+            self._render()
 
     # --------------------------------------------------------------- данные
     def set_state(self, state) -> None:

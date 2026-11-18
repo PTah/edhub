@@ -1422,14 +1422,53 @@ class MainWindow:
             self._set_col_width("route", index, self._col_width("route", key, default_w))
         self._style()
         self._paint_chrome()
+        self._refresh_column_titles()
         self._refresh_tab_titles()
         self._refresh_sphere_headings()
+        self._refresh_static_i18n()
         self.apply_opacity()
         self._apply_saved_position()
         self._last_key = None
+        self._last_route_key = None
         self._clear_body_rows()
+        if getattr(self, "mining_tab", None) is not None:
+            self.mining_tab.refresh_i18n(self.cfg)
         if self._state is not None:
             self.update_state(self._state)
+        else:
+            try:
+                self.route_info.configure(text=t("win.route_empty"))
+            except tk.TclError:
+                pass
+
+    def _refresh_column_titles(self) -> None:
+        """Переписать тексты шапок Bodies/Route после смены языка."""
+        for labels_attr, columns in (
+            ("_header_labels", BODY_COLUMNS),
+            ("_route_header_labels", ROUTE_COLUMNS),
+        ):
+            labels = getattr(self, labels_attr, None)
+            if not labels:
+                continue
+            for label, (_key, title, _w, _a) in zip(labels, columns):
+                try:
+                    label.configure(text=title)
+                except tk.TclError:
+                    pass
+
+    def _refresh_static_i18n(self) -> None:
+        """Подписи вкладок, которые не пересоздаются на каждый тик."""
+        for widget, key in (
+            (getattr(self, "belts_info", None), "win.belts_hint"),
+        ):
+            if widget is None:
+                continue
+            try:
+                widget.configure(text=t(key))
+            except tk.TclError:
+                pass
+        if getattr(self, "_belts_inner", None) is not None:
+            self._refresh_belts_list()
 
     def _refresh_tab_titles(self) -> None:
         if not hasattr(self, "nb"):

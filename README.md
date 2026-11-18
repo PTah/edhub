@@ -46,7 +46,9 @@ session: 2 jumps · scan 120 Kcr · DSS 1.3 Mcr · bio ≈1.69 Mcr
   optional EDSM and INARA API keys, voice, overlay geometry, **Statistics** tab,
   Spansh hotspot dump DB, update checks. **Appearance and localization** —
   theme/fonts/colors and **UI language** (Russian / English; default follows
-  Windows). Config: `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
+  Windows). After switching language, Summary tabs (Route/Bodies/Belts/Mining)
+  refresh immediately. New UI strings must be added in both languages
+  (`docs/i18n.md`). Config: `%LOCALAPPDATA%\EliteDangerousHUD\config.json`.
 * **Summary** (Route / Bodies / Belts / Mining): system bodies, auto tab switch
   on jump charge / arrival. Own discoveries highlighted.
 * **Mining**: ring type/reserve/density (edtools formula), hotspot composition,
