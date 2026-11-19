@@ -198,8 +198,9 @@ def _body_row(state: GameState, cfg) -> Row:
         if mark is not None:
             row.segments.append(mark)
 
-    # прыгаем в другую систему — био этого тела уже не нужно
-    bio_off = bool(getattr(state, "jumping_away", False))
+    # звезда — без БИО; в прыжке в другую систему био текущего тела тоже не нужно
+    is_star = bool(body.is_star or body.star_type)
+    bio_off = bool(getattr(state, "jumping_away", False)) or is_star
     if not bio_off:
         row.segments.append(Segment(t("hud.bio"), "dim"))
         # Чужой счётчик (EDSM/Spansh/EDDN) на HUD не показываем, пока не включена настройка.

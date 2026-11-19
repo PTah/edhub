@@ -124,6 +124,7 @@ class JournalPipelineTests(unittest.TestCase):
         star = hudmodel.build_view(state, Config()).body_row.text
         self.assertTrue(star.startswith("ЗВЕЗДА "))
         self.assertIn(" · M", star)
+        self.assertNotIn("БИО", star)
 
     def test_hud_body_shows_star_while_jumping(self):
         """В гиперпрыжке — звезда системы отлёта, не залипшая планета из Status.BodyID."""
