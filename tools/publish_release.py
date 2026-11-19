@@ -2,14 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.20"
+VERSION = "1.8.21"
 
-NOTES = """**1.8.20: carrier status moved to the third HUD line**
+NOTES = """**1.8.21: no BIO on STAR line**
 
-- Carrier position / distance / jump prep is no longer on the STAR/BODY line
-- It is shown on its own third dashboard line (before samples/stats)
+- When the second HUD row shows a star (STAR), the BIO field is hidden
+- Stars have no biological signals
 
-Version 1.8.20."""
+Version 1.8.21."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
