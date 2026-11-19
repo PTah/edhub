@@ -2558,6 +2558,75 @@ class BioBoardTests(unittest.TestCase):
         )
         self.assertGreater(total_index, board.lines.index(signal_lines[-1]))
 
+    def test_analysed_bios_use_exact_total_not_prediction_span(self):
+        """После взятия всех био: точная сумма строк, без вилки предсказаний и без FF×5."""
+        from edhud import values
+        from edhud.model import Organic
+
+        state = GameState()
+        body = self._icy(state, 1, 2)
+        body.was_footfalled = False
+        body.genuses = {
+            "$Codex_Ent_Bacterial_Genus_Name;": 1,
+            "$Codex_Ent_Stratum_Genus_Name;": 1,
+        }
+        body.dss_scanned = True
+        body.organisms["bact"] = Organic(
+            key="bact",
+            genus="$Codex_Ent_Bacterial_Genus_Name;",
+            species="$Codex_Ent_Bacterial_05_Name;",
+            genus_local="Bacterium",
+            species_local="Bacterium Cerbrus",
+            variant_local="Bacterium Cerbrus - Green",
+            analysed=True,
+            samples=3,
+            was_logged=False,
+        )
+        body.organisms["strat"] = Organic(
+            key="strat",
+            genus="$Codex_Ent_Stratum_Genus_Name;",
+            species="$Codex_Ent_Stratum_07_Name;",
+            genus_local="Stratum",
+            species_local="Stratum Cucumisis",
+            variant_local="Stratum Cucumisis - Lime",
+            analysed=True,
+            samples=3,
+            was_logged=False,
+        )
+        expected = sum(organic.payout for organic in body.organisms.values())
+        self.assertGreater(expected, 0)
+
+        # сводка без лока
+        board = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(board)
+        assert board is not None
+        text = "\n".join(board.plain())
+        self.assertIn("готово", text)
+        self.assertNotIn("?", text)
+        self.assertIn(values.credits(expected), text)
+        self.assertNotIn("–", "\n".join(footer for footer, _ in board.footers))
+        self.assertNotIn("футфол", text)
+        self.assertNotIn("FF+", text)
+        self.assertIn("FF", text)
+
+        # карточка с локом — те же точные цифры
+        state.apply_status(
+            {
+                "Flags": 0,
+                "BodyID": 1,
+                "BodyName": body.name,
+                "Destination": {"System": 1, "Body": 1, "Name": body.name},
+            }
+        )
+        focused = hudmodel.build_bio_board(state)
+        self.assertIsNotNone(focused)
+        assert focused is not None
+        self.assertTrue(focused.title.startswith("1 · био ×2"), focused.title)
+        focus_text = "\n".join(focused.plain())
+        self.assertIn(values.credits(expected), focus_text)
+        self.assertNotIn("футфол", focus_text)
+        self.assertNotIn("FF+", focus_text)
+
     def test_jump_hides_the_board(self):
         state = GameState()
         self._icy(state)

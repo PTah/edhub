@@ -850,28 +850,48 @@ def _genus_span(species_rows: list[tuple[str, list[str], int]]) -> tuple[int, in
     return min(rewards), max(rewards)
 
 
+def _sampled_genera(body: Body) -> set[str]:
+    return {(organic.genus_en or "").lower() for organic in body.organisms.values() if organic.genus_en}
+
+
+def _bio_complete(body: Body) -> bool:
+    """Все биосигналы планеты уже проанализированы (взяты)."""
+    need = body.bio_signals or 0
+    return need > 0 and body.bio_analysed >= need
+
+
+def _ff_taken(body: Body) -> bool:
+    """Первый шаг уже не свободен: журнал WasFootfalled или мы сами брали пробы."""
+    if body.was_footfalled:
+        return True
+    return any(organic.samples > 0 or organic.analysed for organic in body.organisms.values())
+
+
 def _body_reward_span(body: Body, state: GameState) -> tuple[int, int]:
-    groups = _prediction_groups(body, state)
-    if groups:
-        lows, highs = [], []
-        for _genus, species_rows in groups:
-            low, high = _genus_span(species_rows)
-            if low or high:
-                lows.append(low)
-                highs.append(high)
-        if lows:
-            return sum(lows), sum(highs)
-    if body.organisms:
-        payouts = [organic.payout for organic in body.organisms.values() if organic.payout]
-        if payouts:
-            total = sum(payouts)
-            return total, total
+    """Сумма награды: точные payout взятых организмов + вилка только по ещё не взятым родам."""
+    exact = sum(organic.payout for organic in body.organisms.values() if organic.payout)
+    if _bio_complete(body) and exact:
+        return exact, exact
+
+    sampled = _sampled_genera(body)
+    pred_low = 0
+    pred_high = 0
+    for genus, species_rows in _prediction_groups(body, state):
+        if genus.lower() in sampled:
+            continue
+        low, high = _genus_span(species_rows)
+        if low or high:
+            pred_low += low
+            pred_high += high
+
+    if exact or pred_low or pred_high:
+        return exact + pred_low, exact + pred_high
     return 0, 0
 
 
 def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int, int]]:
     lines: list[BioLine] = []
-    sampled = {(organic.genus_en or "").lower() for organic in body.organisms.values()}
+    sampled = _sampled_genera(body)
     for organic in sorted(body.organisms.values(), key=lambda item: item.label):
         style = "ok" if organic.analysed else "warn"
         reward = organic.payout
@@ -885,7 +905,8 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
                 bars=_reward_bars(reward),
             )
         )
-    groups = _prediction_groups(body, state)
+    # всё взято — предсказания «?» больше не показываем (ни в сводке, ни в карточке)
+    groups = [] if _bio_complete(body) else _prediction_groups(body, state)
     block = 0
     for genus, species_rows in groups:
         if genus.lower() in sampled:
@@ -942,21 +963,29 @@ def _body_lines(body: Body, state: GameState) -> tuple[list[BioLine], tuple[int,
 
 
 def _ff_segment(body: Body) -> Segment | None:
-    """Метка первого шага: «FF+» свободен, «FF» уже кто-то ступал (WasFootfalled).
+    """Метка первого шага: «FF+» свободен, «FF» уже занят (журнал или наши пробы).
 
     Бонус за первый шаг входит в «с первым шагом» внизу панели, но по одной
     планете не видно, свободен ли он: метка отвечает на этот вопрос сразу.
     """
-    if body.was_footfalled:
+    if _ff_taken(body):
         return Segment(t("hud.ff_taken"), "muted")
     if getattr(body, "landable", False):
         return Segment(t("hud.ff_free"), "ok")
     return None
 
 
+def _ff_bonus_open(body: Body) -> bool:
+    """Показывать вилку «футфол ×5» только пока шаг свободен и био ещё не закрыто."""
+    return bool(body.landable) and not _ff_taken(body) and not _bio_complete(body)
+
+
 def _ff_legend(bodies) -> tuple[str, str] | None:
-    """Сноска к меткам первого шага — только если метки вообще есть."""
-    if not any(getattr(body, "landable", False) for body in bodies or []):
+    """Сноска к меткам — только пока хоть у одной планеты шаг ещё свободен (FF+)."""
+    landable = [body for body in bodies or [] if getattr(body, "landable", False)]
+    if not landable:
+        return None
+    if not any(not _ff_taken(body) for body in landable):
         return None
     return (t("hud.ff_legend"), "dim")
 
@@ -972,14 +1001,13 @@ def _system_lines(state: GameState) -> tuple[list[BioLine], tuple[int, int], tup
         body_lines, (low, high) = _body_lines(body, state)
         total_low += low
         total_high += high
-        bonus = body.landable and not body.was_footfalled
-        if bonus:
+        if _ff_bonus_open(body):
             ff_low += int(round(low * FIRST_LOGGED_MULTIPLIER))
             ff_high += int(round(high * FIRST_LOGGED_MULTIPLIER))
         else:
             ff_low += low
             ff_high += high
-        done = body.bio_signals and body.bio_analysed >= body.bio_signals
+        done = _bio_complete(body)
         highlight = _marked(body, state)
         style = "muted" if done else ("accent" if highlight else "text")
         # шапка планеты: имя, число сигналов и расстояние — цена ушла к сигналам
@@ -1070,7 +1098,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
                 for row in _sample_rows(state)
             ]
             lines = extra + lines
-        bonus = focus.landable and not focus.was_footfalled
+        bonus = _ff_bonus_open(focus)
         ff_low = low * FIRST_LOGGED_MULTIPLIER if bonus else low
         ff_high = high * FIRST_LOGGED_MULTIPLIER if bonus else high
         count = focus.bio_signals or 0
@@ -1090,7 +1118,7 @@ def build_bio_board(state: GameState) -> BioBoard | None:
         )
     lines, (low, high), (ff_low, ff_high) = _system_lines(state)
     total = sum(body.bio_signals or 0 for body in bodies)
-    bonus = any(body.landable and not body.was_footfalled for body in bodies)
+    bonus = any(_ff_bonus_open(body) for body in bodies)
     footers = _footers(low, high, ff_low, ff_high, bonus)
     legend = _ff_legend(bodies)
     if legend is not None:

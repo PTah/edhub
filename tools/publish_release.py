@@ -2,14 +2,15 @@
 import subprocess
 import sys
 
-VERSION = "1.8.21"
+VERSION = "1.8.22"
 
-NOTES = """**1.8.21: hide BIO on STAR and gas giants**
+NOTES = """**1.8.22: exact bio totals after sampling; FF no longer stuck open**
 
-- STAR line no longer shows BIO (stars have no biological signals)
-- Gas giants (Sudarsky / helium-rich / …) also hide BIO on the body line
+- Planet/system bio totals use exact payouts of analysed organisms instead of prediction ranges
+- When all bio signals are taken, speculative «?» species and first-footfall ×5 range are hidden
+- Own samples mark first footfall as taken (FF), even if WasFootfalled has not updated yet
 
-Version 1.8.21."""
+Version 1.8.22."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
