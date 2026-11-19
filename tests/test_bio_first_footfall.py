@@ -60,6 +60,26 @@ class FirstFootfallTests(unittest.TestCase):
         assert board is not None
         self.assertIn("FF+", board.title)
 
+    def test_own_samples_mark_footfall_taken(self):
+        from edhud.model import Organic
+
+        state = make_state(was_footfalled=False)
+        body = state.system.bodies[1]
+        body.organisms["x"] = Organic(
+            key="x",
+            genus_local="Bacterium",
+            species_local="Bacterium Cerbrus",
+            analysed=True,
+            samples=3,
+            was_logged=True,
+        )
+        board = hudmodel.build_bio_board(state)
+        assert board is not None
+        text = "\n".join(board.plain())
+        self.assertIn("FF", text)
+        self.assertNotIn("FF+", text)
+        self.assertNotIn("футфол", text)
+
 
 if __name__ == "__main__":
     unittest.main()
