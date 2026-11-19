@@ -1256,9 +1256,11 @@ class CarrierDistanceTests(unittest.TestCase):
         )
         self.assertAlmostEqual(state.carrier_distance_ly(), 40.0, places=3)
         view = hudmodel.build_view(state, Config(), expanded=False)
-        self.assertIn("GHY-7TZ", view.body_row.text)
-        self.assertIn("40.0 ly", view.body_row.text)
+        self.assertNotIn("GHY-7TZ", view.body_row.text)
         self.assertNotIn("GHY-7TZ", view.route_row.text)
+        carrier_line = view.detail[0].text if view.detail else ""
+        self.assertIn("GHY-7TZ", carrier_line)
+        self.assertIn("40.0 ly", carrier_line)
 
     def test_carrier_relocation_drops_the_old_distance(self):
         from edhud.route import Route, RouteHop
@@ -1310,7 +1312,9 @@ class CarrierDistanceTests(unittest.TestCase):
         self.assertFalse(state.carrier_pos_pending)
         self.assertAlmostEqual(state.carrier_distance_ly(), 30.0, places=3)
         view = hudmodel.build_view(state, Config(), expanded=False)
-        self.assertIn("30.0 ly", view.body_row.text)
+        self.assertNotIn("30.0 ly", view.body_row.text)
+        carrier_line = view.detail[0].text if view.detail else ""
+        self.assertIn("30.0 ly", carrier_line)
 
     def test_carrier_jump_request_moves_after_departure(self):
         state = GameState()
@@ -1351,7 +1355,9 @@ class CarrierDistanceTests(unittest.TestCase):
         state._remember_star(3, "Near", (0, 0, 10))
         self.assertAlmostEqual(state.carrier_distance_ly(), 30.0, places=3)
         view = hudmodel.build_view(state, Config(), expanded=False)
-        self.assertIn("30.0 ly", view.body_row.text)
+        self.assertNotIn("30.0 ly", view.body_row.text)
+        carrier_line = view.detail[0].text if view.detail else ""
+        self.assertIn("30.0 ly", carrier_line)
 
     def test_rings_mark_mineable_belt(self):
         state = GameState()

@@ -186,8 +186,6 @@ def _body_row(state: GameState, cfg) -> Row:
         mark = _discovered_mark(state)
         if mark is not None:
             row.segments.append(mark)
-        # карриер — на строке STAR/ТЕЛО, чтобы не обрезать «scoopable» на маршруте
-        _append_carrier(row, state)
         return row
 
     body_class = body.planet_class or body.star_type or (t("hud.star") if body.is_star else "?")
@@ -256,7 +254,6 @@ def _body_row(state: GameState, cfg) -> Row:
         row.segments.append(Segment(t("hud.on_foot"), "accent"))
     if state.legacy:
         row.segments.append(Segment("   [Legacy 3.8]", "warn"))
-    _append_carrier(row, state)
     return row
 
 
@@ -526,12 +523,12 @@ def _carrier_label(state: GameState) -> str | None:
     return "".join(part.text for part in parts)
 
 
-def _append_carrier(row: Row, state: GameState) -> None:
+def _carrier_row(state: GameState) -> Row | None:
+    """Отдельная 3-я строка дашборда: место карриера / ly / подготовка к прыжку."""
     parts = _carrier_segments(state)
     if not parts:
-        return
-    row.tail.append(Segment("   ", "dim"))
-    row.tail.extend(parts)
+        return None
+    return Row(list(parts))
 
 
 def _system_row(state: GameState) -> Row:
@@ -595,10 +592,13 @@ def build_view(
     body_row = _body_row(state, cfg)
     expanded = cfg.expanded if expanded is None else expanded
     detail: list[Row] = []
-    # «Показывать маршрут и статистику» выключено — остаётся только верхняя часть:
-    # маршрут, карриер и текущая система/тело
+    # 3-я строка: карриер (место / ly / подготовка к прыжку) — всегда, если известен
+    carrier_row = _carrier_row(state)
+    if carrier_row is not None:
+        detail.append(carrier_row)
+    # «Показывать маршрут и статистику» выключено — остаются маршрут, тело и карриер
     if getattr(cfg, "hud_show_stats", True):
-        detail = _sample_rows(state)
+        detail.extend(_sample_rows(state))
         mining_row = _mining_row(state)
         if mining_row is not None:
             detail.append(mining_row)

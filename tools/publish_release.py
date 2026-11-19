@@ -2,14 +2,14 @@
 import subprocess
 import sys
 
-VERSION = "1.8.19"
+VERSION = "1.8.20"
 
-NOTES = """**1.8.19: new in-game route replaces finished sphere tour; route label clarified**
+NOTES = """**1.8.20: carrier status moved to the third HUD line**
 
-- A route plotted in the galaxy map after loading a sphere tour (destination outside the tour) replaces it in Route
-- HUD label "[залочен]" renamed to "[маршрут зафиксирован]" / "[route pinned]"
+- Carrier position / distance / jump prep is no longer on the STAR/BODY line
+- It is shown on its own third dashboard line (before samples/stats)
 
-Version 1.8.19."""
+Version 1.8.20."""
 
 ASSETS = [
     rf"dist\EDHUD-portable-{VERSION}.zip",
