@@ -242,10 +242,28 @@ class HudDetailToggleTests(unittest.TestCase):
         cfg.expanded = True
         cfg.hud_show_stats = False
         view = hudmodel.build_view(self.make_state(), cfg)
+        # без карриера detail пустой; маршрут и тело на месте
         self.assertEqual(view.detail, [])
-        # верхняя часть на месте: маршрут/карриер и текущая система
         self.assertTrue(view.route_row.text.strip())
         self.assertTrue(view.body_row.text.strip())
+
+    def test_carrier_is_third_line_not_on_body(self):
+        from edhud import hudmodel
+
+        cfg = Config()
+        cfg.hud_show_stats = False
+        state = self.make_state()
+        state.carrier.carrier_id = 1
+        state.carrier.callsign = "GHY-7TZ"
+        state.carrier.system = "Home Base"
+        state.carrier.star_pos = (0, 0, 0)
+        state.system.star_pos = (10, 0, 0)
+        view = hudmodel.build_view(state, cfg)
+        self.assertNotIn("Карриер", view.body_row.text)
+        self.assertNotIn("Home Base", view.body_row.text)
+        self.assertEqual(len(view.detail), 1)
+        self.assertIn("Карриер", view.detail[0].text)
+        self.assertIn("Home Base", view.detail[0].text)
 
 
 class StatusFreshnessTests(unittest.TestCase):
