@@ -126,6 +126,20 @@ class JournalPipelineTests(unittest.TestCase):
         self.assertIn(" · M", star)
         self.assertNotIn("БИО", star)
 
+    def test_hud_gas_giant_hides_bio(self):
+        state = GameState()
+        state.system.name = "Test"
+        state.system.bodies[3] = Body(
+            body_id=3,
+            name="Test 3",
+            planet_class="Sudarsky class I gas giant",
+        )
+        state.current_body_id = 3
+        text = hudmodel.build_view(state, Config()).body_row.text
+        self.assertTrue(text.startswith("ТЕЛО "), text)
+        self.assertIn("gas giant", text.lower())
+        self.assertNotIn("БИО", text)
+
     def test_hud_body_shows_star_while_jumping(self):
         """В гиперпрыжке — звезда системы отлёта, не залипшая планета из Status.BodyID."""
         from edhud.model import FLAG_FSD_JUMP

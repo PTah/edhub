@@ -4,10 +4,10 @@ import sys
 
 VERSION = "1.8.21"
 
-NOTES = """**1.8.21: no BIO on STAR line**
+NOTES = """**1.8.21: hide BIO on STAR and gas giants**
 
-- When the second HUD row shows a star (STAR), the BIO field is hidden
-- Stars have no biological signals
+- STAR line no longer shows BIO (stars have no biological signals)
+- Gas giants (Sudarsky / helium-rich / …) also hide BIO on the body line
 
 Version 1.8.21."""
 
