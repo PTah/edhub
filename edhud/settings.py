@@ -313,10 +313,17 @@ class SettingsDialog:
         """Пересчитать статистику по журналам (единственный источник правды)."""
         if self.stats is None or self._stats_busy:
             return
-        folder = str(getattr(self.cfg, "journal_dir", "") or "").strip()
-        if not folder or not Path(folder).is_dir():
+        typed = ""
+        field = getattr(self, "journal_dir", None)
+        if field is not None:
+            typed = str(field.get() or "")
+        elif self.cfg.journal_dir:
+            typed = self.cfg.journal_dir
+        found = config.journal_dir_for_rebuild(typed, self.cfg)
+        if found is None:
             messagebox.showwarning("EDHUD", t("set.stats_rebuild_no_dir"), parent=self.win)
             return
+        folder = str(found)
         if not messagebox.askyesno(
             "EDHUD", t("set.stats_rebuild_ask", path=folder), parent=self.win
         ):

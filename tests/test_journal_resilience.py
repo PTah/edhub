@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from edhud.config import Config, journal_dir_for_rebuild  # noqa: E402
 from edhud.journal import JournalWatcher  # noqa: E402
 from edhud.model import GameState  # noqa: E402
 
@@ -66,6 +67,32 @@ class JournalResilienceTests(unittest.TestCase):
             watcher.read_journal()
             self.assertEqual(state.system.name, "Gamma")
             self.assertTrue(watcher.errors)
+
+
+class JournalDirForRebuildTests(unittest.TestCase):
+    def test_empty_setting_uses_autodetect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Journal.2026-11-20T120000.01.log").write_text("{}\n", encoding="utf-8")
+            cfg = Config()
+            cfg.journal_dir = None
+            original = journal_dir_for_rebuild.__globals__["find_journal_dir"]
+            journal_dir_for_rebuild.__globals__["find_journal_dir"] = lambda: folder
+            try:
+                self.assertEqual(journal_dir_for_rebuild("", cfg), folder)
+                self.assertEqual(journal_dir_for_rebuild("   ", cfg), folder)
+            finally:
+                journal_dir_for_rebuild.__globals__["find_journal_dir"] = original
+
+    def test_explicit_missing_path_is_not_guessed(self):
+        cfg = Config()
+        cfg.journal_dir = None
+        missing = Path("E:/no/such/journals")
+        self.assertIsNone(journal_dir_for_rebuild(str(missing), cfg))
+
+    def test_explicit_existing_path_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(journal_dir_for_rebuild(tmp, Config()), Path(tmp))
 
 
 if __name__ == "__main__":

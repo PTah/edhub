@@ -278,3 +278,18 @@ class Config:
     # ---------------------------------------------------------------- цвета
     def color(self, key: str) -> str:
         return self.colors.get(key) or DEFAULT_COLORS.get(key, "#ffffff")
+
+
+def journal_dir_for_rebuild(explicit: str | None, cfg: Config | None = None) -> Path | None:
+    """Папка журналов для пересчёта статистики.
+
+    Пустое поле в настройках — это автопоиск, им же пользуется живой режим.
+    Явный путь, которого нет на диске, не подменяем угадыванием.
+    """
+    text = (explicit or "").strip()
+    if text:
+        path = Path(text).expanduser()
+        return path if path.is_dir() else None
+    if cfg is not None:
+        return cfg.resolved_journal_dir()
+    return find_journal_dir()
