@@ -35,9 +35,9 @@ FLAG_FSD_CHARGING = 1 << 17
 FLAG_HAS_LAT_LONG = 1 << 21
 FLAG_IN_SRV = 1 << 26
 FLAG_FSD_JUMP = 1 << 30
-FLAG_LOW_FUEL = 1 << 14
-FLAG_IN_MAINSHIP = 1 << 19
-FLAG_IN_FIGHTER = 1 << 20
+FLAG_LOW_FUEL = 1 << 19
+FLAG_IN_MAINSHIP = 1 << 24
+FLAG_IN_FIGHTER = 1 << 25
 # Flags2: планирование / атмосфера
 FLAG2_GLIDE = 1 << 12
 # ниже этого (м) считаем, что ещё в атмосфере / у поверхности

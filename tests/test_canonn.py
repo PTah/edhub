@@ -71,7 +71,7 @@ class RadarPriorTests(unittest.TestCase):
                 "Heading": 0.0,
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
         state.set_canonn_bio([("C 7", 0.00287, 0.0, "Stratum Tectonicas - Lime")])
@@ -96,7 +96,7 @@ class RadarPriorTests(unittest.TestCase):
                 "Heading": 0.0,
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
         state.set_canonn_bio([("C 7", 0.09, 0.0, "Frutexa - Green")])  # ~10 км

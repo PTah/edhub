@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as config_mod
-from . import canonn, demo, eddn, eddn_upload, edsm_upload, galaxy, hudmodel, icon, inara_upload, prices, remote, spansh, tray
+from . import canonn, demo, eddn, eddn_upload, edsm_upload, extensions, galaxy, hudmodel, icon, inara_upload, prices, remote, spansh, tray
 from .alerts import Alert, AlertEngine
 from .config import Config
 from .hotkeys import Hotkeys
@@ -111,6 +111,7 @@ class App:
         self.watcher: JournalWatcher | None = None
         self.overlay = None
         self.mainwindow = None
+        self.extensions: list = []
         self.hotkeys: Hotkeys | None = None
         self.tray: tray.TrayIcon | None = None
         self.demo_player: demo.DemoPlayer | None = None
@@ -674,8 +675,10 @@ class App:
         self.hotkeys.start()
         from .mainwindow import MainWindow
 
+        self.extensions = extensions.load(self)
         self.mainwindow = MainWindow(
             self.overlay.root,
+            extensions=self.extensions,
             cfg=self.cfg,
             belt_store=self.belt_store,
             hotspot_store=self.hotspot_store,
@@ -1257,6 +1260,7 @@ class App:
 
     def shutdown(self) -> None:
         self._stop.set()
+        extensions.stop_all(self.extensions)
         if self.watcher is not None:
             self.watcher.stop()
         if self.demo_player is not None:

@@ -458,8 +458,11 @@ class MainWindow:
         on_plot_to_carrier: Callable[[], None] | None = None,
         price_index=None,
         on_load_sphere_route: Callable[[list], int] | None = None,
+        extensions: list | None = None,
     ) -> None:
         self.on_load_sphere_route = on_load_sphere_route
+        self.extensions = list(extensions or [])
+        self._ext_frames: dict[str, object] = {}
         self.on_close = on_close
         self.cfg = cfg
         self.belt_store = belt_store if belt_store is not None else BeltStore()
@@ -634,8 +637,38 @@ class MainWindow:
         self._build_bodies_table()
         self._build_belts_tab()
         self._build_mining_tab()
+        self._build_extension_tabs()
         self._bind_minerals_header_menu()
         self._refresh_belts_tab_title()
+
+    def _build_extension_tabs(self) -> None:
+        """Вкладки локальных расширений (см. edhud/extensions.py) — после «Добычи»."""
+        for ext in self.extensions:
+            frame = ttk.Frame(self.nb, style="ED.TFrame", padding=0)
+            try:
+                title = str(getattr(ext, "tab_title", "") or "Ext")
+                self.nb.add(frame, text=title)
+
+                def set_title(text: str, frame=frame) -> None:
+                    try:
+                        self.nb.tab(frame, text=text)
+                    except tk.TclError:
+                        pass
+
+                ext.build_tab(frame, COLORS, set_title)
+            except Exception:  # noqa: BLE001 — сломанное расширение не должно ломать окно
+                try:
+                    self.nb.forget(frame)
+                except tk.TclError:
+                    pass
+                continue
+            self._ext_frames[str(frame)] = ext
+
+    def _ext_selected(self) -> bool:
+        try:
+            return self.nb.select() in self._ext_frames
+        except tk.TclError:
+            return False
 
     def _build_mining_tab(self) -> None:
         """Вкладка «Добыча»: планетарные точки и кольца (см. edhud/miningui.py)."""
@@ -1747,7 +1780,17 @@ class MainWindow:
             self._shown_tab = "mining"
             if self._state is not None:
                 self.mining_tab.set_state(self._state)
-            self.mining_tab.on_show()
+                self.mining_tab.on_show()
+            return
+        ext = self._ext_frames.get(str(current))
+        if ext is not None:
+            self._shown_tab = "ext"
+            on_show = getattr(ext, "on_show", None)
+            if callable(on_show):
+                try:
+                    on_show()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _set_mining_target(self, name: str) -> None:
         """Целевой минерал выбран в «Добыче» — запоминаем и отдаём счётчикам."""
@@ -1793,6 +1836,11 @@ class MainWindow:
         """
         tab = state.view_tab if state.view_tab in ("route", "bodies") else "bodies"
         address = state.system.address
+        if self._ext_frames and self._ext_selected():
+            # вкладка расширения (лог/управление) не должна уезжать на каждом прыжке
+            self._shown_tab = "ext"
+            self._tab_address, self._tab_view = address, tab
+            return
         if address == self._tab_address and tab == self._tab_view:
             return
         # старт прыжка / явный Route / смена системы — всегда слушаем модель
