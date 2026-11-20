@@ -244,7 +244,7 @@ class JournalPipelineTests(unittest.TestCase):
                     "Heading": 10.0,
                     "PlanetRadius": 6_000_000.0,
                     "BodyID": 6,
-                    "Flags": 1 << 19,
+                    "Flags": 1 << 24,
                 }
             )
             radar = restarted.radar_view()
@@ -499,7 +499,7 @@ class StatusTests(unittest.TestCase):
         state = GameState()
         state.apply_status(
             {
-                "Flags": (1 << 4) | (1 << 14),
+                "Flags": (1 << 4) | (1 << 19),
                 "Fuel": {"FuelMain": 3.2, "FuelReserve": 0.5},
                 "GuiFocus": 9,
             }
@@ -2805,7 +2805,7 @@ class SampleGuideTests(unittest.TestCase):
                 "Heading": heading,
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
 
@@ -2933,7 +2933,7 @@ class SampleGuideTests(unittest.TestCase):
                 "Heading": 0.0,
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
         radar = state.radar_view()
@@ -2966,7 +2966,7 @@ class SampleGuideTests(unittest.TestCase):
                 "Heading": 0.0,
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
         radar = state.radar_view()
@@ -2997,7 +2997,7 @@ class SampleGuideTests(unittest.TestCase):
                 "PlanetRadius": 6_000_000.0,
                 "BodyID": 4,
                 "Altitude": 2_000.0,
-                "Flags": 1 << 19,
+                "Flags": 1 << 24,
             }
         )
         radar = state.radar_view()
