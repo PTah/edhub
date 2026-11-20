@@ -186,7 +186,14 @@ def _forecast_tip(body: Body, state: GameState) -> str | None:
 
 
 class _CellTip:
-    """Всплывающая подсказка у ячейки таблицы Bodies."""
+    """Всплывающая подсказка у ячейки таблицы Bodies.
+
+    На экране только одна. Прячется, когда курсор ушёл с ячеек-источников:
+    сравнение путей виджетов оставляло старые окна, потому что путь соседней
+    ячейки или самой подсказки начинался с пути текущей.
+    """
+
+    _active: "_CellTip | None" = None
 
     def __init__(self, *widgets: tk.Misc, text: str) -> None:
         self.widgets = [w for w in widgets if w is not None]
@@ -198,6 +205,30 @@ class _CellTip:
             widget.bind("<Enter>", self._schedule, add="+")
             widget.bind("<Leave>", self._on_leave, add="+")
             widget.bind("<Destroy>", self._hide, add="+")
+            widget.bind("<ButtonPress>", self._hide, add="+")
+            widget.bind("<MouseWheel>", self._hide, add="+")
+
+    @classmethod
+    def hide_active(cls) -> None:
+        if cls._active is not None:
+            cls._active._hide()
+
+    def _pointer_over_sources(self) -> bool:
+        try:
+            x, y = self.widget.winfo_pointerxy()
+        except tk.TclError:
+            return False
+        for widget in self.widgets:
+            try:
+                if not int(widget.winfo_exists()):
+                    continue
+                left, top = widget.winfo_rootx(), widget.winfo_rooty()
+                width, height = widget.winfo_width(), widget.winfo_height()
+            except tk.TclError:
+                continue
+            if left <= x < left + width and top <= y < top + height:
+                return True
+        return False
 
     def _schedule(self, _event=None) -> None:
         if self._tip is not None or not self.text:
@@ -208,22 +239,19 @@ class _CellTip:
         except tk.TclError:
             self._show()
 
-    def _on_leave(self, event=None) -> None:
-        # уход на дочерний виджет той же ячейки — не прячем
-        if event is not None:
-            try:
-                going = event.widget.winfo_containing(event.x_root, event.y_root)
-            except tk.TclError:
-                going = None
-            if going is not None:
-                for widget in self.widgets:
-                    if going == widget or str(going).startswith(str(widget)):
-                        return
-                    try:
-                        if going.master == widget or widget.master == going:
-                            return
-                    except tk.TclError:
-                        pass
+    def _on_leave(self, _event=None) -> None:
+        self._cancel_after()
+        try:
+            self._after = self.widget.after(40, self._hide_if_outside)
+        except tk.TclError:
+            self._hide()
+
+    def _hide_if_outside(self) -> None:
+        self._after = None
+        if self._pointer_over_sources():
+            if self._tip is None and self.text:
+                self._schedule()
+            return
         self._hide()
 
     def _cancel_after(self) -> None:
@@ -237,8 +265,11 @@ class _CellTip:
 
     def _show(self) -> None:
         self._after = None
-        if self._tip is not None or not self.text:
+        if self._tip is not None or not self.text or not self._pointer_over_sources():
             return
+        other = _CellTip._active
+        if other is not None and other is not self:
+            other._hide()
         tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)
         try:
@@ -259,15 +290,29 @@ class _CellTip:
         )
         label.pack()
         tip.update_idletasks()
-        x = self.widget.winfo_rootx() + 12
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        try:
+            px, py = self.widget.winfo_pointerxy()
+        except tk.TclError:
+            px, py = self.widget.winfo_rootx(), self.widget.winfo_rooty()
+        # Смещение от курсора, иначе окно подсказки само вызывает Leave и остаётся висеть.
+        width, height = tip.winfo_width(), tip.winfo_height()
+        x, y = px + 14, py + 18
+        screen_w = self.widget.winfo_screenwidth()
+        screen_h = self.widget.winfo_screenheight()
+        if x + width > screen_w:
+            x = max(0, px - width - 8)
+        if y + height > screen_h:
+            y = max(0, py - height - 8)
         tip.wm_geometry(f"+{x}+{y}")
         self._tip = tip
+        _CellTip._active = self
 
     def _hide(self, _event=None) -> None:
         self._cancel_after()
         tip = self._tip
         self._tip = None
+        if _CellTip._active is self:
+            _CellTip._active = None
         if tip is not None:
             try:
                 tip.destroy()
@@ -998,6 +1043,7 @@ class MainWindow:
             self._sync_header_x(table)
 
         def _wheel(event) -> None:
+            _CellTip.hide_active()
             canvas.yview_scroll(int(-event.delta / 120), "units")
 
         canvas.bind("<Configure>", _fit)
@@ -1008,6 +1054,7 @@ class MainWindow:
         setattr(self, inner_attr, inner)
 
     def _xview(self, table: str, *args) -> None:
+        _CellTip.hide_active()
         canvas = self._bodies_canvas if table == "bodies" else self._route_canvas
         canvas.xview(*args)
         self._sync_header_x(table)
@@ -1050,6 +1097,7 @@ class MainWindow:
             canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, 0, 0))
 
         def _wheel(event) -> None:
+            _CellTip.hide_active()
             canvas.yview_scroll(int(-event.delta / 120), "units")
 
         canvas.bind("<Configure>", _fit)
